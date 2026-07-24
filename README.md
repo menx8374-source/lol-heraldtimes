@@ -27,6 +27,11 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
   - 生成LLMは決定論的な**モック実装**（テンプレート/ルールベース、API キー不要）。逐語一致率・引用の主従関係・最低文字数を満たさない候補は「生成失敗」(`CollectedItem.status="generation_failed"`、`generationError`にエラー内容を記録)として扱われ、他候補の生成は継続する。
   - 生成に成功した候補は `CollectedItem.articleId` と `status="articled"` が同一トランザクションで同期される（再実行しても二重記事化しない）。
   - **公開前コンテンツ安全フィルタ（F9）**: 生成した本文＋タイトルを NGワード／出典欠落／特定個人への中傷・晒し／重複の観点で判定し、通過した記事のみ `Article.status="published"` として公開される。通過しない記事は `status="held"`（保留）となり `heldReason`/`heldDetail` に理由が記録され、閲覧サイトの一覧・検索・個別ページのいずれにも表示されない（保留キューは `src/lib/moderation/queue.ts` の `listHeldArticles()` で参照できる）。未確定・噂レベルの表現を含む記事は保留にはせず `unconfirmed=true` として公開され、記事ページに「未確認情報」ラベルが表示される。
+- **統合パイプライン実行（F10・F11）**: `npm run pipeline`（収集→重複排除→記事生成→タイトル生成→安全フィルタ→公開までを1回の起動で人手介入なしで実行する。`npm run collect`+`npm run generate` を1本のオーケストレーションにまとめたもの）
+  - 1回の実行で公開する記事本数の上限は `PIPELINE_MAX_PUBLISH_PER_RUN`（既定5件）。上限を超えた候補は次回実行に持ち越される（破棄されない）。
+  - 実行間隔（スケジュール設定）は `PIPELINE_INTERVAL_MS`（既定4時間）。実際のcron常駐は本スプリントの対象外のため、`npm run pipeline` を間隔を空けて再実行する運用を想定する（実行結果に「次回実行の目安」を表示する）。
+  - 収集ソース・生成・タイトル・安全フィルタのいずれか1件が失敗しても、パイプライン全体は停止せず他候補の処理を完走する。生成・タイトル付けに失敗した候補（`status="generation_failed"`）は破棄されず、次回実行時に再度候補として処理される。
+  - 各実行の収集件数・記事化候補数・生成成功/失敗数・公開数・保留数は `PipelineRunLog` テーブルに記録される（Sprint 9 の運営ダッシュボードが参照する想定）。
 
 ## 環境変数
 
@@ -41,6 +46,8 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
 | `COLLECTION_REDDIT_MAX_ITEMS` / `COLLECTION_5CH_MAX_ITEMS` / `COLLECTION_RIOT_MAX_ITEMS` | 任意 | ソースごとの1回の収集実行あたりの取得件数上限（既定: reddit/5ch=10, riot=20） |
 | `COLLECTION_REDDIT_MIN_INTERVAL_MS` / `COLLECTION_5CH_MIN_INTERVAL_MS` / `COLLECTION_RIOT_MIN_INTERVAL_MS` | 任意 | ソースごとの最小実行間隔(ミリ秒)。既定: reddit/5ch=600000(10分), riot=1800000(30分) |
 | `GENERATION_MODE` | 任意 | `mock`（既定、APIキー不要の決定論的モックLLM）／`live`。`live` は本接続実装未整備のためエラーになる |
+| `PIPELINE_MAX_PUBLISH_PER_RUN` | 任意 | 統合パイプライン(`npm run pipeline`)1回の実行で処理・公開する記事本数の上限（既定5件） |
+| `PIPELINE_INTERVAL_MS` | 任意 | 統合パイプラインの繰り返し実行の目安間隔(ミリ秒)。既定14400000(4時間) |
 
 ## 外部サービス接続の方針（現時点）
 当面はすべて **モック実装** で全スプリントを通し、将来の実運用時に順次本接続へ差し替える。いずれも差し替え可能な抽象越しに呼ぶ設計。

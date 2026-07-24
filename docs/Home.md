@@ -34,6 +34,9 @@ spec-pipelineの全ドキュメントへの入口(MOC)です。プロジェク�
 - **Sprint 6** ✅ PASS — 公開前コンテンツ安全フィルタ・モデレーション
   - brief: [[sprint-6-brief]] ／ 自己評価: [[sprint-6-selfeval]] ／ 評価: [[sprint-6-evaluation]]
   - プレビュー: [未確認ラベル付き記事](sprints/sprint-6-preview-1.png) ／ [保留記事非表示のトップ](sprints/sprint-6-preview-2.png)。公開状態(published/held)導入
+- **Sprint 7** ✅ PASS — 自動公開スケジューリング・エラー耐性・運営ログ（全モック）
+  - brief: [[sprint-7-brief]] ／ 自己評価: [[sprint-7-selfeval]] ／ 評価: [[sprint-7-evaluation]]
+  - バックエンド統合。`npm run pipeline` で収集→重複排除→生成→タイトル→安全フィルタ→公開を1本で実行、`PipelineRunLog`に運営ログ
 
 ## 実行状況
 - [dashboard.html](./dashboard.html) — リアルタイム進捗ダッシュボード（ブラウザで開く。30秒ごとに自動更新、「今すぐ更新」で即時更新も可能）

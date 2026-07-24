@@ -121,3 +121,24 @@ model SourceFetchLog {
 
   @@index([sourceType, runAt])
 }
+
+/// 統合パイプライン（F10: 収集→重複排除→生成→タイトル→安全フィルタ→公開）の実行ログ（F11）。
+/// 各実行ごとに件数サマリを残し、Sprint 9 の運営ダッシュボードが読み取れるようにする。
+/// この行の作成自体が失敗しても実行結果には影響させない（呼び出し側でcatchするだけ）。
+model PipelineRunLog {
+  id                  String   @id @default(cuid())
+  startedAt           DateTime
+  finishedAt          DateTime
+  /// "success"（想定内の個別失敗を含め正常終了） | "failure"（想定外の例外で異常終了）
+  status              String
+  collectedCount      Int      @default(0)
+  candidateCount      Int      @default(0)
+  generationSucceeded Int      @default(0)
+  generationFailed    Int      @default(0)
+  publishedCount      Int      @default(0)
+  heldCount           Int      @default(0)
+  /// status="failure" のときのみ設定される、想定外の例外メッセージ。
+  errorMessage        String?
+
+  @@index([startedAt])
+}

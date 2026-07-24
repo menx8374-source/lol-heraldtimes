@@ -66,6 +66,16 @@ function slugForCandidate(candidateId: string): string {
   return `gen-${candidateId}`;
 }
 
+export type GenerationRunOptions = {
+  /**
+   * 1回の実行で処理する候補数の上限（F10: 公開本数上限）。公開されない候補（held/failure）が
+   * 混ざりうるため「公開数の上限」そのものではなく「処理する候補数の上限」だが、
+   * 処理数を上限以下に抑えることで公開数も必ず上限以下になる。未指定時は無制限（全件処理、既存挙動）。
+   * 上限を超えた残りの候補はDBの状態(queued)を変更しないため、次回実行時に再度処理対象になる。
+   */
+  maxCandidates?: number;
+};
+
 /**
  * 記事化候補キュー（status="queued"）を1件ずつ処理し、Article(+ArticleSource)を作成する。
  * 1件の生成に失敗しても他候補の処理は継続する（F7受け入れ基準:「生成に失敗した候補は
@@ -73,9 +83,19 @@ function slugForCandidate(candidateId: string): string {
  */
 export async function generateArticlesForQueue(
   llmClient: LLMClient = getLLMClient(),
+  options: GenerationRunOptions = {},
 ): Promise<GenerationRunSummary> {
-  const candidates = await listCandidateQueue();
+  // 上限は DB 側の take で絞る（全 queued を取得してから捨てる無駄を避ける）。
+  const candidates = await listCandidateQueue(
+    options.maxCandidates != null ? { take: options.maxCandidates } : {},
+  );
   const results: GenerationRunResult[] = [];
+
+  // 候補が枯渇しているときは、重複判定プールのクエリも含め何もせず正常終了する（F10:「今回は新規公開なし」）。
+  if (candidates.length === 0) {
+    return { succeededCount: 0, failedCount: 0, results };
+  }
+
   // 重複判定の比較プールはこの実行中に公開された記事も随時追加し、同一実行内での重複も検出する。
   const contentPool = await loadPublishedContentPool();
 

@@ -1,0 +1,147 @@
+/**
+ * 統合パイプライン（F10: 収集→重複排除→記事生成→タイトル生成→安全フィルタ→公開）のオーケストレーション。
+ * Sprint 3〜6 で個別に実装した各工程（収集: collection/pipeline.ts、重複排除: collection/queue.ts、
+ * 生成+タイトル+安全フィルタ+公開ゲート: generation/pipeline.ts）を1本の関数としてつなぐだけで、
+ * 各工程自体のロジックは変更しない。
+ *
+ * F11（エラー耐性・運営ログ）:
+ * - 収集の1ソース失敗・生成/タイトルの1候補失敗は、それぞれの工程が既に「握りつぶさず記録しつつ
+ *   継続する」設計になっている（collection/pipeline.ts・generation/pipeline.ts）。
+ * - ここでは各工程をまたぐ想定外の例外（DB異常等）に対する最後の安全網としてtry/catchを1つ持ち、
+ *   万一の例外でもパイプライン全体をクラッシュさせず、実行ログに記録して正常終了する。
+ * - 実行ごとに収集件数・記事化候補数・生成成功/失敗数・公開数・保留数を PipelineRunLog に記録する。
+ */
+import { prisma } from "@/lib/prisma";
+import { runCollectionPipeline, type SourceRunSummary } from "@/lib/collection/pipeline";
+import { rebuildCandidateQueue } from "@/lib/collection/queue";
+import { getAllAdapters } from "@/lib/collection/adapters";
+import { getDefaultSourceConfigs } from "@/lib/collection/config";
+import type { SourceAdapter, SourceConfig, SourceType } from "@/lib/collection/types";
+import { generateArticlesForQueue, type GenerationRunSummary } from "@/lib/generation/pipeline";
+import { getLLMClient, type LLMClient } from "@/lib/generation/llm-client";
+import { getPipelineConfig } from "@/lib/pipeline/config";
+
+export type PipelineRunOptions = {
+  /** 収集に使うアダプタ群。未指定時は設定（COLLECTION_MODE）に従った既定アダプタ。 */
+  adapters?: SourceAdapter[];
+  sourceConfigs?: Record<SourceType, SourceConfig>;
+  llmClient?: LLMClient;
+  now?: Date;
+  /** 1回の実行で処理する候補数（≒公開本数）の上限。未指定時は設定(PIPELINE_MAX_PUBLISH_PER_RUN)。 */
+  maxPublishPerRun?: number;
+
+  // 以下はテスト用の差し替えフック（想定外の例外に対する安全網を検証するため）。
+  // 通常運用では指定不要（既定で実工程を呼ぶ）。
+  runCollection?: typeof runCollectionPipeline;
+  rebuildQueue?: typeof rebuildCandidateQueue;
+  generateArticles?: typeof generateArticlesForQueue;
+};
+
+export type PipelineRunReport = {
+  startedAt: Date;
+  finishedAt: Date;
+  /** "success": 想定内の個別失敗を含め正常終了。 "failure": 想定外の例外で異常終了（それでも例外は投げない）。 */
+  status: "success" | "failure";
+  collectedCount: number;
+  candidateCount: number;
+  generationSucceeded: number;
+  generationFailed: number;
+  publishedCount: number;
+  heldCount: number;
+  errorMessage?: string;
+  sourceSummaries: SourceRunSummary[];
+  generationSummary?: GenerationRunSummary;
+};
+
+/** 実行ログの保存。保存自体の失敗は実行結果に影響させず、コンソールに残すだけにする。 */
+async function persistRunLog(report: PipelineRunReport): Promise<void> {
+  await prisma.pipelineRunLog
+    .create({
+      data: {
+        startedAt: report.startedAt,
+        finishedAt: report.finishedAt,
+        status: report.status,
+        collectedCount: report.collectedCount,
+        candidateCount: report.candidateCount,
+        generationSucceeded: report.generationSucceeded,
+        generationFailed: report.generationFailed,
+        publishedCount: report.publishedCount,
+        heldCount: report.heldCount,
+        errorMessage: report.errorMessage,
+      },
+    })
+    .catch((err) => console.error("PipelineRunLogの保存に失敗しました:", err));
+}
+
+/**
+ * 統合パイプラインを1回実行する。人手介入なしで
+ * 収集→重複排除→記事生成→タイトル生成→安全フィルタ→公開まで完走する。
+ * 候補が枯渇していれば0件公開のまま正常終了し、想定外の例外が起きてもクラッシュせず
+ * ログに残して正常終了する（F10・F11）。
+ */
+export async function runFullPipeline(options: PipelineRunOptions = {}): Promise<PipelineRunReport> {
+  const startedAt = options.now ?? new Date();
+  const pipelineConfig = getPipelineConfig();
+  const maxPublishPerRun = options.maxPublishPerRun ?? pipelineConfig.maxPublishPerRun;
+
+  const runCollection = options.runCollection ?? runCollectionPipeline;
+  const rebuildQueue = options.rebuildQueue ?? rebuildCandidateQueue;
+  const generateArticles = options.generateArticles ?? generateArticlesForQueue;
+
+  let sourceSummaries: SourceRunSummary[] = [];
+  let collectedCount = 0;
+  let candidateCount = 0;
+  let generationSucceeded = 0;
+  let generationFailed = 0;
+  let publishedCount = 0;
+  let heldCount = 0;
+  let generationSummary: GenerationRunSummary | undefined;
+  let status: "success" | "failure" = "success";
+  let errorMessage: string | undefined;
+
+  try {
+    const adapters = options.adapters ?? getAllAdapters();
+    const sourceConfigs = options.sourceConfigs ?? getDefaultSourceConfigs();
+    sourceSummaries = await runCollection(adapters, sourceConfigs, startedAt);
+    collectedCount = sourceSummaries.reduce((sum, s) => sum + s.savedCount, 0);
+
+    const queueSummary = await rebuildQueue();
+    candidateCount = queueSummary.queuedCount;
+
+    const llmClient = options.llmClient ?? getLLMClient();
+    generationSummary = await generateArticles(llmClient, { maxCandidates: maxPublishPerRun });
+    generationSucceeded = generationSummary.succeededCount;
+    generationFailed = generationSummary.failedCount;
+    publishedCount = generationSummary.results.filter(
+      (r) => r.status === "success" && r.publicationStatus === "published",
+    ).length;
+    heldCount = generationSummary.results.filter(
+      (r) => r.status === "success" && r.publicationStatus === "held",
+    ).length;
+  } catch (err) {
+    // 収集・生成・タイトル・フィルタの各工程は個別に失敗を握りつぶす設計だが、
+    // それらをまたぐ想定外の例外（DB異常等）が万一漏れてもパイプライン全体を止めない最後の安全網。
+    status = "failure";
+    errorMessage = err instanceof Error ? err.message : String(err);
+    console.error("統合パイプラインの実行で想定外のエラーが発生しました:", err);
+  }
+
+  const finishedAt = new Date();
+  const report: PipelineRunReport = {
+    startedAt,
+    finishedAt,
+    status,
+    collectedCount,
+    candidateCount,
+    generationSucceeded,
+    generationFailed,
+    publishedCount,
+    heldCount,
+    errorMessage,
+    sourceSummaries,
+    generationSummary,
+  };
+
+  await persistRunLog(report);
+  return report;
+}

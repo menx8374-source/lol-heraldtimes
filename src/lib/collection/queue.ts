@@ -47,10 +47,14 @@ export async function rebuildCandidateQueue(): Promise<QueueBuildSummary> {
   return { queuedCount: queued.length, duplicateCount: duplicates.length, alreadyArticledCount: alreadyArticled.length };
 }
 
-/** 現在の記事化候補キュー(status="queued")を新しい順で取得する。UI/確認用の読み取り専用ヘルパ。 */
-export async function listCandidateQueue() {
+/**
+ * 現在の記事化候補キュー(status="queued")を新しい順で取得する。UI/確認用の読み取り専用ヘルパ。
+ * take を指定すると DB 側で件数を絞る（1回の実行で処理する候補数の上限など。全件取得→sliceの無駄を避ける）。
+ */
+export async function listCandidateQueue(options: { take?: number } = {}) {
   return prisma.collectedItem.findMany({
     where: { status: "queued" },
     orderBy: { fetchedAt: "desc" },
+    ...(options.take != null ? { take: options.take } : {}),
   });
 }
