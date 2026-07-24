@@ -11,6 +11,7 @@ import type { LLMClient } from "@/lib/generation/llm-client";
 import { composeArticleBody } from "@/lib/generation/compose";
 import { computeVerbatimMatchRatio, DEFAULT_VERBATIM_THRESHOLD } from "@/lib/generation/verbatim";
 import { hasAcceptableQuoteRatio } from "@/lib/generation/quote-ratio";
+import { generateHookTitle } from "@/lib/generation/title";
 
 /** 1記事あたりの本文最低文字数（見出し・段落・引用の合計、F7受け入れ基準）。 */
 export const MIN_BODY_LENGTH = 300;
@@ -31,7 +32,7 @@ export type GenerationCandidate = {
 };
 
 export type GeneratedArticle = {
-  /** 仮タイトル（本格的なタイトル生成はSprint 5のF8で実装する）。 */
+  /** 煽り速報タイトル（F8）。generateHookTitle により候補の原題+本文から生成する。 */
   title: string;
   category: CategoryLabel;
   body: ArticleBodyBlock[];
@@ -86,7 +87,7 @@ export async function generateArticleForCandidate(
   }
 
   return {
-    title: candidate.title,
+    title: generateHookTitle({ title: candidate.title, content: candidate.content }),
     category: CATEGORY_BY_SOURCE[candidate.sourceType],
     body,
     sources: [{ label: ARTICLE_SOURCE_LABEL[candidate.sourceType], url: candidate.sourceUrl }],

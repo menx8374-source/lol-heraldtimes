@@ -28,6 +28,9 @@ spec-pipelineの全ドキュメントへの入口(MOC)です。プロジェク�
 - **Sprint 4** ✅ PASS — AIまとめ記事本文の自動生成（LLMはモック）
   - brief: [[sprint-4-brief]] ／ 自己評価: [[sprint-4-selfeval]] ／ 評価: [[sprint-4-evaluation]]
   - プレビュー: [生成記事(riot)](sprints/sprint-4-preview-1.png) ／ [生成記事(reddit)](sprints/sprint-4-preview-2.png)。`npm run generate` で候補→記事化
+- **Sprint 5** ✅ PASS — 煽り速報タイトル生成と品質チェッカー（中核差別化・LLMはモック）
+  - brief: [[sprint-5-brief]] ／ 自己評価: [[sprint-5-selfeval]] ／ 評価: [[sprint-5-evaluation]]
+  - プレビュー: [トップ(煽りタイトル)](sprints/sprint-5-preview-1.png) ／ [個別記事](sprints/sprint-5-preview-2.png)。10件サンプル合格率100%
 
 ## 実行状況
 - [dashboard.html](./dashboard.html) — リアルタイム進捗ダッシュボード（ブラウザで開く。30秒ごとに自動更新、「今すぐ更新」で即時更新も可能）

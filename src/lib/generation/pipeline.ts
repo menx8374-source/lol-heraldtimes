@@ -12,6 +12,8 @@ import { prisma } from "@/lib/prisma";
 import { listCandidateQueue } from "@/lib/collection/queue";
 import { generateArticleForCandidate, GenerationError, type GenerationCandidate } from "@/lib/generation/generate-article";
 import { getLLMClient, type LLMClient } from "@/lib/generation/llm-client";
+import { generateHookTitle } from "@/lib/generation/title";
+import { parseArticleBody } from "@/lib/article-body";
 
 export type GenerationRunResult =
   | { collectedItemId: string; status: "success"; articleId: string; slug: string }
@@ -97,4 +99,49 @@ export async function generateArticlesForQueue(
   const succeededCount = results.filter((r) => r.status === "success").length;
   const failedCount = results.filter((r) => r.status === "failure").length;
   return { succeededCount, failedCount, results };
+}
+
+export type TitleRegenerationResult = { articleId: string; oldTitle: string; newTitle: string };
+
+/**
+ * 既存記事1件のタイトルを煽り速報タイトル(F8)で再生成する（Sprint4以前に仮タイトルで
+ * 生成された記事、および静的シード記事にも後から適用できるようにする）。
+ * 生成元の CollectedItem（原題+本文）が残っていればそれを、無ければ記事のタイトル+本文テキストを
+ * ソースとして使う（具体要素の捏造を避けるため、いずれの場合も実在するテキストから抽出する）。
+ */
+export async function regenerateArticleTitle(articleId: string): Promise<TitleRegenerationResult> {
+  const article = await prisma.article.findUnique({
+    where: { id: articleId },
+    // ソースは先頭1件の title/content しか使わないので、全 collectedItem・全カラムは取らない。
+    include: { collectedItems: { take: 1, select: { title: true, content: true } } },
+  });
+  if (!article) {
+    throw new Error(`記事が見つかりません (articleId=${articleId})`);
+  }
+
+  const source = article.collectedItems[0];
+  const sourceInput = source
+    ? { title: source.title, content: source.content }
+    : { title: article.title, content: parseArticleBody(article.body).map((b) => b.text).join("") };
+
+  const newTitle = generateHookTitle(sourceInput);
+  await prisma.article.update({ where: { id: articleId }, data: { title: newTitle } });
+  return { articleId, oldTitle: article.title, newTitle };
+}
+
+/**
+ * 全記事のタイトルを一括で再生成する。1件の失敗が他記事の再生成を止めないようにする
+ * （F7の生成失敗継続方針と同様の考え方）。
+ */
+export async function regenerateAllArticleTitles(): Promise<TitleRegenerationResult[]> {
+  const articles = await prisma.article.findMany({ select: { id: true } });
+  const results: TitleRegenerationResult[] = [];
+  for (const a of articles) {
+    try {
+      results.push(await regenerateArticleTitle(a.id));
+    } catch (err) {
+      console.error(`タイトル再生成に失敗しました (articleId=${a.id}):`, err);
+    }
+  }
+  return results;
 }
