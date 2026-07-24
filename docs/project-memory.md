@@ -41,7 +41,7 @@ League of Legends（LoL）の日本語「まとめ速報」型サイトと、記
 | 7 | 自動公開スケジューリング・エラー耐性・運営ログ | pass | 全モック・runFullPipeline統合・PipelineRunLog・3連続実行で0→5→7件・124テストGreen |
 | 8 | 広告枠差し込み・SEO・構造化データ・サイトマップ | pass | 広告枠(env設定/プレースホルダー)・OGP/JSON-LD/sitemap(公開のみ)/robots・137テストGreen |
 | 9 | 運営監視ダッシュボード | pass | /admin(公開nav非露出・robots除外・chrome分離)・実行ログ/保留/失敗ログ/人気・143テストGreen。認証は未実装(要運用対応) |
-| 10 | 出典表記・非公認ディスクレーマー・免責／オプトアウト（法務） | pending | |
+| 10 | 出典表記・非公認ディスクレーマー・免責／オプトアウト（法務） | pass | フッター非公認表記・免責/プライバシー/オプトアウト固定ページ・出典/AI注記/引用ラベル・157テストGreen |
 
 ## 既知の課題・要人手介入
 - **外部接続の方針（ユーザー決定 2026-07-25、更新済み）**: **当面すべてモック実装で全スプリントを通す**（当初 LLM は本接続予定だったが、ユーザーが「LLM 本接続もスキップし、まずモックで全スプリントを通す」と再決定）。
@@ -54,5 +54,8 @@ League of Legends（LoL）の日本語「まとめ速報」型サイトと、記
 - **将来の本接続時のセキュリティ注記**: live 収集アダプタ実装時は、外部URLフェッチのSSRF対策・取得した外部コンテンツ（掲示板/SNS本文）のサニタイズ（記事生成・表示前）を必須とする。現状モックでは外部通信なし。
 - **Sprint 6 への申し送り（Sprint 4 の設計から）**: 現状、記事生成（`src/lib/generation/pipeline.ts`）は成功時に `Article` を `publishedAt=now` で**即時公開**する（`Article` に下書き/公開状態フラグは無く、`listArticles` 等は全件を公開扱いで表示）。Sprint 4 の受け入れ基準「生成記事はサイトに表示される」を満たすための仕様。**Sprint 6（安全フィルタ F9）で「フィルタ通過まで非公開（保留キュー）」を実装する際は、`Article` に公開状態（例: `status`: pending/published/held）を追加し、生成は「未公開ドラフト」で作成→安全フィルタ通過で公開、に変更する。同時に `listArticles`/カテゴリ/タグ/検索/人気/関連/サイトマップ等の閲覧系クエリを「公開済みのみ」に絞る**（現在は全件表示のため要修正）。この公開ゲートは Sprint 7 の自動公開パイプライン統合の要にもなる。
 - **Sprint 6 への申し送り（Sprint 5 の設計から）**: (1) タイトル生成（`src/lib/generation/title.ts`）に暫定の `NG_WORDS`/`stripUnsafe` 安全フィルタが**タイトル経路のみ**に実装されている（F8要件）。本文経路（`compose.ts`）には無いので、**Sprint 6 の安全フィルタ F9 は本文＋タイトルの両方を対象にした一般化された安全層**として実装し、可能ならタイトル側の暫定フィルタと統合（NGワードリストの二重管理を解消）する。(2) 品質チェッカー `checkTitleQuality` は現在テストのみで使用され、生成パイプラインに配線されていない。安全フィルタ導入時に「生成→品質/安全検証→不合格は保留」の検証境界としてパイプラインに組み込むと、seam が一箇所に揃う。
-- **技術的負債メモ**: 本文ブロック→テキスト連結が `src/lib/search.ts` の `bodyBlocksToText` と `generation/generate-article.ts`・`generation/pipeline.ts` に重複（3箇所）。本来は `src/lib/article-body.ts`（`ArticleBodyBlock` の定義元）に区切り文字パラメータ付きで集約し全箇所から呼ぶのが筋（差分外のため各スプリントでは見送り。着手時は search 側の挙動=空白区切りを壊さないよう注意）。
+- **技術的負債メモ**:
+  - 本文ブロック→テキスト連結が `src/lib/search.ts` の `bodyBlocksToText` と `generation/generate-article.ts` に重複。本来は `src/lib/article-body.ts`（`ArticleBodyBlock` の定義元）に区切り文字パラメータ付きで集約し全箇所から呼ぶのが筋（差分外のため各スプリントでは見送り。着手時は search 側の挙動=空白区切りを壊さないよう注意）。
+  - **サイト名/ブランド名「LoLまとめ速報」が SoT 不在で複数箇所にリテラル散在**（`layout.tsx` のtitleテンプレート・`articles/[slug]/page.tsx` の JSON-LD publisher・`site-header.tsx`・`public/og-default.svg`）。URLは `src/lib/site.ts` に集約済みなので、`getSiteName()`/`SITE_NAME` を同ファイルに足して全箇所から引くとリブランド時のズレ（特に構造化データと表示titleの乖離）を防げる。
+  - **法務3固定ページ（disclaimer/privacy/contact）の骨格＋セクション書式が重複**（`<div max-w-3xl px-4 py-8>`+`<h1>`+反復する`<section mt-6><h2>+<p>`）。`LegalPage`/`LegalSection` 共通コンポーネントに集約可能。フッターと各ページで法務リンク(href,ラベル)も重複しており `LEGAL_LINKS` 定数化の余地あり（Sprint 10 では法務文言の毀損リスクを避け見送り）。
 - **法的リスク（仕様書リスク欄より）**: 掲示板／SNS 転載の著作権・利用規約（要約再構成・主従引用・出典明記で緩和）、AdSense の自動生成／コピーコンテンツポリシー、Riot API／公式コンテンツ規約と非公認ディスクレーマー、無審査公開リスク（安全フィルタ→保留キューで緩和）。

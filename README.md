@@ -50,12 +50,19 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
 | `PIPELINE_INTERVAL_MS` | 任意 | 統合パイプラインの繰り返し実行の目安間隔(ミリ秒)。既定14400000(4時間) |
 | `SITE_URL` | 任意 | サイトの絶対URLベース（既定 `http://localhost:3000`）。OGP／構造化データ／サイトマップ／robotsの絶対URL生成に使う |
 | `AD_SLOT_ARTICLE_TOP` / `AD_SLOT_ARTICLE_IN_BODY` / `AD_SLOT_ARTICLE_BOTTOM` / `AD_SLOT_SIDEBAR` / `AD_SLOT_LISTING` | 任意 | 各広告枠（記事上部／本文中／記事末尾／サイドバー／一覧内）に差し込む広告タグ文字列（AdSense等）。未設定時はプレースホルダー枠を表示 |
+| `CONTACT_EMAIL` | 任意 | `/contact`（お問い合わせ・掲載削除依頼ページ）に表示する連絡先メールアドレス。未設定時は `SITE_URL` のホスト名から `contact@<host>` を自動生成 |
 
 ## 外部サービス接続の方針（現時点）
 当面はすべて **モック実装** で全スプリントを通し、将来の実運用時に順次本接続へ差し替える。いずれも差し替え可能な抽象越しに呼ぶ設計。
 - **LLM 記事・タイトル生成（F7・F8）**: `LLMClient` 抽象越しの決定論的モック実装（API キー不要）。将来は Anthropic Claude（`ANTHROPIC_API_KEY`・既定 `claude-haiku-4-5`）へ差し替え可能。
 - **ソース収集（Reddit／5ch／Riot 公式・F5）**: `SourceAdapter` 抽象越しの fixture モック。認証情報が揃い次第 本接続に切り替える。
 - **AdSense 広告（F12）**: アカウント開設・審査は Non-Goal。広告タグを差し込める枠と、設定でタグ文字列を受け取る仕組みまで（未設定時はプレースホルダー枠）。
+
+## 法務コンプライアンス表示（F15）
+全ページ共通のフッターに Riot 非公認ディスクレーマー・AI自動生成注記・以下の固定ページへの導線を常設している。
+- `/disclaimer`（免責事項）: 非公認・AI生成・出典/外部リンクの責任範囲・法的助言でない旨
+- `/privacy`（プライバシーポリシー）: アクセス解析・広告(Cookie)・個人情報の取り扱い方針
+- `/contact`（お問い合わせ・掲載削除依頼）: 掲載内容の削除依頼（オプトアウト）の連絡先案内
 
 ## 開発フロー
 このプロジェクトは `planner` / `architect` / `generator` / `evaluator` の4サブエージェントを `spec-pipeline` スキルがオーケストレーションする自律開発フローで進める。詳細は [CLAUDE.md](CLAUDE.md) を参照。

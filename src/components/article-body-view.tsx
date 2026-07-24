@@ -25,11 +25,16 @@ export function ArticleBodyView({ blocks }: { blocks: ArticleBodyBlock[] }) {
           );
         }
         if (block.type === "quote") {
+          // 引用（掲示板/SNSの原文要約）は自サイト生成文（見出し・段落）と視覚的に区別する（F15）:
+          // 枠線・背景色・斜体に加え、「引用」ラベルと出典元表記を明示する。
           return (
             <blockquote
               key={index}
               className="border-l-4 border-neutral-400 bg-neutral-50 py-2 pl-3 text-sm italic text-neutral-700"
             >
+              <span className="mb-1 inline-block rounded bg-neutral-200 px-1.5 py-0.5 text-[10px] font-bold not-italic text-neutral-500">
+                引用
+              </span>
               <p>{block.text}</p>
               {block.source && (
                 <footer className="mt-1 text-xs not-italic text-neutral-500">

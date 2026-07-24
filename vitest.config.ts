@@ -4,7 +4,7 @@ import path from "node:path";
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     globalSetup: ["./vitest.global-setup.ts"],
     // 複数のテストファイルがPrisma経由で同一の共有テストDB(prisma/test.db)へ実際に
     // 読み書きする（pipeline-run-pipeline.test.ts・seo-output.test.ts等）。ファイル単位の

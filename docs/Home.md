@@ -43,6 +43,9 @@ spec-pipelineの全ドキュメントへの入口(MOC)です。プロジェク�
 - **Sprint 9** ✅ PASS — 運営監視ダッシュボード（`/admin`）
   - brief: [[sprint-9-brief]] ／ 自己評価: [[sprint-9-selfeval]] ／ 評価: [[sprint-9-evaluation]]
   - 実行ログ時系列・保留キュー(理由付き)・失敗ログ統合・公開総数/人気ランキング。公開navから非露出・robots除外（認証は要運用対応）
+- **Sprint 10** ✅ PASS — 出典表記・非公認ディスクレーマー・免責／オプトアウト（法務）
+  - brief: [[sprint-10-brief]] ／ 自己評価: [[sprint-10-selfeval]] ／ 評価: [[sprint-10-evaluation]]
+  - プレビュー: [フッター/法務](sprints/sprint-10-preview-1.png) ／ [固定ページ](sprints/sprint-10-preview-2.png)。Riot非公認表記・免責/プライバシー/掲載削除依頼・出典/AI注記/引用ラベル
 
 ## 実行状況
 - [dashboard.html](./dashboard.html) — リアルタイム進捗ダッシュボード（ブラウザで開く。30秒ごとに自動更新、「今すぐ更新」で即時更新も可能）
