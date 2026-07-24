@@ -1,0 +1,41 @@
+# LoL まとめ速報サイト 自動運営システム
+
+League of Legends（LoL）の情報を扱う日本語の「まとめ速報」型ゲーム情報サイトと、その記事の収集・生成・掲載・定期更新までを人手なしで回す自動運営システム。Reddit（r/leagueoflegends 等）や 5ch のスレッド反応をまとめた記事を主軸に、Riot 公式のパッチノート・大会結果・公式ニュース等の一次情報も記事化し、扇情的（好奇心ギャップ型）なまとめ速報タイトルで多数掲載してディスプレイ広告で収益化することを目指す。運営者の手動操作なしで日々の記事投稿を自動化し、恒久的な収入源にすることが目的。
+
+- 製品仕様書: [docs/spec/lol-matome-sokuhou-spec.md](docs/spec/lol-matome-sokuhou-spec.md)
+- 画面ワイヤーフレーム: [docs/spec/lol-matome-sokuhou-wireframes.html](docs/spec/lol-matome-sokuhou-wireframes.html)
+- 進捗ダッシュボード: `docs/dashboard.html` をブラウザで開く（30秒ごとに自動更新）
+
+## 対象プラットフォーム
+`web`（閲覧者向けの公開サイト＋自動運営のバックエンド／バッチ処理）。スマートフォン・PC 双方のブラウザで崩れず読めるレスポンシブ表示。
+
+## 起動方法
+
+```bash
+npm install                # 依存関係インストール（postinstall で prisma generate も実行）
+npx prisma migrate dev     # 初回のみ: SQLite DB(prisma/dev.db) を作成・マイグレーション適用
+npm run db:seed            # サンプル記事（12件）を投入
+npm run dev                # 開発サーバー起動（http://localhost:3000）
+```
+
+- 本番相当で確認する場合: `npm run build && npm run start`
+- テスト実行: `npm test`（Vitest）
+
+## 環境変数
+
+`.env`（gitignore 済み・コミットしない）に以下を設定する。値はキー名のみ `.env.example` に記載済み。
+
+| 変数名 | 必須 | 説明 |
+|---|---|---|
+| `DATABASE_URL` | 必須 | SQLite ファイルの場所。既定値 `file:./dev.db`（秘密情報ではない） |
+| `ANTHROPIC_API_KEY` | 後続スプリントで使用 | LLM 本接続用の Anthropic API キー（Sprint 1 時点では未使用） |
+| `ANTHROPIC_MODEL` | 任意 | 使用モデル。既定 `claude-haiku-4-5`（Sprint 1 時点では未使用） |
+
+## 外部サービス接続の方針（現時点）
+当面はすべて **モック実装** で全スプリントを通し、将来の実運用時に順次本接続へ差し替える。いずれも差し替え可能な抽象越しに呼ぶ設計。
+- **LLM 記事・タイトル生成（F7・F8）**: `LLMClient` 抽象越しの決定論的モック実装（API キー不要）。将来は Anthropic Claude（`ANTHROPIC_API_KEY`・既定 `claude-haiku-4-5`）へ差し替え可能。
+- **ソース収集（Reddit／5ch／Riot 公式・F5）**: `SourceAdapter` 抽象越しの fixture モック。認証情報が揃い次第 本接続に切り替える。
+- **AdSense 広告（F12）**: アカウント開設・審査は Non-Goal。広告タグを差し込める枠と、設定でタグ文字列を受け取る仕組みまで（未設定時はプレースホルダー枠）。
+
+## 開発フロー
+このプロジェクトは `planner` / `architect` / `generator` / `evaluator` の4サブエージェントを `spec-pipeline` スキルがオーケストレーションする自律開発フローで進める。詳細は [CLAUDE.md](CLAUDE.md) を参照。

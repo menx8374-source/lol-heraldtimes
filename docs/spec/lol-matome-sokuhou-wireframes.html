@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LoL まとめ速報サイト ワイヤーフレーム</title>
+<style>
+  body { font-family: sans-serif; background: #f0f0f0; color: #222; margin: 0; padding: 24px; }
+  h1 { font-size: 20px; }
+  p.note { color: #555; font-size: 13px; max-width: 900px; }
+  .screen { background: #fff; border: 2px solid #888; border-radius: 6px; margin: 28px 0; padding: 16px; }
+  .screen > h2 { font-size: 15px; margin: 0 0 4px; background: #ddd; padding: 6px 10px; border-radius: 4px; }
+  .screen > .desc { font-size: 12px; color: #555; margin: 0 0 12px; }
+  .box { border: 1px dashed #999; background: #eaeaea; padding: 8px; margin: 6px 0; font-size: 12px; color: #333; }
+  .box.solid { border-style: solid; background: #e0e0e0; }
+  .ad { border: 2px dotted #777; background: #d8d8d8; text-align: center; padding: 12px; font-weight: bold; color: #444; }
+  .row { display: flex; gap: 12px; }
+  .col-main { flex: 3; }
+  .col-side { flex: 1; }
+  .card { border: 1px solid #aaa; background: #f4f4f4; padding: 8px; margin: 6px 0; }
+  .thumb { background: #ccc; height: 48px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #666; margin-bottom: 4px; }
+  .tag { display: inline-block; border: 1px solid #999; background: #e5e5e5; padding: 1px 6px; font-size: 11px; margin: 2px; border-radius: 3px; }
+  .nav { display: flex; gap: 8px; flex-wrap: wrap; }
+  .nav .box { flex: 1; text-align: center; min-width: 70px; }
+</style>
+</head>
+<body>
+<h1>LoL まとめ速報サイト 主要画面ワイヤーフレーム（グレースケール・体験設計用）</h1>
+<p class="note">配色・フォント・コンポーネント実装は含まず、「どの画面にどの情報・操作が並ぶか」だけを角括弧ラベルの矩形で表す。実装判断は architect / generator に委ねる。</p>
+
+<!-- 1. トップ -->
+<div class="screen">
+  <h2>画面1: トップページ（記事一覧）</h2>
+  <p class="desc">新着まとめ記事が煽りタイトルのカードで縦に多数並ぶ。一覧内にも広告枠を差し込む（F1・F3・F12）。</p>
+  <div class="box solid">[ヘッダー: サイトロゴ]　[グローバルナビ: パッチ/メタ | 5chの反応 | 海外の反応 | eスポーツ | 公式ニュース]　[検索ボックス]</div>
+  <div class="ad">[ヘッダー広告枠]</div>
+  <div class="row">
+    <div class="col-main">
+      <div class="card"><div class="thumb">[サムネイル]</div>[カテゴリ] [投稿日時]<br>[【悲報】煽り速報タイトル ...ヤバい件]</div>
+      <div class="card"><div class="thumb">[サムネイル]</div>[カテゴリ] [投稿日時]<br>[【海外の反応】煽り速報タイトル ...判明]</div>
+      <div class="ad">[記事一覧内 インフィード広告枠]</div>
+      <div class="card"><div class="thumb">[サムネイル]</div>[カテゴリ] [投稿日時]<br>[【速報】パッチXX.XX 変更点まとめ]</div>
+      <div class="box">[もっと見る / ページネーション]</div>
+    </div>
+    <div class="col-side">
+      <div class="ad">[サイドバー広告枠]</div>
+      <div class="box">[人気記事ランキング 1〜5位（順位付き・クリックで記事へ）]</div>
+      <div class="box">[最新記事ウィジェット]</div>
+      <div class="box">[カテゴリ一覧リンク]</div>
+    </div>
+  </div>
+  <div class="box solid">[フッター: 非公認ディスクレーマー | 免責 | プライバシー | 掲載削除依頼]</div>
+</div>
+
+<!-- 2. 個別記事 -->
+<div class="screen">
+  <h2>画面2: 個別記事ページ</h2>
+  <p class="desc">タイトル・本文（見出し＋段落・引用は区別表示）・出典・AI生成注記・広告枠・関連記事（F1・F7・F12・F15）。</p>
+  <div class="box solid">[ヘッダー: ロゴ / ナビ / 検索]</div>
+  <div class="row">
+    <div class="col-main">
+      <div class="box">[記事タイトル（煽り速報タイトル）]　[カテゴリ] [投稿日時] [タグ: チャンピオン名など]</div>
+      <div class="box">[AI自動生成の注記 / 情報は変動し得る旨]</div>
+      <div class="ad">[記事上部 広告枠]</div>
+      <div class="box">[導入段落]</div>
+      <div class="box">[見出し1] → [本文段落 / 反応の要約]</div>
+      <div class="box" style="border-left:4px solid #666;">[引用ブロック（自サイト文と視覚的に区別）]</div>
+      <div class="ad">[本文中 見出し間 広告枠]</div>
+      <div class="box">[見出し2] → [本文段落 / まとめ]</div>
+      <div class="box">[出典: 元スレッド/投稿へのリンク + サービス名（Reddit/5ch/Riot公式）]</div>
+      <div class="ad">[記事末尾 広告枠]</div>
+      <div class="box">[関連記事（同カテゴリ/同タグ 3件以上・自分自身を除く）]</div>
+    </div>
+    <div class="col-side">
+      <div class="ad">[サイドバー広告枠]</div>
+      <div class="box">[人気記事ランキング]</div>
+    </div>
+  </div>
+  <div class="box solid">[フッター: 非公認ディスクレーマー / 各種固定ページ]</div>
+</div>
+
+<!-- 3. カテゴリ/検索結果 -->
+<div class="screen">
+  <h2>画面3: カテゴリ一覧 / 検索結果 / タグ一覧</h2>
+  <p class="desc">同カテゴリ・同タグ・検索一致の記事だけを新しい順に一覧。0件時は空状態（F2・F4）。</p>
+  <div class="box solid">[ヘッダー: ロゴ / ナビ / 検索]</div>
+  <div class="box">[見出し: 「カテゴリ: 5chの反応」/「検索結果: ○○」/「タグ: △△」]</div>
+  <div class="row">
+    <div class="col-main">
+      <div class="card">[記事カード（煽りタイトル + カテゴリ + 日時）]</div>
+      <div class="card">[記事カード]</div>
+      <div class="card">[記事カード]</div>
+      <div class="box">[空状態: 「記事がありません / 該当する記事が見つかりませんでした」]</div>
+      <div class="box">[ページネーション]</div>
+    </div>
+    <div class="col-side">
+      <div class="box">[人気記事ランキング]</div>
+      <div class="ad">[サイドバー広告枠]</div>
+    </div>
+  </div>
+</div>
+
+<!-- 4. 運営監視ダッシュボード -->
+<div class="screen">
+  <h2>画面4: 運営監視ダッシュボード（管理用・非公開／robots除外）</h2>
+  <p class="desc">運営者だけが見る自動運営の稼働状況。公開ナビからは辿れない（F14）。</p>
+  <div class="box solid">[管理ヘッダー: 「運営ダッシュボード」]</div>
+  <div class="nav">
+    <div class="box">[直近実行: 収集件数]</div>
+    <div class="box">[生成成功/失敗]</div>
+    <div class="box">[公開件数]</div>
+    <div class="box">[保留件数]</div>
+    <div class="box">[失敗件数]</div>
+  </div>
+  <div class="box">[実行結果の時系列リスト（実行ごとの各件数）]</div>
+  <div class="box">[保留キュー一覧（記事タイトル + 保留理由: NGワード/出典欠落/重複/中傷/未確認）]</div>
+  <div class="row">
+    <div class="col-main"><div class="box">[エラー/失敗ログ（どの工程で何が失敗したか）]</div></div>
+    <div class="col-side"><div class="box">[公開記事総数 / 人気記事ランキング]</div></div>
+  </div>
+</div>
+
+<!-- 5. 固定ページ -->
+<div class="screen">
+  <h2>画面5: 法務・固定ページ（免責 / プライバシー / 掲載削除依頼）</h2>
+  <p class="desc">コンプライアンス表示とオプトアウト導線。フッターから到達（F15）。</p>
+  <div class="box solid">[ヘッダー: ロゴ / ナビ]</div>
+  <div class="box">[固定ページ見出し: 免責事項 / プライバシー方針 / 掲載削除依頼]</div>
+  <div class="box">[本文: 非公認ディスクレーマー（Riot非承認）/ AI自動生成の説明 / 引用方針]</div>
+  <div class="box">[掲載削除依頼（オプトアウト）の連絡導線]</div>
+  <div class="box solid">[フッター]</div>
+</div>
+
+</body>
+</html>

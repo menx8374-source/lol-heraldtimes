@@ -1,0 +1,63 @@
+// Prisma schema — LoL まとめ速報サイト
+// データ層決定: SQLite + Prisma（architecture.md 参照）
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// 記事本体。本文は見出し/段落/引用のブロック配列を JSON で保持し、
+/// 「1本の長文ベタ書き」にしないための構造化データとする（F1・F7）。
+model Article {
+  id            String   @id @default(cuid())
+  slug          String   @unique
+  title         String
+  category      String
+  /// ArticleBodyBlock[] を JSON シリアライズしたもの（lib/article-body.ts で検証・パース）
+  body          Json
+  /// サムネイル画像URL。未設定時はカテゴリ由来のプレースホルダーを表示する。
+  thumbnailUrl  String?
+  /// 閲覧数指標（F3 で加算ロジックを実装予定。本スプリントはシード値のみ）
+  viewCount     Int      @default(0)
+  publishedAt   DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tags    ArticleTag[]
+  sources ArticleSource[]
+
+  @@index([publishedAt])
+  @@index([category])
+}
+
+/// 記事の出典リンク。1記事につき1件以上を必須とする（F1・F9 出典欠落チェックの土台）。
+model ArticleSource {
+  id        String  @id @default(cuid())
+  articleId String
+  article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  /// 出典元サービス名（reddit / 5ch / riot-official など）
+  label     String
+  url       String
+
+  @@index([articleId])
+}
+
+/// タグ（チャンピオン名など）。カテゴリより粒度が細かい分類軸。
+model Tag {
+  id      String       @id @default(cuid())
+  name    String       @unique
+  articles ArticleTag[]
+}
+
+model ArticleTag {
+  articleId String
+  tagId     String
+  article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([articleId, tagId])
+}

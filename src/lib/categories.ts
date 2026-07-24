@@ -1,0 +1,21 @@
+/**
+ * カテゴリの単一定義（表示ラベル → サムネイル配色）。
+ * サムネイルのプレースホルダー配色・シードのカテゴリラベルはここを唯一の source of truth として参照し、
+ * ラベルの表記ズレ（→ 無言のグレーフォールバック）を防ぐ。後続スプリントのカテゴリ機能もここを基点にする。
+ */
+export const CATEGORY_GRADIENTS = {
+  "パッチ/メタ": "from-sky-600 to-sky-800",
+  "5chの反応": "from-amber-600 to-amber-800",
+  "海外の反応": "from-emerald-600 to-emerald-800",
+  "eスポーツ": "from-rose-600 to-rose-800",
+  "公式ニュース": "from-violet-600 to-violet-800",
+} as const;
+
+/** 定義済みカテゴリの表示ラベル。 */
+export type CategoryLabel = keyof typeof CATEGORY_GRADIENTS;
+
+/** 全カテゴリの表示ラベル一覧。 */
+export const CATEGORY_LABELS = Object.keys(CATEGORY_GRADIENTS) as CategoryLabel[];
+
+/** 未定義カテゴリ用のフォールバック配色。 */
+export const DEFAULT_CATEGORY_GRADIENT = "from-neutral-600 to-neutral-800";
