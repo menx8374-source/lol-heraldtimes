@@ -37,6 +37,13 @@ status: active
 - 差し替え点をアダプタ1層に閉じ込め、パイプライン本体（重複排除→生成→タイトル→安全→公開）は収集元に非依存。
 - 取得件数上限・実行間隔（レート制限）は設定として各アダプタが保持（F5）。1ソース失敗が全体を止めない設計はパイプライン側で担保（F11）。
 
+### 実装詳細（Sprint 3 確定）
+- 実装場所: `src/lib/collection/`（`types.ts`/`normalize.ts`/`similarity.ts`/`filter.ts`/`rate-limit.ts`/`collect-source.ts`（DB非依存の純ロジック）/`dedupe.ts`（同）/`pipeline.ts`・`queue.ts`（DB連携）/`adapters/`）。単独実行は `scripts/collect.ts`（`npm run collect`）。
+- データモデル: `CollectedItem`（`normalizedUrl` に unique 制約で同一URL取込みを自然に1件化）・`SourceFetchLog`（実行間隔判定・失敗記録）を Prisma に追加。`CollectedItem.status`: pending/queued/duplicate/articled。
+- URL正規化: ホスト小文字化・トラッキングクエリ除去（`utm_*`/`ref`/`fbclid`等）・末尾スラッシュ除去・ハッシュ除去。
+- 類似度判定（同一話題検出）: LLM非依存、文字bi-gramのJaccard係数（タイトル重み0.7・本文0.3、既定しきい値0.5）。日本語の分かち書きをしないため言語非依存だが、**言語をまたいだ類似判定はできない**（同一トピックでも日英で別候補として残る。実用上は許容）。
+- 本接続への差し替え点は `adapters/index.ts`（`getAdapter`）1箇所。live 指定時は現状エラーを返す（未実装・要認証情報）。
+
 ## 広告差し込み方式
 - 広告コード（AdSense 等のタグ文字列）は**設定/env で受け取り**、記事上部・本文中(見出し間)・記事末尾・サイドバー・一覧内の各枠コンポーネントに差し込む。
 - 未設定時はプレースホルダー枠を表示。枠にラベル/区切りを付け本文と視覚区別（AdSense ポリシー: コンテンツ誤認・クリック誘導配置をしない）。アカウント開設・審査は Non-Goal。

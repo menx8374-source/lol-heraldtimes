@@ -34,7 +34,7 @@ League of Legends（LoL）の日本語「まとめ速報」型サイトと、記
 |---|---|---|---|
 | 1 | 記事データモデルと閲覧サイトの土台（トップ一覧・個別記事） | pass | 記事12件シード・レスポンシブ実測・Vitest9件Green・依存脆弱性0 |
 | 2 | カテゴリ・タグ・検索・サイドバー・人気ランキングで回遊 | pass | 試行2でPASS（日本語タグのdecodeURIComponent修正）・Vitest26件Green |
-| 3 | ソース収集パイプラインと重複排除 | pending | 収集はモック |
+| 3 | ソース収集パイプラインと重複排除 | pass | 収集はモック（fixture）・67テストGreen・CollectedItem/SourceFetchLog追加 |
 | 4 | AIまとめ記事本文の自動生成 | pending | LLM本接続 |
 | 5 | 煽り速報タイトル生成と品質チェッカー（中核差別化） | pending | LLM本接続 |
 | 6 | 公開前コンテンツ安全フィルタ・モデレーション | pending | |
@@ -49,4 +49,6 @@ League of Legends（LoL）の日本語「まとめ速報」型サイトと、記
   - **ソース収集（Reddit／5ch／Riot 公式・F5・F6 / Sprint 3・7）はモック／サンプル**。`SourceAdapter` 抽象で差し替え可能にし、認証情報が揃い次第 本接続に切り替える。evaluator はモック前提で判定する。
   - **AdSense 広告（F12 / Sprint 8）はプレースホルダー枠＋設定でタグ受け取り**まで（アカウント開設・審査は Non-Goal）。
   - → 将来、実運用（恒久収入化）に進む際は、これらモックを順に本接続へ差し替える（LLM: Anthropic キー、収集: 各ソースの取得実装、広告: AdSense 審査通過後のタグ、最終デプロイ接続）。
+- **Sprint 4 への申し送り（Sprint 3 の設計から）**: 候補（`CollectedItem`, status=`queued`）から記事を生成したら、**その `CollectedItem` の `articleId` をセットし、`status` も `articled` に必ず同期する**こと。`rebuildCandidateQueue` は `articleId=null` の行のみ対象にし、`ArticleSource.url` 一致でも `articled` にするが、articleId と status が食い違うと `listCandidateQueue`（status=queued抽出）が同アイテムを再提示して**二重記事化**を招く。生成時に articleId と status を原子的に揃える（または articled 判定を articleId 由来の単一導出にする）実装にする。
+- **将来の本接続時のセキュリティ注記**: live 収集アダプタ実装時は、外部URLフェッチのSSRF対策・取得した外部コンテンツ（掲示板/SNS本文）のサニタイズ（記事生成・表示前）を必須とする。現状モックでは外部通信なし。
 - **法的リスク（仕様書リスク欄より）**: 掲示板／SNS 転載の著作権・利用規約（要約再構成・主従引用・出典明記で緩和）、AdSense の自動生成／コピーコンテンツポリシー、Riot API／公式コンテンツ規約と非公認ディスクレーマー、無審査公開リスク（安全フィルタ→保留キューで緩和）。

@@ -29,6 +29,7 @@ model Article {
 
   tags    ArticleTag[]
   sources ArticleSource[]
+  collectedItems CollectedItem[]
 
   @@index([publishedAt])
   @@index([category])
@@ -60,4 +61,48 @@ model ArticleTag {
   tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@id([articleId, tagId])
+}
+
+/// 収集パイプライン（F5）が各ソースから取り込んだ「収集アイテム」。
+/// 出典URLを必ず持つ（アダプタ側で欠落アイテムを弾いてから保存する）。
+/// normalizedUrl のユニーク制約により、同一URLの再取込は新規行を増やさず既存行を更新する
+/// （F6: 同一URLの二重取込みを1件にまとめる仕組みの土台）。
+model CollectedItem {
+  id            String   @id @default(cuid())
+  /// ソース種別: "reddit" | "5ch" | "riot"
+  sourceType    String
+  /// 収集元の元URL（出典。表示・正規化前の生値を保持）
+  sourceUrl     String
+  /// 正規化後URL（重複判定キー）
+  normalizedUrl String   @unique
+  /// 原題（スレッドタイトル／記事タイトル）
+  title         String
+  /// 取得本文または反応抜粋
+  content       String
+  /// ソース側での投稿・取得日時
+  fetchedAt     DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  /// 記事化候補キューでの状態: "pending"（未処理）| "queued"（記事化候補）
+  /// | "duplicate"（類似アイテムに敗れ候補から除外）| "articled"（記事化済み）
+  status        String   @default("pending")
+  articleId     String?
+  article       Article? @relation(fields: [articleId], references: [id], onDelete: SetNull)
+
+  @@index([sourceType])
+  @@index([status])
+}
+
+/// ソースごとの収集実行ログ（F5: 実行間隔の判定・1ソース失敗の記録に使う）。
+model SourceFetchLog {
+  id           String   @id @default(cuid())
+  sourceType   String
+  runAt        DateTime @default(now())
+  /// "success" | "failure"
+  status       String
+  itemCount    Int      @default(0)
+  errorMessage String?
+
+  @@index([sourceType, runAt])
 }

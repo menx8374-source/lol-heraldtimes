@@ -20,16 +20,22 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
 
 - 本番相当で確認する場合: `npm run build && npm run start`
 - テスト実行: `npm test`（Vitest）
+- **収集パイプライン実行**: `npm run collect`（reddit/5ch/riot からの収集 → 重複排除 → 記事化候補キュー再構築を実行し、結果をコンソールに表示。DB は `npx prisma studio` でも閲覧できる）
+  - 収集は各ソースとも fixture（`src/lib/collection/fixtures/*.json`）を読む **モック実装**（本番 API 未接続）。
+  - ソースごとに実行間隔（既定: reddit/5ch 10分、riot 30分）を設けているため、直後に連続実行すると2回目以降は `skipped-rate-limited` になる（意図した挙動。上限・間隔の検証はこの動作で確認できる）。
 
 ## 環境変数
 
-`.env`（gitignore 済み・コミットしない）に以下を設定する。値はキー名のみ `.env.example` に記載済み。
+`.env`（gitignore 済み・コミットしない）に以下を設定する。値はキー名のみ `.env.example` に記載済み。いずれも秘密情報ではなく、収集はモックのため外部認証情報は不要。
 
 | 変数名 | 必須 | 説明 |
 |---|---|---|
 | `DATABASE_URL` | 必須 | SQLite ファイルの場所。既定値 `file:./dev.db`（秘密情報ではない） |
 | `ANTHROPIC_API_KEY` | 後続スプリントで使用 | LLM 本接続用の Anthropic API キー（Sprint 1 時点では未使用） |
 | `ANTHROPIC_MODEL` | 任意 | 使用モデル。既定 `claude-haiku-4-5`（Sprint 1 時点では未使用） |
+| `COLLECTION_MODE` | 任意 | `mock`（既定）／`live`。`live` は本接続アダプタ未実装のためエラーになる |
+| `COLLECTION_REDDIT_MAX_ITEMS` / `COLLECTION_5CH_MAX_ITEMS` / `COLLECTION_RIOT_MAX_ITEMS` | 任意 | ソースごとの1回の収集実行あたりの取得件数上限（既定: reddit/5ch=10, riot=20） |
+| `COLLECTION_REDDIT_MIN_INTERVAL_MS` / `COLLECTION_5CH_MIN_INTERVAL_MS` / `COLLECTION_RIOT_MIN_INTERVAL_MS` | 任意 | ソースごとの最小実行間隔(ミリ秒)。既定: reddit/5ch=600000(10分), riot=1800000(30分) |
 
 ## 外部サービス接続の方針（現時点）
 当面はすべて **モック実装** で全スプリントを通し、将来の実運用時に順次本接続へ差し替える。いずれも差し替え可能な抽象越しに呼ぶ設計。

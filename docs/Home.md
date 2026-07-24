@@ -22,6 +22,9 @@ spec-pipelineの全ドキュメントへの入口(MOC)です。プロジェク�
 - **Sprint 2** ✅ PASS（試行2） — カテゴリ・タグ・検索・サイドバー・人気ランキング・関連記事
   - brief: [[sprint-2-brief]] ／ 自己評価: [[sprint-2-selfeval]] ／ 評価: [[sprint-2-evaluation]]
   - プレビュー: [タグ一覧(#ヤスオ)](sprints/sprint-2-preview-1.png) ／ [トップページ](sprints/sprint-2-preview-2.png)
+- **Sprint 3** ✅ PASS — ソース収集パイプライン（収集はモック）と重複排除
+  - brief: [[sprint-3-brief]] ／ 自己評価: [[sprint-3-selfeval]] ／ 評価: [[sprint-3-evaluation]]
+  - バックエンド/バッチ（新規画面なし）。`npm run collect` で収集→重複排除→候補キュー再構築
 
 ## 実行状況
 - [dashboard.html](./dashboard.html) — リアルタイム進捗ダッシュボード（ブラウザで開く。30秒ごとに自動更新、「今すぐ更新」で即時更新も可能）
