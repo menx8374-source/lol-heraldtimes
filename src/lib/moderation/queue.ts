@@ -13,11 +13,15 @@ export type HeldArticleSummary = {
   createdAt: Date;
 };
 
-/** 保留キュー: status="held" の記事を新しい順で取得する。 */
-export async function listHeldArticles(): Promise<HeldArticleSummary[]> {
+/**
+ * 保留キュー: status="held" の記事を新しい順で取得する。
+ * take を指定すると DB 側で件数を絞る（保留が解消されず積み上がっても無界に全件取得しないため）。
+ */
+export async function listHeldArticles(options: { take?: number } = {}): Promise<HeldArticleSummary[]> {
   return prisma.article.findMany({
     where: { status: "held" },
     select: { slug: true, title: true, category: true, heldReason: true, heldDetail: true, createdAt: true },
     orderBy: { createdAt: "desc" },
+    ...(options.take != null ? { take: options.take } : {}),
   });
 }

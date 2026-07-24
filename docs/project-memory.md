@@ -40,7 +40,7 @@ League of Legends（LoL）の日本語「まとめ速報」型サイトと、記
 | 6 | 公開前コンテンツ安全フィルタ・モデレーション | pass | Article.status(published/held)導入・NGワード統合・保留記事はサイト非露出/直URL404・115テストGreen |
 | 7 | 自動公開スケジューリング・エラー耐性・運営ログ | pass | 全モック・runFullPipeline統合・PipelineRunLog・3連続実行で0→5→7件・124テストGreen |
 | 8 | 広告枠差し込み・SEO・構造化データ・サイトマップ | pass | 広告枠(env設定/プレースホルダー)・OGP/JSON-LD/sitemap(公開のみ)/robots・137テストGreen |
-| 9 | 運営監視ダッシュボード | pending | |
+| 9 | 運営監視ダッシュボード | pass | /admin(公開nav非露出・robots除外・chrome分離)・実行ログ/保留/失敗ログ/人気・143テストGreen。認証は未実装(要運用対応) |
 | 10 | 出典表記・非公認ディスクレーマー・免責／オプトアウト（法務） | pending | |
 
 ## 既知の課題・要人手介入
@@ -49,6 +49,7 @@ League of Legends（LoL）の日本語「まとめ速報」型サイトと、記
   - **ソース収集（Reddit／5ch／Riot 公式・F5・F6 / Sprint 3・7）はモック／サンプル**。`SourceAdapter` 抽象で差し替え可能にし、認証情報が揃い次第 本接続に切り替える。evaluator はモック前提で判定する。
   - **AdSense 広告（F12 / Sprint 8）はプレースホルダー枠＋設定でタグ受け取り**まで（アカウント開設・審査は Non-Goal）。
   - → 将来、実運用（恒久収入化）に進む際は、これらモックを順に本接続へ差し替える（LLM: Anthropic キー、収集: 各ソースの取得実装、広告: AdSense 審査通過後のタグ、最終デプロイ接続）。
+- **運営ダッシュボードの認証（Sprint 9・要運用対応）**: `/admin` ダッシュボードは仕様上の受け入れ基準では認証がスコープ外のため未実装（公開nav非露出＋robots除外のみ）。URLを知れば誰でも運営データ（保留記事・失敗ログ・実行状況）を閲覧できる状態。**実デプロイ前に Basic 認証／IP制限／認証ミドルウェア等でアクセス制御を追加すること**（本デプロイ接続と同じく人手セットアップフェーズの対象）。
 - **Sprint 4 への申し送り（Sprint 3 の設計から）**: 候補（`CollectedItem`, status=`queued`）から記事を生成したら、**その `CollectedItem` の `articleId` をセットし、`status` も `articled` に必ず同期する**こと。`rebuildCandidateQueue` は `articleId=null` の行のみ対象にし、`ArticleSource.url` 一致でも `articled` にするが、articleId と status が食い違うと `listCandidateQueue`（status=queued抽出）が同アイテムを再提示して**二重記事化**を招く。生成時に articleId と status を原子的に揃える（または articled 判定を articleId 由来の単一導出にする）実装にする。
 - **将来の本接続時のセキュリティ注記**: live 収集アダプタ実装時は、外部URLフェッチのSSRF対策・取得した外部コンテンツ（掲示板/SNS本文）のサニタイズ（記事生成・表示前）を必須とする。現状モックでは外部通信なし。
 - **Sprint 6 への申し送り（Sprint 4 の設計から）**: 現状、記事生成（`src/lib/generation/pipeline.ts`）は成功時に `Article` を `publishedAt=now` で**即時公開**する（`Article` に下書き/公開状態フラグは無く、`listArticles` 等は全件を公開扱いで表示）。Sprint 4 の受け入れ基準「生成記事はサイトに表示される」を満たすための仕様。**Sprint 6（安全フィルタ F9）で「フィルタ通過まで非公開（保留キュー）」を実装する際は、`Article` に公開状態（例: `status`: pending/published/held）を追加し、生成は「未公開ドラフト」で作成→安全フィルタ通過で公開、に変更する。同時に `listArticles`/カテゴリ/タグ/検索/人気/関連/サイトマップ等の閲覧系クエリを「公開済みのみ」に絞る**（現在は全件表示のため要修正）。この公開ゲートは Sprint 7 の自動公開パイプライン統合の要にもなる。

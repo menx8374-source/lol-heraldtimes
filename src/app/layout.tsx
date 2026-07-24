@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { SiteHeader } from "@/components/site-header";
-import { SiteFooter } from "@/components/site-footer";
+import { SiteChrome } from "@/components/site-chrome";
 
 export const metadata: Metadata = {
   title: {
@@ -20,9 +19,7 @@ export default function RootLayout({
   return (
     <html lang="ja" className="h-full antialiased">
       <body className="min-h-full flex flex-col bg-neutral-100 text-neutral-900">
-        <SiteHeader />
-        <main className="flex-1 w-full">{children}</main>
-        <SiteFooter />
+        <SiteChrome>{children}</SiteChrome>
       </body>
     </html>
   );
