@@ -25,6 +25,9 @@ spec-pipelineの全ドキュメントへの入口(MOC)です。プロジェク�
 - **Sprint 3** ✅ PASS — ソース収集パイプライン（収集はモック）と重複排除
   - brief: [[sprint-3-brief]] ／ 自己評価: [[sprint-3-selfeval]] ／ 評価: [[sprint-3-evaluation]]
   - バックエンド/バッチ（新規画面なし）。`npm run collect` で収集→重複排除→候補キュー再構築
+- **Sprint 4** ✅ PASS — AIまとめ記事本文の自動生成（LLMはモック）
+  - brief: [[sprint-4-brief]] ／ 自己評価: [[sprint-4-selfeval]] ／ 評価: [[sprint-4-evaluation]]
+  - プレビュー: [生成記事(riot)](sprints/sprint-4-preview-1.png) ／ [生成記事(reddit)](sprints/sprint-4-preview-2.png)。`npm run generate` で候補→記事化
 
 ## 実行状況
 - [dashboard.html](./dashboard.html) — リアルタイム進捗ダッシュボード（ブラウザで開く。30秒ごとに自動更新、「今すぐ更新」で即時更新も可能）

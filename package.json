@@ -10,6 +10,7 @@
     "test": "vitest run",
     "db:seed": "tsx prisma/seed.ts",
     "collect": "tsx scripts/collect.ts",
+    "generate": "tsx scripts/generate.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

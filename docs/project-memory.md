@@ -35,7 +35,7 @@ League of Legends（LoL）の日本語「まとめ速報」型サイトと、記
 | 1 | 記事データモデルと閲覧サイトの土台（トップ一覧・個別記事） | pass | 記事12件シード・レスポンシブ実測・Vitest9件Green・依存脆弱性0 |
 | 2 | カテゴリ・タグ・検索・サイドバー・人気ランキングで回遊 | pass | 試行2でPASS（日本語タグのdecodeURIComponent修正）・Vitest26件Green |
 | 3 | ソース収集パイプラインと重複排除 | pass | 収集はモック（fixture）・67テストGreen・CollectedItem/SourceFetchLog追加 |
-| 4 | AIまとめ記事本文の自動生成 | pending | LLM本接続 |
+| 4 | AIまとめ記事本文の自動生成 | pass | LLMモック（決定論）・生成6件・逐語一致率0.06〜0.39・84テストGreen・候補状態を原子的同期 |
 | 5 | 煽り速報タイトル生成と品質チェッカー（中核差別化） | pending | LLM本接続 |
 | 6 | 公開前コンテンツ安全フィルタ・モデレーション | pending | |
 | 7 | 自動公開スケジューリング・エラー耐性・運営ログ | pending | 収集はモック |
@@ -51,4 +51,5 @@ League of Legends（LoL）の日本語「まとめ速報」型サイトと、記
   - → 将来、実運用（恒久収入化）に進む際は、これらモックを順に本接続へ差し替える（LLM: Anthropic キー、収集: 各ソースの取得実装、広告: AdSense 審査通過後のタグ、最終デプロイ接続）。
 - **Sprint 4 への申し送り（Sprint 3 の設計から）**: 候補（`CollectedItem`, status=`queued`）から記事を生成したら、**その `CollectedItem` の `articleId` をセットし、`status` も `articled` に必ず同期する**こと。`rebuildCandidateQueue` は `articleId=null` の行のみ対象にし、`ArticleSource.url` 一致でも `articled` にするが、articleId と status が食い違うと `listCandidateQueue`（status=queued抽出）が同アイテムを再提示して**二重記事化**を招く。生成時に articleId と status を原子的に揃える（または articled 判定を articleId 由来の単一導出にする）実装にする。
 - **将来の本接続時のセキュリティ注記**: live 収集アダプタ実装時は、外部URLフェッチのSSRF対策・取得した外部コンテンツ（掲示板/SNS本文）のサニタイズ（記事生成・表示前）を必須とする。現状モックでは外部通信なし。
+- **Sprint 6 への申し送り（Sprint 4 の設計から）**: 現状、記事生成（`src/lib/generation/pipeline.ts`）は成功時に `Article` を `publishedAt=now` で**即時公開**する（`Article` に下書き/公開状態フラグは無く、`listArticles` 等は全件を公開扱いで表示）。Sprint 4 の受け入れ基準「生成記事はサイトに表示される」を満たすための仕様。**Sprint 6（安全フィルタ F9）で「フィルタ通過まで非公開（保留キュー）」を実装する際は、`Article` に公開状態（例: `status`: pending/published/held）を追加し、生成は「未公開ドラフト」で作成→安全フィルタ通過で公開、に変更する。同時に `listArticles`/カテゴリ/タグ/検索/人気/関連/サイトマップ等の閲覧系クエリを「公開済みのみ」に絞る**（現在は全件表示のため要修正）。この公開ゲートは Sprint 7 の自動公開パイプライン統合の要にもなる。
 - **法的リスク（仕様書リスク欄より）**: 掲示板／SNS 転載の著作権・利用規約（要約再構成・主従引用・出典明記で緩和）、AdSense の自動生成／コピーコンテンツポリシー、Riot API／公式コンテンツ規約と非公認ディスクレーマー、無審査公開リスク（安全フィルタ→保留キューで緩和）。

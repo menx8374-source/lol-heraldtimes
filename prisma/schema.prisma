@@ -86,9 +86,12 @@ model CollectedItem {
 
   /// 記事化候補キューでの状態: "pending"（未処理）| "queued"（記事化候補）
   /// | "duplicate"（類似アイテムに敗れ候補から除外）| "articled"（記事化済み）
+  /// | "generation_failed"（AI記事生成に失敗。F7: 他候補の生成は継続し、この行に理由を記録する）
   status        String   @default("pending")
   articleId     String?
   article       Article? @relation(fields: [articleId], references: [id], onDelete: SetNull)
+  /// 生成失敗時のエラーメッセージ（F7）。status="generation_failed" のときのみ設定される。
+  generationError String?
 
   @@index([sourceType])
   @@index([status])
