@@ -121,6 +121,14 @@ export async function listArticlesByTag(tagName: string): Promise<ArticleSummary
 /**
  * サイドバー（PC）／記事下（スマホ）の人気記事ランキング用: 公開済み記事を閲覧数（viewCount）降順に取得する（F3）。
  */
+export async function listArticlesForSitemap(): Promise<{ slug: string; updatedAt: Date }[]> {
+  return prisma.article.findMany({
+    where: PUBLISHED_ONLY,
+    select: { slug: true, updatedAt: true },
+    orderBy: { publishedAt: "desc" },
+  });
+}
+
 export async function listPopularArticles(limit = 5): Promise<ArticleSummary[]> {
   return prisma.article.findMany({
     where: PUBLISHED_ONLY,

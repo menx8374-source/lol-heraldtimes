@@ -39,7 +39,7 @@ League of Legends（LoL）の日本語「まとめ速報」型サイトと、記
 | 5 | 煽り速報タイトル生成と品質チェッカー（中核差別化） | pass | LLMモック（決定論）・10/10=100%合格・ラベル/フック分散・捏造防止・97テストGreen |
 | 6 | 公開前コンテンツ安全フィルタ・モデレーション | pass | Article.status(published/held)導入・NGワード統合・保留記事はサイト非露出/直URL404・115テストGreen |
 | 7 | 自動公開スケジューリング・エラー耐性・運営ログ | pass | 全モック・runFullPipeline統合・PipelineRunLog・3連続実行で0→5→7件・124テストGreen |
-| 8 | 広告枠差し込み・SEO・構造化データ・サイトマップ | pending | AdSenseタグはプレースホルダー |
+| 8 | 広告枠差し込み・SEO・構造化データ・サイトマップ | pass | 広告枠(env設定/プレースホルダー)・OGP/JSON-LD/sitemap(公開のみ)/robots・137テストGreen |
 | 9 | 運営監視ダッシュボード | pending | |
 | 10 | 出典表記・非公認ディスクレーマー・免責／オプトアウト（法務） | pending | |
 

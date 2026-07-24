@@ -37,6 +37,9 @@ spec-pipelineの全ドキュメントへの入口(MOC)です。プロジェク�
 - **Sprint 7** ✅ PASS — 自動公開スケジューリング・エラー耐性・運営ログ（全モック）
   - brief: [[sprint-7-brief]] ／ 自己評価: [[sprint-7-selfeval]] ／ 評価: [[sprint-7-evaluation]]
   - バックエンド統合。`npm run pipeline` で収集→重複排除→生成→タイトル→安全フィルタ→公開を1本で実行、`PipelineRunLog`に運営ログ
+- **Sprint 8** ✅ PASS — 広告枠差し込み・SEO・構造化データ・サイトマップ
+  - brief: [[sprint-8-brief]] ／ 自己評価: [[sprint-8-selfeval]] ／ 評価: [[sprint-8-evaluation]]
+  - プレビュー: [記事ページ(広告枠)](sprints/sprint-8-preview-1.png) ／ [トップ一覧](sprints/sprint-8-preview-2.png)。`/sitemap.xml`・`/robots.txt`・OGP・JSON-LD
 
 ## 実行状況
 - [dashboard.html](./dashboard.html) — リアルタイム進捗ダッシュボード（ブラウザで開く。30秒ごとに自動更新、「今すぐ更新」で即時更新も可能）

@@ -8,7 +8,11 @@ export default async function HomePage() {
   return (
     <PageWithSidebar>
       <h1 className="mb-4 text-lg font-bold">新着まとめ記事</h1>
-      <ArticleList articles={articles} emptyMessage="まだ記事がありません。" />
+      <ArticleList
+        articles={articles}
+        emptyMessage="まだ記事がありません。"
+        adInterval={4}
+      />
     </PageWithSidebar>
   );
 }

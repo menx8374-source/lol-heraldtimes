@@ -1,5 +1,6 @@
 import { listPopularArticles } from "@/lib/articles";
 import { PopularRanking } from "@/components/popular-ranking";
+import { AdSlot } from "@/components/ad-slot";
 
 /**
  * サイト共通のコンテンツ+サイドバー2カラムレイアウト。
@@ -17,6 +18,7 @@ export async function PageWithSidebar({
       <div className="min-w-0 flex-1">{children}</div>
       <aside className="w-full shrink-0 lg:w-72">
         <PopularRanking articles={popular} />
+        <AdSlot position="sidebar" />
       </aside>
     </div>
   );

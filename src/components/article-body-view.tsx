@@ -1,14 +1,27 @@
+import { Fragment } from "react";
 import type { ArticleBodyBlock } from "@/lib/article-body";
+import { AdSlot } from "@/components/ad-slot";
+
+/** 本文ブロック配列中、見出しブロックが何番目(blocksのindex)にあるかを列挙する純関数。 */
+function headingBlockIndices(blocks: ArticleBodyBlock[]): number[] {
+  return blocks.flatMap((block, index) => (block.type === "heading" ? [index] : []));
+}
 
 export function ArticleBodyView({ blocks }: { blocks: ArticleBodyBlock[] }) {
+  // 本文中(見出し間)の広告枠（F12）は中央の見出しの直前に差し込む。見出し数に依存せず
+  // 「記事の真ん中あたり」に収まるよう、見出し数の中央インデックスを使う（3見出しなら2番目＝従来と同じ）。
+  const headings = headingBlockIndices(blocks);
+  const adBeforeBlockIndex = headings.length > 0 ? headings[Math.floor(headings.length / 2)] : -1;
+
   return (
     <div className="flex flex-col gap-3">
       {blocks.map((block, index) => {
         if (block.type === "heading") {
           return (
-            <h2 key={index} className="mt-2 text-base font-bold sm:text-lg">
-              {block.text}
-            </h2>
+            <Fragment key={index}>
+              {index === adBeforeBlockIndex && <AdSlot position="article-in-body" />}
+              <h2 className="mt-2 text-base font-bold sm:text-lg">{block.text}</h2>
+            </Fragment>
           );
         }
         if (block.type === "quote") {
