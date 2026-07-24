@@ -19,3 +19,30 @@ export const CATEGORY_LABELS = Object.keys(CATEGORY_GRADIENTS) as CategoryLabel[
 
 /** 未定義カテゴリ用のフォールバック配色。 */
 export const DEFAULT_CATEGORY_GRADIENT = "from-neutral-600 to-neutral-800";
+
+/**
+ * カテゴリ表示ラベル → URL 用スラッグ（ASCII安全）。
+ * 「パッチ/メタ」のようにラベルに `/` を含むものがあり、そのまま動的セグメントに使うと
+ * URLパスの区切りと衝突しうるため、カテゴリ一覧ページのルーティングは必ずこのスラッグ経由にする。
+ */
+export const CATEGORY_SLUGS: Record<CategoryLabel, string> = {
+  "パッチ/メタ": "patch-meta",
+  "5chの反応": "5ch",
+  "海外の反応": "overseas",
+  "eスポーツ": "esports",
+  "公式ニュース": "official",
+};
+
+const SLUG_TO_CATEGORY_LABEL: Record<string, CategoryLabel> = Object.fromEntries(
+  CATEGORY_LABELS.map((label) => [CATEGORY_SLUGS[label], label]),
+);
+
+/** カテゴリ表示ラベルから URL 用スラッグを引く。未定義カテゴリは undefined。 */
+export function categorySlugFor(category: string): string | undefined {
+  return CATEGORY_SLUGS[category as CategoryLabel];
+}
+
+/** URL 用スラッグからカテゴリ表示ラベルを引く。未知のスラッグは undefined。 */
+export function categoryLabelForSlug(slug: string): CategoryLabel | undefined {
+  return SLUG_TO_CATEGORY_LABEL[slug];
+}

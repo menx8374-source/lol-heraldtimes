@@ -1,10 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getArticleBySlug } from "@/lib/articles";
+import {
+  getArticleBySlug,
+  incrementViewCount,
+  listRelatedArticles,
+} from "@/lib/articles";
+import { categorySlugFor } from "@/lib/categories";
 import { ArticleBodyView } from "@/components/article-body-view";
 import { ArticleThumbnail } from "@/components/article-thumbnail";
 import { ArticleMeta } from "@/components/article-meta";
+import { ArticleList } from "@/components/article-list";
+import { PageWithSidebar } from "@/components/page-with-sidebar";
 
 type Props = {
   params: Promise<{ slug: string }>;
@@ -27,14 +34,27 @@ export default async function ArticlePage({ params }: Props) {
     notFound();
   }
 
+  // 閲覧数の加算（書き込み）と関連記事の取得（読み込み）は互いに独立なので並列化する。
+  const [, related] = await Promise.all([
+    incrementViewCount(article.slug),
+    listRelatedArticles(article, 3),
+  ]);
+  const categorySlug = categorySlugFor(article.category);
+
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6">
+    <PageWithSidebar>
       <nav className="mb-3 text-xs text-neutral-500">
         <Link href="/" className="hover:underline">
           トップ
         </Link>
         <span className="mx-1">/</span>
-        <span>{article.category}</span>
+        {categorySlug ? (
+          <Link href={`/category/${categorySlug}`} className="hover:underline">
+            {article.category}
+          </Link>
+        ) : (
+          <span>{article.category}</span>
+        )}
       </nav>
 
       <ArticleThumbnail
@@ -48,9 +68,13 @@ export default async function ArticlePage({ params }: Props) {
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
         <ArticleMeta category={article.category} publishedAt={article.publishedAt} />
         {article.tags.map((tag) => (
-          <span key={tag} className="rounded-full border border-neutral-300 px-2 py-0.5">
+          <Link
+            key={tag}
+            href={`/tags/${tag}`}
+            className="rounded-full border border-neutral-300 px-2 py-0.5 hover:bg-neutral-100"
+          >
             #{tag}
-          </span>
+          </Link>
         ))}
       </div>
 
@@ -81,11 +105,16 @@ export default async function ArticlePage({ params }: Props) {
         </ul>
       </section>
 
+      <section className="mt-8 border-t border-neutral-200 pt-4">
+        <h2 className="mb-3 text-sm font-bold text-neutral-600">関連記事</h2>
+        <ArticleList articles={related} emptyMessage="関連記事はありません" />
+      </section>
+
       <div className="mt-6">
         <Link href="/" className="text-sm text-sky-700 hover:underline">
           &larr; トップへ戻る
         </Link>
       </div>
-    </div>
+    </PageWithSidebar>
   );
 }

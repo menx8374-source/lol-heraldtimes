@@ -19,6 +19,9 @@ spec-pipelineの全ドキュメントへの入口(MOC)です。プロジェク�
 - **Sprint 1** ✅ PASS — 記事データモデルと閲覧サイトの土台
   - brief: [[sprint-1-brief]] ／ 自己評価: [[sprint-1-selfeval]] ／ 評価: [[sprint-1-evaluation]]
   - プレビュー: [トップ一覧](sprints/sprint-1-preview-1.png) ／ [個別記事](sprints/sprint-1-preview-2.png)
+- **Sprint 2** ✅ PASS（試行2） — カテゴリ・タグ・検索・サイドバー・人気ランキング・関連記事
+  - brief: [[sprint-2-brief]] ／ 自己評価: [[sprint-2-selfeval]] ／ 評価: [[sprint-2-evaluation]]
+  - プレビュー: [タグ一覧(#ヤスオ)](sprints/sprint-2-preview-1.png) ／ [トップページ](sprints/sprint-2-preview-2.png)
 
 ## 実行状況
 - [dashboard.html](./dashboard.html) — リアルタイム進捗ダッシュボード（ブラウザで開く。30秒ごとに自動更新、「今すぐ更新」で即時更新も可能）
