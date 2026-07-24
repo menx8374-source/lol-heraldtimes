@@ -23,6 +23,17 @@ model Article {
   thumbnailUrl  String?
   /// 閲覧数指標（F3 で加算ロジックを実装予定。本スプリントはシード値のみ）
   viewCount     Int      @default(0)
+  /// 公開状態（F9 安全フィルタのゲート）: "published"（公開・閲覧サイトに表示）| "held"（保留・非公開）。
+  /// 公開記事は必ず安全フィルタ通過済みという不変条件を保つため、閲覧系クエリは必ずこの列で絞り込む。
+  status        String   @default("published")
+  /// 保留理由コード（F9）: "ng_word" | "missing_source" | "personal_attack" | "duplicate"。
+  /// status="held" のときのみ設定される（保留キューの記録に使う）。
+  heldReason    String?
+  /// 保留理由の詳細メッセージ（人間可読）。status="held" のときのみ設定される。
+  heldDetail    String?
+  /// 未確定・噂レベルの情報と判定された場合に true（F9）。true でも公開はされるが、
+  /// 記事に「未確認」ラベルを表示する対象になる。
+  unconfirmed   Boolean  @default(false)
   publishedAt   DateTime
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -33,6 +44,7 @@ model Article {
 
   @@index([publishedAt])
   @@index([category])
+  @@index([status])
 }
 
 /// 記事の出典リンク。1記事につき1件以上を必須とする（F1・F9 出典欠落チェックの土台）。

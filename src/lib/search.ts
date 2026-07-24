@@ -6,7 +6,7 @@
  */
 import { prisma } from "@/lib/prisma";
 import { parseArticleBody, type ArticleBodyBlock } from "@/lib/article-body";
-import { summarySelect, toSummary, type ArticleSummary } from "@/lib/articles";
+import { summarySelect, toSummary, PUBLISHED_ONLY, type ArticleSummary } from "@/lib/articles";
 
 /** 本文ブロック配列から検索対象テキストを連結して作る純関数。 */
 export function bodyBlocksToText(blocks: ArticleBodyBlock[]): string {
@@ -32,6 +32,7 @@ export async function searchArticles(query: string): Promise<ArticleSummary[]> {
   if (!trimmed) return [];
 
   const articles = await prisma.article.findMany({
+    where: { ...PUBLISHED_ONLY },
     select: { ...summarySelect, body: true },
     orderBy: { publishedAt: "desc" },
   });

@@ -7,6 +7,11 @@
  * ⚠ Sprint 3からの申し送り: 候補から記事を生成したら、その CollectedItem の articleId をセットし、
  * status も "articled" に必ず同期する（原子的に）。これを怠ると listCandidateQueue（status=queued抽出）
  * が同アイテムを再提示して二重記事化を招く。
+ *
+ * ⚠ F9（安全フィルタ）: 生成した本文＋タイトルは必ず moderateArticleContent を通してから
+ * Article.status を決める。フィルタ通過(published)のときのみ公開状態にし、不通過は
+ * status="held"（保留・保留理由付き）にして CollectedItem は articled のまま公開キューには入れない
+ * （「公開記事は必ずフィルタ通過済み」という不変条件をここで担保する）。
  */
 import { prisma } from "@/lib/prisma";
 import { listCandidateQueue } from "@/lib/collection/queue";
@@ -14,9 +19,40 @@ import { generateArticleForCandidate, GenerationError, type GenerationCandidate 
 import { getLLMClient, type LLMClient } from "@/lib/generation/llm-client";
 import { generateHookTitle } from "@/lib/generation/title";
 import { parseArticleBody } from "@/lib/article-body";
+import { bodyBlocksToText } from "@/lib/search";
+import { moderateArticleContent } from "@/lib/moderation/moderate";
+
+/** 重複判定の比較対象にする既存公開記事の上限件数（記事数増加時のコスト有界化。related-articles.ts と同じ考え方）。 */
+const DUPLICATE_CHECK_POOL = 200;
+
+/** 重複判定用に、直近の公開済み記事のタイトル+本文テキストを取得する。 */
+async function loadPublishedContentPool(): Promise<{ title: string; content: string }[]> {
+  const rows = await prisma.article.findMany({
+    where: { status: "published" },
+    select: { title: true, body: true },
+    orderBy: { publishedAt: "desc" },
+    take: DUPLICATE_CHECK_POOL,
+  });
+  return rows.map((r) => {
+    try {
+      return { title: r.title, content: bodyBlocksToText(parseArticleBody(r.body)) };
+    } catch {
+      // 不正な本文データは重複判定の比較対象から除外するだけにし、生成パイプライン自体は止めない。
+      return { title: r.title, content: "" };
+    }
+  });
+}
 
 export type GenerationRunResult =
-  | { collectedItemId: string; status: "success"; articleId: string; slug: string }
+  | {
+      collectedItemId: string;
+      status: "success";
+      articleId: string;
+      slug: string;
+      /** F9の安全フィルタ判定結果。held のときは heldReason に理由コードが入る。 */
+      publicationStatus: "published" | "held";
+      heldReason?: string;
+    }
   | { collectedItemId: string; status: "failure"; errorMessage: string };
 
 export type GenerationRunSummary = {
@@ -40,6 +76,8 @@ export async function generateArticlesForQueue(
 ): Promise<GenerationRunSummary> {
   const candidates = await listCandidateQueue();
   const results: GenerationRunResult[] = [];
+  // 重複判定の比較プールはこの実行中に公開された記事も随時追加し、同一実行内での重複も検出する。
+  const contentPool = await loadPublishedContentPool();
 
   for (const item of candidates) {
     const candidate: GenerationCandidate = {
@@ -53,9 +91,18 @@ export async function generateArticlesForQueue(
     try {
       const generated = await generateArticleForCandidate(candidate, llmClient);
       const slug = slugForCandidate(item.id);
+      const bodyText = bodyBlocksToText(generated.body);
+
+      const moderation = moderateArticleContent(
+        { title: generated.title, bodyText, sourceCount: generated.sources.length },
+        { candidate: { title: generated.title, content: bodyText }, existing: contentPool },
+      );
+      const isPublished = moderation.status === "published";
 
       // Article作成・ArticleSource作成・CollectedItemの状態同期(articleId+status)は
       // 一貫性が崩れると二重記事化を招くため、必ず1つのトランザクションで原子的に行う。
+      // 安全フィルタ不通過(held)でも Article 自体は作成し、CollectedItem は articled のまま
+      // （保留理由付きで保留キューに記録し、再度キューへ戻って重複生成されないようにする）。
       const articleId = await prisma.$transaction(async (tx) => {
         const article = await tx.article.create({
           data: {
@@ -64,6 +111,10 @@ export async function generateArticlesForQueue(
             category: generated.category,
             body: generated.body,
             publishedAt: new Date(),
+            status: isPublished ? "published" : "held",
+            heldReason: isPublished ? null : moderation.reason,
+            heldDetail: isPublished ? null : moderation.detail,
+            unconfirmed: isPublished ? moderation.unconfirmed : false,
             sources: {
               create: generated.sources,
             },
@@ -76,7 +127,19 @@ export async function generateArticlesForQueue(
         return article.id;
       });
 
-      results.push({ collectedItemId: item.id, status: "success", articleId, slug });
+      if (isPublished) {
+        // 同一実行内の後続候補が、今公開したばかりの記事と重複判定されるようにプールへ追加する。
+        contentPool.unshift({ title: generated.title, content: bodyText });
+      }
+
+      results.push({
+        collectedItemId: item.id,
+        status: "success",
+        articleId,
+        slug,
+        publicationStatus: isPublished ? "published" : "held",
+        ...(isPublished ? {} : { heldReason: moderation.reason }),
+      });
     } catch (err) {
       const errorMessage =
         err instanceof GenerationError || err instanceof Error ? err.message : String(err);
@@ -122,7 +185,7 @@ export async function regenerateArticleTitle(articleId: string): Promise<TitleRe
   const source = article.collectedItems[0];
   const sourceInput = source
     ? { title: source.title, content: source.content }
-    : { title: article.title, content: parseArticleBody(article.body).map((b) => b.text).join("") };
+    : { title: article.title, content: bodyBlocksToText(parseArticleBody(article.body)) };
 
   const newTitle = generateHookTitle(sourceInput);
   await prisma.article.update({ where: { id: articleId }, data: { title: newTitle } });

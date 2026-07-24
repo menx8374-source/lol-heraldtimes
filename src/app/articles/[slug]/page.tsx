@@ -67,6 +67,11 @@ export default async function ArticlePage({ params }: Props) {
 
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
         <ArticleMeta category={article.category} publishedAt={article.publishedAt} />
+        {article.unconfirmed && (
+          <span className="rounded-full bg-red-600 px-2 py-0.5 font-bold text-white">
+            未確認情報
+          </span>
+        )}
         {article.tags.map((tag) => (
           <Link
             key={tag}
@@ -81,6 +86,11 @@ export default async function ArticlePage({ params }: Props) {
       <p className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
         この記事は AI により自動生成された記事です。内容は変動・変更される場合があります。
       </p>
+      {article.unconfirmed && (
+        <p className="mt-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
+          【未確認】この記事は未確定・噂レベルの情報を含みます。内容の真偽は確認されていません。
+        </p>
+      )}
 
       <div className="mt-4">
         <ArticleBodyView blocks={article.body} />

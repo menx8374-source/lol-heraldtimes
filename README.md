@@ -26,6 +26,7 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
 - **AIまとめ記事生成パイプライン実行**: `npm run generate`（記事化候補キュー(status="queued")を1件ずつ処理し、Article(+ArticleSource)を作成。結果をコンソールに表示。`npm run collect` の後に実行する）
   - 生成LLMは決定論的な**モック実装**（テンプレート/ルールベース、API キー不要）。逐語一致率・引用の主従関係・最低文字数を満たさない候補は「生成失敗」(`CollectedItem.status="generation_failed"`、`generationError`にエラー内容を記録)として扱われ、他候補の生成は継続する。
   - 生成に成功した候補は `CollectedItem.articleId` と `status="articled"` が同一トランザクションで同期される（再実行しても二重記事化しない）。
+  - **公開前コンテンツ安全フィルタ（F9）**: 生成した本文＋タイトルを NGワード／出典欠落／特定個人への中傷・晒し／重複の観点で判定し、通過した記事のみ `Article.status="published"` として公開される。通過しない記事は `status="held"`（保留）となり `heldReason`/`heldDetail` に理由が記録され、閲覧サイトの一覧・検索・個別ページのいずれにも表示されない（保留キューは `src/lib/moderation/queue.ts` の `listHeldArticles()` で参照できる）。未確定・噂レベルの表現を含む記事は保留にはせず `unconfirmed=true` として公開され、記事ページに「未確認情報」ラベルが表示される。
 
 ## 環境変数
 

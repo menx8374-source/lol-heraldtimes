@@ -31,6 +31,9 @@ spec-pipelineの全ドキュメントへの入口(MOC)です。プロジェク�
 - **Sprint 5** ✅ PASS — 煽り速報タイトル生成と品質チェッカー（中核差別化・LLMはモック）
   - brief: [[sprint-5-brief]] ／ 自己評価: [[sprint-5-selfeval]] ／ 評価: [[sprint-5-evaluation]]
   - プレビュー: [トップ(煽りタイトル)](sprints/sprint-5-preview-1.png) ／ [個別記事](sprints/sprint-5-preview-2.png)。10件サンプル合格率100%
+- **Sprint 6** ✅ PASS — 公開前コンテンツ安全フィルタ・モデレーション
+  - brief: [[sprint-6-brief]] ／ 自己評価: [[sprint-6-selfeval]] ／ 評価: [[sprint-6-evaluation]]
+  - プレビュー: [未確認ラベル付き記事](sprints/sprint-6-preview-1.png) ／ [保留記事非表示のトップ](sprints/sprint-6-preview-2.png)。公開状態(published/held)導入
 
 ## 実行状況
 - [dashboard.html](./dashboard.html) — リアルタイム進捗ダッシュボード（ブラウザで開く。30秒ごとに自動更新、「今すぐ更新」で即時更新も可能）

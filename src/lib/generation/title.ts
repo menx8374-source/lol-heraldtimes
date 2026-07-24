@@ -11,6 +11,7 @@
  * extractConcreteElements が sourceText から取り出した「そのままの部分文字列」だけを使う
  * （新しい文字列を組み立てて主張することはしない）。
  */
+import { stripNgWords } from "@/lib/moderation/ng-words";
 
 /** 冒頭ラベル語彙。生成タイトルは必ずこの中から1つを【】で囲んで先頭に付ける。 */
 export const LABELS = ["速報", "悲報", "朗報", "朗報か？", "議論", "海外の反応"] as const;
@@ -49,33 +50,9 @@ export const HOOK_PATTERNS: RegExp[] = [
 export const MIN_TITLE_LENGTH = 20;
 export const MAX_TITLE_LENGTH = 48;
 
-/**
- * 差別的・攻撃的表現として抽出テキストから除去するNGワード（安全フィルタ）。
- * ラベル・フック語彙自体は最初から安全な語だけで構成しているが、具体要素や文脈の穴埋めは
- * 5ch/Reddit等ユーザー投稿由来の生コンテンツから抜き出すため、混入防止のために適用する。
- */
-const NG_WORDS = [
-  "死ね",
-  "殺す",
-  "殺せ",
-  "キモい",
-  "キモッ",
-  "カス",
-  "クズ",
-  "ゴミ",
-  "バカ",
-  "アホ",
-  "ハゲ",
-  "デブ",
-  "ブス",
-  "気持ち悪い",
-  "消えろ",
-  "うざい",
-];
-
-function stripUnsafe(text: string): string {
-  return NG_WORDS.reduce((acc, word) => acc.split(word).join(""), text);
-}
+// 具体要素や文脈の穴埋めは 5ch/Reddit 等ユーザー投稿由来の生コンテンツから抜き出すため、
+// 差別的・攻撃的表現の混入防止に F9 の moderation/ng-words.ts の stripNgWords を直接適用する
+// （NGワード語彙は moderation 側に一元化。ここで別途語彙を持たない）。
 
 /** ASCII(半角)は0.5、それ以外(全角)は1として数える「全角文字相当」の長さ。 */
 export function zenkakuLength(text: string): number {
@@ -245,7 +222,7 @@ export function generateHookTitle(input: TitleGenInput): string {
   const sourceText = `${input.title}\n${input.content}`;
   const elements = extractConcreteElements(sourceText);
   const rawSubject = elements[0] ?? fallbackSubject(input);
-  const safeSubject = stripUnsafe(rawSubject);
+  const safeSubject = stripNgWords(rawSubject);
   const subject = safeSubject.length > 0 ? safeSubject : fallbackSubject(input);
 
   const label = pickFromArray(LABELS, sourceText);
@@ -272,7 +249,7 @@ export function generateHookTitle(input: TitleGenInput): string {
   const maxCoreLen = MAX_TITLE_LENGTH - fixedLen;
   const desiredCoreLen = Math.min(maxCoreLen, minCoreLen + 4);
   const contentPool = input.content.trim();
-  const contextPool = stripUnsafe(
+  const contextPool = stripNgWords(
     contentPool.length > 0 ? `${contentPool}。${FILLER_PADDING}` : FILLER_PADDING,
   );
   let core = buildCoreText(contextPool, desiredCoreLen);

@@ -13,7 +13,11 @@ async function main() {
   const summary = await generateArticlesForQueue();
   for (const r of summary.results) {
     if (r.status === "success") {
-      console.log(`  [success] collectedItemId=${r.collectedItemId} -> articleId=${r.articleId} slug=${r.slug}`);
+      const pub =
+        r.publicationStatus === "held" ? `held(理由:${r.heldReason})` : "published";
+      console.log(
+        `  [success] collectedItemId=${r.collectedItemId} -> articleId=${r.articleId} slug=${r.slug} status=${pub}`,
+      );
     } else {
       console.log(`  [failure] collectedItemId=${r.collectedItemId}: ${r.errorMessage}`);
     }

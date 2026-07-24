@@ -26,7 +26,16 @@ export type ArticleDetail = ArticleSummary & {
   body: ArticleBodyBlock[];
   tags: string[];
   sources: { label: string; url: string }[];
+  /** 未確定・噂レベルの情報と判定された記事に付与される「未確認」ラベル対象フラグ（F9）。 */
+  unconfirmed: boolean;
 };
+
+/**
+ * 閲覧系クエリで必ず適用する公開状態フィルタ（F9）。
+ * 「公開記事は必ず安全フィルタ通過済み」という不変条件を守るため、一覧・カテゴリ・タグ・検索・
+ * 人気・関連記事・個別記事表示のすべてのクエリはこの条件を経由し、保留(held)記事を露出させない。
+ */
+export const PUBLISHED_ONLY = { status: "published" } as const;
 
 /** 一覧カードに必要なスカラー列だけを取得する select（本文・リレーションは取らない）。 */
 export const summarySelect = {
@@ -53,28 +62,31 @@ function toDetail(article: ArticleWithRelations): ArticleDetail {
     body: parseArticleBody(article.body),
     tags: article.tags.map((t) => t.tag.name),
     sources: article.sources.map((s) => ({ label: s.label, url: s.url })),
+    unconfirmed: article.unconfirmed,
   };
 }
 
 /**
- * トップページ用: 全記事を新しい順で取得する。
+ * トップページ用: 公開済み記事のみを新しい順で取得する。
  * 並べ替えは publishedAt インデックスで DB 側に押し下げ、カード表示に不要な本文・リレーションは取得しない。
  */
 export async function listArticles(): Promise<ArticleSummary[]> {
   return prisma.article.findMany({
+    where: PUBLISHED_ONLY,
     select: summarySelect,
     orderBy: { publishedAt: "desc" },
   });
 }
 
 /**
- * slug から記事詳細を取得する。存在しない場合は null（呼び出し側で 404 を判定する）。
+ * slug から公開済み記事の詳細を取得する。存在しない、または保留(held)中の場合は null
+ * （呼び出し側で 404 を判定する。保留記事は slug を知っていても直接閲覧できない）。
  * 同一リクエスト内での重複呼び出し（generateMetadata とページ本体）は React cache でメモ化する。
  */
 export const getArticleBySlug = cache(
   async (slug: string): Promise<ArticleDetail | null> => {
-    const article = await prisma.article.findUnique({
-      where: { slug },
+    const article = await prisma.article.findFirst({
+      where: { slug, ...PUBLISHED_ONLY },
       ...articleWithRelations,
     });
     if (!article) return null;
@@ -83,34 +95,35 @@ export const getArticleBySlug = cache(
 );
 
 /**
- * カテゴリ一覧ページ用: 指定カテゴリの記事だけを新しい順で取得する（F2）。
+ * カテゴリ一覧ページ用: 指定カテゴリの公開済み記事だけを新しい順で取得する（F2）。
  * 該当記事が0件の場合は空配列を返す（呼び出し側で空状態を表示、エラーにはしない）。
  */
 export async function listArticlesByCategory(category: string): Promise<ArticleSummary[]> {
   return prisma.article.findMany({
-    where: { category },
+    where: { category, ...PUBLISHED_ONLY },
     select: summarySelect,
     orderBy: { publishedAt: "desc" },
   });
 }
 
 /**
- * タグ一覧ページ用: 指定タグを持つ記事だけを新しい順で取得する（F2）。
+ * タグ一覧ページ用: 指定タグを持つ公開済み記事だけを新しい順で取得する（F2）。
  * 未知のタグ名でも例外にはせず空配列を返す。
  */
 export async function listArticlesByTag(tagName: string): Promise<ArticleSummary[]> {
   return prisma.article.findMany({
-    where: { tags: { some: { tag: { name: tagName } } } },
+    where: { tags: { some: { tag: { name: tagName } } }, ...PUBLISHED_ONLY },
     select: summarySelect,
     orderBy: { publishedAt: "desc" },
   });
 }
 
 /**
- * サイドバー（PC）／記事下（スマホ）の人気記事ランキング用: 閲覧数（viewCount）降順に取得する（F3）。
+ * サイドバー（PC）／記事下（スマホ）の人気記事ランキング用: 公開済み記事を閲覧数（viewCount）降順に取得する（F3）。
  */
 export async function listPopularArticles(limit = 5): Promise<ArticleSummary[]> {
   return prisma.article.findMany({
+    where: PUBLISHED_ONLY,
     select: summarySelect,
     orderBy: { viewCount: "desc" },
     take: limit,
@@ -147,7 +160,7 @@ export async function listRelatedArticles(
   // この最新プール内で成立するので「関連記事は最低 limit 件」の契約は維持される。
   const RELATED_CANDIDATE_POOL = 60;
   const rows = await prisma.article.findMany({
-    where: { slug: { not: article.slug } },
+    where: { slug: { not: article.slug }, ...PUBLISHED_ONLY },
     select: { ...summarySelect, tags: { include: { tag: true } } },
     orderBy: { publishedAt: "desc" },
     take: RELATED_CANDIDATE_POOL,
