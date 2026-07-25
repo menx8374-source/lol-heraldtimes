@@ -237,32 +237,69 @@ export async function voteOnComment(
   return { ok: true, goodCount: updated.goodCount, badCount: updated.badCount };
 }
 
-export type RecentCommentView = {
+export type FeaturedCommentView = {
   excerpt: string;
   articleSlug: string;
   articleTitle: string;
   createdAt: Date;
+  /** 被返信数（このコメントに付いた返信の件数）。 */
+  replyCount: number;
+  goodCount: number;
+  badCount: number;
 };
 
+/** 「注目コメント」の集計対象期間（直近N日）。この範囲に投稿された公開コメントを候補にする。 */
+const FEATURED_COMMENT_WINDOW_DAYS = 3;
+/** エンゲージメント順に並べ替える前に読み込む候補上限（期間内でも無界フェッチにしないため）。 */
+const FEATURED_COMMENT_CANDIDATE_POOL = 300;
+
 /**
- * サイドバーの「新着コメント」ウィジェット用: 全記事横断で直近の公開コメントを新しい順に取得する。
- * 対象記事が公開中(published)のもののみに絞り、保留記事へのコメントを露出させない。
+ * サイドバーの「注目コメント」ウィジェット用: 直近 FEATURED_COMMENT_WINDOW_DAYS 日間に投稿された
+ * 公開コメントのうち、返信数＋賛否リアクション数（👍👎）が多い順に上位 limit 件を返す。
+ * 対象は公開記事の公開コメントのみ（保留記事・保留コメントは露出しない）。エンゲージメント0のコメントは
+ * 「注目」に含めない。トップレベル・返信いずれも1コメントとして被返信数＋good/badで評価する。
+ * 期間内でも新しい順に候補プールを有界化してから集計し、無界フェッチにはしない。
  */
-export async function listRecentComments(limit = 5): Promise<RecentCommentView[]> {
+export async function listFeaturedComments(
+  limit = 5,
+  now: Date = new Date(),
+): Promise<FeaturedCommentView[]> {
+  const cutoff = new Date(now.getTime() - FEATURED_COMMENT_WINDOW_DAYS * 24 * 60 * 60 * 1000);
   const rows = await prisma.articleComment.findMany({
-    where: { status: "published", article: { status: "published" } },
+    where: {
+      status: "published",
+      article: { status: "published" },
+      createdAt: { gte: cutoff },
+    },
     orderBy: { createdAt: "desc" },
-    take: limit,
+    take: FEATURED_COMMENT_CANDIDATE_POOL,
     select: {
       body: true,
       createdAt: true,
+      goodCount: true,
+      badCount: true,
       article: { select: { slug: true, title: true } },
+      _count: { select: { replies: true } },
     },
   });
-  return rows.map((r) => ({
-    excerpt: buildCommentExcerpt(r.body),
-    articleSlug: r.article.slug,
-    articleTitle: r.article.title,
-    createdAt: r.createdAt,
-  }));
+
+  const scored = rows.map((r) => {
+    const replyCount = r._count.replies;
+    const view: FeaturedCommentView = {
+      excerpt: buildCommentExcerpt(r.body),
+      articleSlug: r.article.slug,
+      articleTitle: r.article.title,
+      createdAt: r.createdAt,
+      replyCount,
+      goodCount: r.goodCount,
+      badCount: r.badCount,
+    };
+    return { view, score: replyCount + r.goodCount + r.badCount };
+  });
+
+  return scored
+    .filter((c) => c.score > 0)
+    .sort((a, b) => b.score - a.score || b.view.createdAt.getTime() - a.view.createdAt.getTime())
+    .slice(0, limit)
+    .map((c) => c.view);
 }

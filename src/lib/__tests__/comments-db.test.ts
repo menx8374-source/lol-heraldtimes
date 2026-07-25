@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import {
   createComment,
   listPublishedCommentsBySlug,
-  listRecentComments,
+  listFeaturedComments,
   voteOnComment,
 } from "@/lib/comments-db";
 import { POST } from "@/app/api/articles/[slug]/comments/route";
@@ -351,23 +351,50 @@ describe("POST /api/articles/[slug]/comments/[number]/vote（Route Handler, 拡�
   });
 });
 
-describe("listRecentComments（新着コメントウィジェット, 拡張E2）", () => {
-  it("公開記事の公開コメントのみを新しい順に返す", async () => {
+describe("listFeaturedComments（注目コメント: 直近3日・返信+賛否の多い順）", () => {
+  it("直近3日の公開コメントを返信+賛否の多い順に返し、無反応・保留記事・期間外は除外する", async () => {
     const published = await createArticle({ slug: "published-article" });
     const held = await createArticle({ slug: "held-article", status: "held" });
 
-    await createComment(published.id, { body: "1件目のコメント" });
-    await createComment(published.id, { body: "2件目のコメント" });
-    // 保留記事へのコメントは直接投入（createCommentは保留記事に対して呼ばれない実装のため、
-    // 「保留記事に紐づく公開コメントが万一存在しても露出しない」ことを確認する目的で直接insertする）。
-    await prisma.articleComment.create({
-      data: { articleId: held.id, number: 1, name: "名無しさん", body: "保留記事へのコメント", status: "published" },
+    // A: 返信2 + good1 → score 3（最も注目）
+    const a = await createComment(published.id, { body: "注目される親コメントA" });
+    const aNumber = a.outcome === "published" ? a.comment.number : 0;
+    await createComment(published.id, { body: "Aへの返信その1", parentNumber: aNumber });
+    await createComment(published.id, { body: "Aへの返信その2", parentNumber: aNumber });
+    // B: good2 → score 2
+    await createComment(published.id, { body: "そこそこ注目コメントB" });
+    // C: 返信・賛否なし → score 0（注目に含めない）
+    await createComment(published.id, { body: "無風のコメントC" });
+    await prisma.articleComment.updateMany({
+      where: { articleId: published.id, body: "注目される親コメントA" },
+      data: { goodCount: 1 },
+    });
+    await prisma.articleComment.updateMany({
+      where: { articleId: published.id, body: "そこそこ注目コメントB" },
+      data: { goodCount: 2 },
     });
 
-    const recent = await listRecentComments(5);
-    expect(recent).toHaveLength(2);
-    expect(recent.every((c) => c.articleTitle === "コメント対象記事")).toBe(true);
-    expect(recent.some((c) => c.excerpt.includes("保留記事"))).toBe(false);
+    // 保留記事の公開コメント（高good）は公開サイトに露出しないため除外される。
+    await prisma.articleComment.create({
+      data: { articleId: held.id, number: 1, name: "名無しさん", body: "保留記事の注目コメント", status: "published", goodCount: 9 },
+    });
+    // 期間外（4日前）の高エンゲージメントコメントは直近3日の対象外。
+    await createComment(published.id, { body: "4日前の古い注目コメント" });
+    await prisma.articleComment.updateMany({
+      where: { articleId: published.id, body: "4日前の古い注目コメント" },
+      data: { goodCount: 20, createdAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000) },
+    });
+
+    const featured = await listFeaturedComments(5);
+    const excerpts = featured.map((c) => c.excerpt);
+    expect(featured).toHaveLength(2); // A, B のみ（C=無反応・保留記事・期間外は除外）
+    expect(excerpts[0]).toContain("親コメントA"); // score3 が先頭
+    expect(excerpts[1]).toContain("コメントB");
+    expect(excerpts.some((e) => e.includes("無風"))).toBe(false);
+    expect(excerpts.some((e) => e.includes("保留記事"))).toBe(false);
+    expect(excerpts.some((e) => e.includes("古い"))).toBe(false);
+    expect(featured[0].replyCount).toBe(2);
+    expect(featured[0].goodCount).toBe(1);
   });
 });
 

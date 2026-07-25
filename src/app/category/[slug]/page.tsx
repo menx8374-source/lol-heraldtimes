@@ -1,12 +1,16 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { categoryLabelForSlug } from "@/lib/categories";
-import { listArticlesByCategory } from "@/lib/articles";
+import { listArticlesByCategory, listPopularArticles } from "@/lib/articles";
 import { parsePageParam } from "@/lib/pagination";
 import { ArticleList } from "@/components/article-list";
 import { PageWithSidebar } from "@/components/page-with-sidebar";
+import { PickupCarousel } from "@/components/pickup-carousel";
 import { Pagination } from "@/components/pagination";
 import { Breadcrumbs } from "@/components/breadcrumbs";
+
+/** 注目記事PICKUPの表示件数（トップページと揃える）。 */
+const PICKUP_LIMIT = 5;
 
 type Props = {
   params: Promise<{ slug: string }>;
@@ -31,7 +35,11 @@ export default async function CategoryPage({ params, searchParams }: Props) {
 
   const { page: pageParam } = await searchParams;
   const requestedPage = parsePageParam(pageParam);
-  const result = await listArticlesByCategory(category, requestedPage);
+  // 注目記事PICKUPはカテゴリを問わない全体の注目記事（トップページと同じ）を表示する。
+  const [result, pickup] = await Promise.all([
+    listArticlesByCategory(category, requestedPage),
+    listPopularArticles(PICKUP_LIMIT),
+  ]);
 
   return (
     <PageWithSidebar>
@@ -41,6 +49,7 @@ export default async function CategoryPage({ params, searchParams }: Props) {
           { name: category, path: `/category/${slug}` },
         ]}
       />
+      <PickupCarousel articles={pickup} />
       <h1 className="mb-4 text-lg font-bold">{category}</h1>
       <ArticleList articles={result.items} emptyMessage="記事がありません" />
       <Pagination

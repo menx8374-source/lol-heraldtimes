@@ -1,9 +1,9 @@
 import { listPopularArticles } from "@/lib/articles";
-import { listRecentComments } from "@/lib/comments-db";
+import { listFeaturedComments } from "@/lib/comments-db";
 import { listPopularTags } from "@/lib/tags";
 import { listArchiveMonths } from "@/lib/archive";
 import { PopularRanking } from "@/components/popular-ranking";
-import { RecentCommentsWidget } from "@/components/recent-comments-widget";
+import { FeaturedCommentsWidget } from "@/components/featured-comments-widget";
 import { TagCloud } from "@/components/tag-cloud";
 import { ArchiveWidget } from "@/components/archive-widget";
 import { AdSlot } from "@/components/ad-slot";
@@ -22,9 +22,9 @@ export async function PageWithSidebar({
 }: {
   children: React.ReactNode;
 }) {
-  const [popular, recentComments, popularTags, archiveMonths] = await Promise.all([
+  const [popular, featuredComments, popularTags, archiveMonths] = await Promise.all([
     listPopularArticles(5),
-    listRecentComments(5),
+    listFeaturedComments(5),
     listPopularTags(20),
     listArchiveMonths(ARCHIVE_WIDGET_MONTH_LIMIT),
   ]);
@@ -36,7 +36,7 @@ export async function PageWithSidebar({
         <PopularRanking
           initialArticles={popular.map((a) => ({ slug: a.slug, title: a.title }))}
         />
-        <RecentCommentsWidget comments={recentComments} />
+        <FeaturedCommentsWidget comments={featuredComments} />
         <TagCloud tags={popularTags} />
         <ArchiveWidget months={archiveMonths.slice(0, ARCHIVE_WIDGET_MONTH_LIMIT)} />
         <AdSlot position="sidebar" />
