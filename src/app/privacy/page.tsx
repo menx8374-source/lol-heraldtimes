@@ -14,9 +14,20 @@ export default function PrivacyPage() {
       <section className="mt-6">
         <h2 className="text-base font-bold">アクセス解析について</h2>
         <p className="mt-2 text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
-          本サイトは、サービス改善のためアクセス解析ツール（Cookie 等の技術を利用する場合が
-          あります）を利用することがあります。取得され得る情報は、ブラウザの種類・閲覧ページ・
-          滞在時間・参照元等、個人を特定しない範囲の情報です。
+          本サイトは、サービス改善のためアクセス解析ツール（Google Analytics 等、Cookie 等の
+          技術を利用する場合があります）を利用することがあります。取得され得る情報は、ブラウザの
+          種類・閲覧ページ・滞在時間・参照元等、個人を特定しない範囲の情報です。
+        </p>
+      </section>
+
+      <section className="mt-6">
+        <h2 className="text-base font-bold">Cookieの使用と同意について</h2>
+        <p className="mt-2 text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
+          初回訪問時に画面下部へCookie使用に関する同意バナーを表示します。「同意する」を
+          選択いただいた場合のみ、アクセス解析・広告のためのCookieを使用するタグ（Google
+          Analytics 等）を読み込みます。「拒否/後で」を選択した場合、これらのタグは読み込まれません。
+          同意状況はブラウザに保存され、次回訪問時は同じ選択が適用されます（保存内容を消去すると
+          再度バナーが表示されます）。
         </p>
       </section>
 

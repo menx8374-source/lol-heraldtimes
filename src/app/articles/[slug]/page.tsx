@@ -188,6 +188,9 @@ export default async function ArticlePage({ params }: Props) {
         <section className="mt-8 border-t border-neutral-200 pt-4 dark:border-neutral-800">
           <h2 className="mb-3 text-sm font-bold text-neutral-600 dark:text-neutral-300">関連記事</h2>
           <ArticleList articles={related} emptyMessage="関連記事はありません" />
+          {/* マッチドコンテンツ枠（拡張E5）。自サイトの関連記事(上記)に加え、記事末尾に
+              広告枠を併設する（AdSense Matched Content相当）。 */}
+          <AdSlot position="matched-content" />
         </section>
 
         <div className="mt-6">

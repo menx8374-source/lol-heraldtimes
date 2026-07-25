@@ -41,6 +41,11 @@ export async function PageWithSidebar({
         <ArchiveWidget months={archiveMonths.slice(0, ARCHIVE_WIDGET_MONTH_LIMIT)} />
         <AdSlot position="sidebar" />
         <BlogRankingSlot />
+        {/* 追従(sticky)サイドバー広告（拡張E5）。PC(lg以上)ではスクロールに追従し、
+            モバイルでは通常のブロックとして表示する（sticky指定なし）。 */}
+        <div className="lg:sticky lg:top-20">
+          <AdSlot position="sidebar-sticky" />
+        </div>
       </aside>
     </div>
   );

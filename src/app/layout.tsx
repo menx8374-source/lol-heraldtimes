@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { SiteChrome } from "@/components/site-chrome";
 import { getSiteNotice } from "@/lib/notice";
+import { getAdSlotCode } from "@/lib/ads/config";
 
 export const metadata: Metadata = {
   title: {
@@ -29,6 +30,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   const notice = getSiteNotice();
+  // アンカー広告（拡張E5）のタグは非公開env(AD_SLOT_ANCHOR)のためサーバー側で読み、
+  // クライアントコンポーネント(SiteChrome→AnchorAdBar)へpropsで渡す(NoticeBarと同じ方式)。
+  const anchorAdCode = getAdSlotCode("anchor");
 
   return (
     <html lang="ja" className="h-full antialiased">
@@ -36,7 +40,9 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: NO_FLASH_THEME_SCRIPT }} />
       </head>
       <body className="min-h-full flex flex-col bg-neutral-100 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
-        <SiteChrome notice={notice}>{children}</SiteChrome>
+        <SiteChrome notice={notice} anchorAdCode={anchorAdCode}>
+          {children}
+        </SiteChrome>
       </body>
     </html>
   );

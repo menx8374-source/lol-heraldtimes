@@ -1,11 +1,14 @@
 import { getAdSlotCode, type AdSlotPosition } from "@/lib/ads/config";
 
-const POSITION_LABELS: Record<AdSlotPosition, string> = {
+export const POSITION_LABELS: Record<AdSlotPosition, string> = {
   "article-top": "記事上部広告",
   "article-in-body": "記事中広告",
   "article-bottom": "記事下広告",
   sidebar: "サイドバー広告",
-  listing: "一覧広告",
+  listing: "インフィード広告",
+  "sidebar-sticky": "追従サイドバー広告",
+  anchor: "アンカー広告",
+  "matched-content": "関連コンテンツ",
 };
 
 /**
