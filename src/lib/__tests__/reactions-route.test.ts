@@ -88,4 +88,43 @@ describe("POST /api/articles/[slug]/reactions", () => {
     const res = await POST(makeRequest({ emoji: "👍" }), makeParams("nonexistent-slug"));
     expect(res.status).toBe(404);
   });
+
+  it("op:'add'を明示しても加算する（後方互換の既定と同じ挙動）", async () => {
+    const res = await POST(makeRequest({ emoji: "👍", op: "add" }), makeParams("reaction-target"));
+    const data = await res.json();
+    expect(data.counts["👍"]).toBe(1);
+  });
+
+  it("op:'remove'で1減算する（拡張E13: トグルの取り消し）", async () => {
+    await POST(makeRequest({ emoji: "👍", op: "add" }), makeParams("reaction-target"));
+    const res = await POST(makeRequest({ emoji: "👍", op: "remove" }), makeParams("reaction-target"));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.counts["👍"]).toBe(0);
+  });
+
+  it("op:'remove'はカウントを0未満にしない（floorガード）", async () => {
+    const res = await POST(makeRequest({ emoji: "👍", op: "remove" }), makeParams("reaction-target"));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.counts["👍"]).toBe(0);
+
+    // 未登録（レコード自体が存在しない）状態からの減算でも0未満にならない。
+    const res2 = await POST(makeRequest({ emoji: "👍", op: "remove" }), makeParams("reaction-target"));
+    const data2 = await res2.json();
+    expect(data2.counts["👍"]).toBe(0);
+  });
+
+  it("不正なopは400を返し、カウントを変更しない", async () => {
+    const res = await POST(makeRequest({ emoji: "👍", op: "toggle" }), makeParams("reaction-target"));
+    expect(res.status).toBe(400);
+  });
+
+  it("add→addで2、addの後removeして再度addすると1に戻る（切替相当の一連の操作）", async () => {
+    await POST(makeRequest({ emoji: "👍", op: "add" }), makeParams("reaction-target"));
+    await POST(makeRequest({ emoji: "👍", op: "remove" }), makeParams("reaction-target"));
+    const res = await POST(makeRequest({ emoji: "👍", op: "add" }), makeParams("reaction-target"));
+    const data = await res.json();
+    expect(data.counts["👍"]).toBe(1);
+  });
 });

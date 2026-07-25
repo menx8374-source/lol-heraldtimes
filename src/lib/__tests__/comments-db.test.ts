@@ -243,6 +243,34 @@ describe("voteOnComment（賛否投票, 拡張E8）", () => {
     const result = await voteOnComment(article.slug, comment.number, "good");
     expect(result).toEqual({ ok: false });
   });
+
+  it("op:'remove'で1減算する（拡張E13: トグルの取り消し）", async () => {
+    const article = await createArticle();
+    const created = await createComment(article.id, { body: "投票対象2" });
+    const number = created.outcome === "published" ? created.comment.number : -1;
+
+    await voteOnComment(article.slug, number, "good", "add");
+    const removed = await voteOnComment(article.slug, number, "good", "remove");
+    expect(removed).toEqual({ ok: true, goodCount: 0, badCount: 0 });
+  });
+
+  it("op:'remove'はカウントを0未満にしない（floorガード）", async () => {
+    const article = await createArticle();
+    const created = await createComment(article.id, { body: "投票対象3" });
+    const number = created.outcome === "published" ? created.comment.number : -1;
+
+    const result = await voteOnComment(article.slug, number, "bad", "remove");
+    expect(result).toEqual({ ok: true, goodCount: 0, badCount: 0 });
+  });
+
+  it("op省略時は後方互換で'add'扱いになる", async () => {
+    const article = await createArticle();
+    const created = await createComment(article.id, { body: "投票対象4" });
+    const number = created.outcome === "published" ? created.comment.number : -1;
+
+    const result = await voteOnComment(article.slug, number, "good");
+    expect(result).toEqual({ ok: true, goodCount: 1, badCount: 0 });
+  });
 });
 
 function makeVoteRequest(body: unknown): Request {
@@ -298,6 +326,28 @@ describe("POST /api/articles/[slug]/comments/[number]/vote（Route Handler, 拡�
     await createArticle();
     const res = await votePOST(makeVoteRequest({ type: "good" }), makeVoteParams("comment-target", "999"));
     expect(res.status).toBe(404);
+  });
+
+  it("op:'remove'で1減算し、0未満にはならない（拡張E13）", async () => {
+    const article = await createArticle({ slug: "vote-route-op-target" });
+    const created = await createComment(article.id, { body: "投票対象route" });
+    const number = created.outcome === "published" ? created.comment.number : -1;
+    const params = () => makeVoteParams("vote-route-op-target", String(number));
+
+    await votePOST(makeVoteRequest({ type: "good", op: "add" }), params());
+    const removed = await votePOST(makeVoteRequest({ type: "good", op: "remove" }), params());
+    const removedData = await removed.json();
+    expect(removedData).toEqual({ goodCount: 0, badCount: 0 });
+
+    const floored = await votePOST(makeVoteRequest({ type: "good", op: "remove" }), params());
+    const flooredData = await floored.json();
+    expect(flooredData).toEqual({ goodCount: 0, badCount: 0 });
+  });
+
+  it("不正なopは400を返す", async () => {
+    await createArticle();
+    const res = await votePOST(makeVoteRequest({ type: "good", op: "toggle" }), makeVoteParams("comment-target", "1"));
+    expect(res.status).toBe(400);
   });
 });
 

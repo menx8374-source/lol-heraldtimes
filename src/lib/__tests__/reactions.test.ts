@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { REACTION_EMOJIS, isValidReactionEmoji, mergeReactionCounts } from "@/lib/reactions";
+import { REACTION_EMOJIS, isValidReactionEmoji, isValidReactionOp, mergeReactionCounts } from "@/lib/reactions";
 
 describe("isValidReactionEmoji", () => {
   it("既定の絵文字は true", () => {
@@ -35,5 +35,17 @@ describe("mergeReactionCounts", () => {
   it("既定外の絵文字（不正データ）は無視する", () => {
     const result = mergeReactionCounts([{ emoji: "🍣", count: 99 }]);
     expect(Object.values(result).every((c) => c === 0)).toBe(true);
+  });
+});
+
+describe("isValidReactionOp（拡張E13）", () => {
+  it("addとremoveはtrue", () => {
+    expect(isValidReactionOp("add")).toBe(true);
+    expect(isValidReactionOp("remove")).toBe(true);
+  });
+
+  it("それ以外はfalse", () => {
+    expect(isValidReactionOp("increment")).toBe(false);
+    expect(isValidReactionOp("")).toBe(false);
   });
 });

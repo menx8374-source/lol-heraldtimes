@@ -7,6 +7,7 @@
 import { findNgWord } from "@/lib/moderation/ng-words";
 import { detectPersonalAttack } from "@/lib/moderation/personal-attack";
 import { extractAnchors } from "@/lib/generation/thread-format";
+import { isValidToggleOp, type ToggleOp } from "@/lib/toggle-selection";
 
 export const COMMENT_BODY_MAX_LENGTH = 1000;
 export const COMMENT_NAME_MAX_LENGTH = 30;
@@ -60,6 +61,12 @@ export type CommentVoteType = "good" | "bad";
 export function isValidCommentVoteType(value: string): value is CommentVoteType {
   return value === "good" || value === "bad";
 }
+
+/** コメント投票APIの操作種別（拡張E13: 加算/減算）。共通の ToggleOp を単一ソースとして用いる。 */
+export type CommentVoteOp = ToggleOp;
+
+/** 値がコメント投票操作種別("add"/"remove")のいずれかであるかを判定する型ガード（ToggleOp 共用）。 */
+export const isValidCommentVoteOp = isValidToggleOp;
 
 export type CommentModerationResult =
   | { status: "published" }

@@ -16,6 +16,7 @@ import {
   type CommentBase,
   type CommentView,
   type CommentVoteType,
+  type CommentVoteOp,
   type CreateCommentResult,
 } from "@/lib/comments";
 
@@ -200,25 +201,37 @@ export async function listPublishedCommentsBySlug(slug: string): Promise<Comment
 }
 
 /**
- * コメント・返信への賛否投票（拡張E8）。ログイン無し方針のためユーザー単位の多重防止はせず、
- * 存在しない/保留中コメント・非公開記事への投票は加算しない（信頼境界: 対象IDはクライアント入力）。
+ * コメント・返信への賛否投票（拡張E8、拡張E13で1ユーザー1回制限に対応）。ログイン無し方針
+ * のためユーザー単位の多重防止はサーバー側では行わず、`op`（"add"省略時既定/"remove"）で
+ * 加算・減算の両方に対応する。減算は0未満にならない（floorガード）。存在しない/保留中コメント・
+ * 非公開記事への投票は加算しない（信頼境界: 対象IDはクライアント入力）。
  */
 export async function voteOnComment(
   slug: string,
   number: number,
   type: CommentVoteType,
+  op: CommentVoteOp = "add",
 ): Promise<{ ok: true; goodCount: number; badCount: number } | { ok: false }> {
   // 記事の公開判定はコメント取得のリレーションフィルタに畳み込み、往復を1回減らす。
   // article: PUBLISHED_ONLY により非公開記事のコメントはヒットしない。
   const comment = await prisma.articleComment.findFirst({
     where: { number, status: "published", article: { slug, ...PUBLISHED_ONLY } },
-    select: { id: true },
+    select: { id: true, goodCount: true, badCount: true },
   });
   if (!comment) return { ok: false };
 
+  const data =
+    op === "remove"
+      ? type === "good"
+        ? { goodCount: Math.max(0, comment.goodCount - 1) }
+        : { badCount: Math.max(0, comment.badCount - 1) }
+      : type === "good"
+        ? { goodCount: { increment: 1 } }
+        : { badCount: { increment: 1 } };
+
   const updated = await prisma.articleComment.update({
     where: { id: comment.id },
-    data: type === "good" ? { goodCount: { increment: 1 } } : { badCount: { increment: 1 } },
+    data,
     select: { goodCount: true, badCount: true },
   });
   return { ok: true, goodCount: updated.goodCount, badCount: updated.badCount };
