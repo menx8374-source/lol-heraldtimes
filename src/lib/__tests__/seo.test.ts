@@ -36,18 +36,65 @@ describe("buildArticleDescription", () => {
   });
 });
 
-describe("buildArticleExcerpt（記事カードの本文抜粋, 拡張E1）", () => {
-  it("buildArticleDescriptionより短い上限（80字）で切り詰める", () => {
+describe("buildArticleExcerpt（記事カードの本文抜粋, 拡張E1・E9）", () => {
+  it("reactionブロックが無い場合はbuildArticleDescriptionより短い上限（100字）で切り詰める", () => {
     const longText = "あ".repeat(200);
     const blocks: ArticleBodyBlock[] = [{ type: "paragraph", text: longText }];
     const result = buildArticleExcerpt(blocks);
-    expect(result.length).toBe(81); // 80文字 + "…"
+    expect(result.length).toBe(101); // 100文字 + "…"
     expect(result.endsWith("…")).toBe(true);
   });
 
   it("短い本文はそのまま返す（切り詰めない）", () => {
     const blocks: ArticleBodyBlock[] = [{ type: "paragraph", text: "短い本文の段落です。" }];
     expect(buildArticleExcerpt(blocks)).toBe("短い本文の段落です。");
+  });
+
+  it("reactionブロックを含む記事は「1レス目の本文」から抜粋する（段落より優先）", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "heading", text: "反応まとめ" },
+      {
+        type: "reaction",
+        number: 1,
+        name: "国内プレイヤーさん",
+        lines: [{ text: "新チャンピオンの調整が来た、これは強すぎる" }],
+      },
+      {
+        type: "reaction",
+        number: 2,
+        name: "国内プレイヤーさん",
+        lines: [{ text: "確かに強そう" }],
+      },
+    ];
+    expect(buildArticleExcerpt(blocks)).toBe("新チャンピオンの調整が来た、これは強すぎる");
+  });
+
+  it("reaction ブロックの出現順に関わらずレス番号(number)が最小のものを1レス目として使う", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "reaction", number: 3, name: "海外プレイヤーさん", lines: [{ text: "3番目のレス" }] },
+      { type: "reaction", number: 1, name: "海外プレイヤーさん", lines: [{ text: "1番目のレスの本文" }] },
+    ];
+    expect(buildArticleExcerpt(blocks)).toBe("1番目のレスの本文");
+  });
+
+  it("`>>N` だけのアンカー行は抜粋から除外し、実際の発言内容を使う", () => {
+    const blocks: ArticleBodyBlock[] = [
+      {
+        type: "reaction",
+        number: 1,
+        name: "国内プレイヤーさん",
+        lines: [{ text: ">>0" }, { text: "これが1レス目の実際の発言内容です" }],
+      },
+    ];
+    expect(buildArticleExcerpt(blocks)).toBe("これが1レス目の実際の発言内容です");
+  });
+
+  it("reactionブロックを持たない記事（Riot公式形式）は本文冒頭段落からの抜粋にフォールバックする", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "heading", text: "速報" },
+      { type: "paragraph", text: "新パッチの詳細が公式から発表された。" },
+    ];
+    expect(buildArticleExcerpt(blocks)).toBe("新パッチの詳細が公式から発表された。");
   });
 });
 

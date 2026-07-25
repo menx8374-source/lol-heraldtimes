@@ -2,30 +2,73 @@
  * SEO出力の純関数群（F13）。LLM非依存・DB非依存で、メタディスクリプション生成と
  * JSON-LD の安全な直列化だけを担う（ページ側の generateMetadata/構造化データ埋め込みから使う）。
  */
-import { blockText, type ArticleBodyBlock } from "@/lib/article-body";
+import {
+  blockText,
+  type ArticleBodyBlock,
+  type ArticleBodyReactionBlock,
+} from "@/lib/article-body";
 
 const DESCRIPTION_MAX_LENGTH = 120;
-/** 記事カードの本文抜粋（拡張E1）はメタディスクリプションより短く、先頭〜80字程度にする。 */
-const EXCERPT_MAX_LENGTH = 80;
+/**
+ * 記事カードの本文抜粋（拡張E1、拡張E9でおばにゅー風レイアウトに合わせ80→100字へ拡張）は
+ * メタディスクリプションより短く、先頭〜100字程度にする。
+ */
+const EXCERPT_MAX_LENGTH = 100;
+
+/** 空白（改行含む）を1つの半角スペースに正規化し、`maxLength` を超える場合は省略記号付きで切り詰める。 */
+function truncate(text: string, maxLength: number): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength)}…`;
+}
+
+/** 最初の段落ブロック（無ければ最初のブロック）のテキストを返す。ブロックが空なら空文字。 */
+function firstParagraphText(blocks: ArticleBodyBlock[]): string {
+  const firstParagraph = blocks.find((b) => b.type === "paragraph");
+  return firstParagraph ? blockText(firstParagraph) : blocks[0] ? blockText(blocks[0]) : "";
+}
 
 /**
  * 記事本文ブロックから要約テキストを作る。最初の段落（無ければ最初のブロック）の
- * テキストを空白正規化し、`maxLength` で省略する。メタディスクリプション（120字）と
- * 記事カードの本文抜粋（80字）の両方でこの共通ロジックを使う。
+ * テキストを空白正規化し、`maxLength` で省略する。メタディスクリプション（120字）で使う
+ * （記事カードの本文抜粋は拡張E9で `buildArticleExcerpt` に分岐ロジックが分かれたため、
+ * こちらは常に段落先頭を使う従来どおりの挙動を維持する）。
  */
 export function buildArticleDescription(
   blocks: ArticleBodyBlock[],
   maxLength: number = DESCRIPTION_MAX_LENGTH,
 ): string {
-  const firstParagraph = blocks.find((b) => b.type === "paragraph");
-  const text = (firstParagraph ? blockText(firstParagraph) : blocks[0] ? blockText(blocks[0]) : "");
-  const normalized = text.replace(/\s+/g, " ").trim();
-  return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength)}…`;
+  return truncate(firstParagraphText(blocks), maxLength);
 }
 
-/** 記事カード用の短い本文抜粋（拡張E1）。`buildArticleDescription` を短い上限長で流用する。 */
+/**
+ * 反応まとめ記事（拡張E9・まとめ速報型/5ch・reddit）の「1レス目」の本文テキストを取り出す。
+ * レス番号（number）が最小の reaction ブロックを1レス目とみなす（本文中の出現順とは限らないため）。
+ * `>>N` のみのアンカー行は本文として不自然なため除外する。reaction ブロックが無い記事（Riot公式形式）
+ * では null を返し、呼び出し側で段落抜粋にフォールバックさせる。
+ */
+function firstReactionLineText(blocks: ArticleBodyBlock[]): string | null {
+  const reactionBlocks = blocks.filter(
+    (b): b is ArticleBodyReactionBlock => b.type === "reaction",
+  );
+  if (reactionBlocks.length === 0) return null;
+
+  const firstRes = reactionBlocks.reduce((min, b) => (b.number < min.number ? b : min));
+  const text = firstRes.lines
+    .map((line) => line.text)
+    .filter((line) => !/^>>\d+$/.test(line.trim()))
+    .join(" ")
+    .trim();
+  return text.length > 0 ? text : null;
+}
+
+/**
+ * 記事カード用の短い本文抜粋（拡張E1、拡張E9で反応まとめの1レス目本文に対応）。
+ * reaction ブロックを含む記事（まとめ速報型）は「1レス目の本文」から、含まない記事
+ * （Riot公式形式）は従来どおり本文冒頭段落からの抜粋にフォールバックして生成する。
+ */
 export function buildArticleExcerpt(blocks: ArticleBodyBlock[]): string {
-  return buildArticleDescription(blocks, EXCERPT_MAX_LENGTH);
+  const source = firstReactionLineText(blocks) ?? firstParagraphText(blocks);
+  return truncate(source, EXCERPT_MAX_LENGTH);
 }
 
 /**

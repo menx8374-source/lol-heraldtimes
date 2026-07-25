@@ -6,7 +6,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 export function SiteHeader() {
   return (
     <header className="w-full bg-neutral-900 text-white">
-      <div className="mx-auto max-w-5xl px-4 py-4">
+      <div className="mx-auto max-w-7xl px-4 py-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Link href="/" className="inline-flex flex-col">
             <span className="text-xl font-bold tracking-tight">LoLまとめ速報</span>
