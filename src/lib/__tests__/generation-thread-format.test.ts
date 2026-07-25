@@ -52,4 +52,10 @@ describe("computeLineEmphasis", () => {
   it("キーワード・アンカーのいずれも無い行はundefined", () => {
     expect(computeLineEmphasis(["普通の行1", "普通の行2"])).toEqual([undefined, undefined]);
   });
+
+  it("議論系の決定的な一行（戦犯/言い訳/論破）も赤で強調する", () => {
+    expect(computeLineEmphasis(["普通の行", "今回の戦犯はこいつだろ"])).toEqual([undefined, "red"]);
+    expect(computeLineEmphasis(["言い訳にしか聞こえない"])).toEqual(["red"]);
+    expect(computeLineEmphasis(["それは完全に論破されてる"])).toEqual(["red"]);
+  });
 });
