@@ -54,6 +54,12 @@ export function SiteHeader() {
           <Link href="/glossary" className="text-neutral-400 hover:text-white hover:underline">
             用語集
           </Link>
+          <Link href="/tags" className="text-neutral-400 hover:text-white hover:underline">
+            タグ一覧
+          </Link>
+          <Link href="/archive" className="text-neutral-400 hover:text-white hover:underline">
+            アーカイブ
+          </Link>
         </nav>
       </div>
     </header>

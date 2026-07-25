@@ -1,25 +1,49 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { listArchiveMonths } from "@/lib/archive";
+import {
+  buildMonthCalendar,
+  dayCountsForMonth,
+  listArchiveMonths,
+  nextMonthKey,
+  prevMonthKey,
+  todayMonthKeyJST,
+} from "@/lib/archive";
+import { ArchiveCalendar } from "@/components/archive-calendar";
 import { PageWithSidebar } from "@/components/page-with-sidebar";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { EmptyState } from "@/components/empty-state";
 
-export const metadata: Metadata = { title: "月別アーカイブ" };
+export const metadata: Metadata = { title: "アーカイブ" };
 
-/** 月別アーカイブ一覧ページ（拡張E4）。公開記事が存在する月を新しい順に列挙する。 */
+/**
+ * アーカイブ入口ページ（拡張E10）。日本時間(JST)基準の今月のカレンダー（日付グリッド）を
+ * 既定表示にし、記事のある日を強調する。従来の月一覧（拡張E4）も下部に残す。
+ */
 export default async function ArchiveIndexPage() {
-  const months = await listArchiveMonths();
+  const monthKey = todayMonthKeyJST();
+  const [dayCounts, months] = await Promise.all([
+    dayCountsForMonth(monthKey),
+    listArchiveMonths(),
+  ]);
+  const cells = buildMonthCalendar(monthKey, dayCounts);
 
   return (
     <PageWithSidebar>
       <Breadcrumbs
         items={[
           { name: "トップ", path: "/" },
-          { name: "月別アーカイブ", path: "/archive" },
+          { name: "アーカイブ", path: "/archive" },
         ]}
       />
-      <h1 className="mb-4 text-lg font-bold">月別アーカイブ</h1>
+      <h1 className="mb-4 text-lg font-bold">アーカイブ</h1>
+      <ArchiveCalendar
+        monthKey={monthKey}
+        cells={cells}
+        prevMonthKey={prevMonthKey(monthKey)}
+        nextMonthKey={nextMonthKey(monthKey)}
+      />
+
+      <h2 className="mb-3 text-sm font-bold text-neutral-700 dark:text-neutral-200">月別アーカイブ</h2>
       {months.length === 0 ? (
         <EmptyState message="記事がありません" />
       ) : (

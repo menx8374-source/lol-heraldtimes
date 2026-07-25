@@ -56,9 +56,9 @@ export function tagCloudSizeClass(count: number, maxCount: number): string {
 /**
  * 人気タグ集計（拡張E4）。公開記事のみを対象に、タグごとの記事数を数え、多い順に上位 limit 件を返す。
  * タグの総数は語彙（チャンピオン名・トピック等）に自然に有界なため、記事数とは独立に全タグを
- * 1クエリで取得しアプリ側でランキングする（N+1にはならない）。
+ * 1クエリで取得しアプリ側でランキングする（N+1にはならない）。limit 省略/Infinity で全件。
  */
-export async function listPopularTags(limit = 20): Promise<TagCount[]> {
+export async function listPopularTags(limit: number = 20): Promise<TagCount[]> {
   const rows = await prisma.tag.findMany({
     select: {
       name: true,
@@ -78,4 +78,12 @@ export async function listAllTagNames(): Promise<string[]> {
     select: { name: true },
   });
   return rows.map((r) => r.name);
+}
+
+/**
+ * タグ一覧ページ（`/tags`, 拡張E10）用: 公開記事が1件以上付いている全タグを、記事数の多い順
+ * （同数は名前順）で返す。件数上限なし＝`listPopularTags` を上限なしで呼ぶだけ（集計は同一）。
+ */
+export function listAllTagsWithCounts(): Promise<TagCount[]> {
+  return listPopularTags(Number.POSITIVE_INFINITY);
 }

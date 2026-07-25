@@ -3,7 +3,7 @@
  */
 import { describe, expect, it, beforeEach } from "vitest";
 import { prisma } from "@/lib/prisma";
-import { listAllTagNames, listPopularTags } from "@/lib/tags";
+import { listAllTagNames, listAllTagsWithCounts, listPopularTags } from "@/lib/tags";
 
 async function resetDb() {
   await prisma.articleTag.deleteMany();
@@ -51,6 +51,24 @@ describe("listPopularTags（拡張E4）", () => {
     await createArticleWithTags("a", "published", ["タグ1", "タグ2", "タグ3"]);
     const tags = await listPopularTags(1);
     expect(tags).toHaveLength(1);
+  });
+});
+
+describe("listAllTagsWithCounts（タグ一覧ページ用, 拡張E10）", () => {
+  it("公開記事のみを対象に、記事数の多い順で全タグを返す（0件タグ・保留記事は除く）", async () => {
+    await createArticleWithTags("a", "published", ["ヤスオ", "パッチ"]);
+    await createArticleWithTags("b", "published", ["ヤスオ"]);
+    await createArticleWithTags("c", "held", ["ゼド"]); // 公開記事が無いタグ
+
+    const tags = await listAllTagsWithCounts();
+    expect(tags).toEqual([
+      { name: "ヤスオ", count: 2 },
+      { name: "パッチ", count: 1 },
+    ]);
+  });
+
+  it("タグが1件も無い場合は空配列を返す", async () => {
+    expect(await listAllTagsWithCounts()).toEqual([]);
   });
 });
 

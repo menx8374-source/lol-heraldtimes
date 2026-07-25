@@ -36,9 +36,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     url: `${siteUrl}/category/${categorySlugFor(label)}`,
   }));
 
-  const tagEntries: MetadataRoute.Sitemap = tagNames.map((name) => ({
-    url: `${siteUrl}/tags/${encodeURIComponent(name)}`,
-  }));
+  const tagEntries: MetadataRoute.Sitemap = [
+    { url: `${siteUrl}/tags` },
+    ...tagNames.map((name) => ({ url: `${siteUrl}/tags/${encodeURIComponent(name)}` })),
+  ];
 
   const archiveEntries: MetadataRoute.Sitemap = [
     { url: `${siteUrl}/archive` },
