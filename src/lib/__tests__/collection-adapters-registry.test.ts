@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { getAdapter, getAllAdapters } from "@/lib/collection/adapters";
 import { RiotDataDragonAdapter } from "@/lib/collection/adapters/riot-datadragon";
+import { RedditAdapter } from "@/lib/collection/adapters/reddit";
 import { MockSourceAdapter } from "@/lib/collection/adapters/mock";
 
 describe("getAdapter (live)", () => {
@@ -10,17 +11,22 @@ describe("getAdapter (live)", () => {
     expect(adapter.sourceType).toBe("riot");
   });
 
-  it("reddit/5chは未実装のため分かりやすいエラーを投げる", () => {
-    expect(() => getAdapter("reddit", "live")).toThrow(/未実装/);
+  it("redditは実装済みのlive(RedditAdapter)を返す", () => {
+    const adapter = getAdapter("reddit", "live");
+    expect(adapter).toBeInstanceOf(RedditAdapter);
+    expect(adapter.sourceType).toBe("reddit");
+  });
+
+  it("5chは未実装のため分かりやすいエラーを投げる", () => {
     expect(() => getAdapter("5ch", "live")).toThrow(/未実装/);
   });
 });
 
 describe("getAllAdapters (live)", () => {
-  it("live実装があるriotのみを含み、未実装(reddit/5ch)はスキップする(全体を止めない)", () => {
+  it("live実装があるriot・redditを含み、未実装(5ch)はスキップする(全体を止めない)", () => {
     const adapters = getAllAdapters("live");
-    expect(adapters).toHaveLength(1);
-    expect(adapters[0].sourceType).toBe("riot");
+    expect(adapters).toHaveLength(2);
+    expect(adapters.map((a) => a.sourceType).sort()).toEqual(["reddit", "riot"]);
   });
 });
 

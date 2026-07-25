@@ -8,11 +8,10 @@
  * 例外を投げず握り潰して空配列/nullを返す（1ソースの失敗が収集パイプライン全体を止めない方針）。
  */
 import type { RawCollectionItem, SourceAdapter } from "@/lib/collection/types";
+import { fetchJsonSafe } from "@/lib/collection/adapters/http";
 
 const VERSIONS_URL = "https://ddragon.leagueoflegends.com/api/versions.json";
 const DEFAULT_LOCALE = "ja_JP";
-/** 1回のfetchあたりのタイムアウト（外部CDNが応答しない場合に収集全体を止めないため）。 */
-const FETCH_TIMEOUT_MS = 8000;
 /** 1回の収集で候補として返すチャンピオン件数（常識的な範囲。最終的な上限はpipeline側config）。 */
 const DEFAULT_CHAMPION_WINDOW_SIZE = 15;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -22,18 +21,8 @@ function championListUrl(version: string, locale: string): string {
 }
 
 /** Data Dragon の JSON を取得する。HTTPエラー・パース失敗・ネットワーク断はnullを返す（例外を投げない）。 */
-async function fetchJson<T>(url: string): Promise<T | null> {
-  try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-    if (!res.ok) {
-      console.error(`[riot-datadragon] HTTPエラー: ${url} status=${res.status}`);
-      return null;
-    }
-    return (await res.json()) as T;
-  } catch (err) {
-    console.error(`[riot-datadragon] 取得に失敗しました: ${url}`, err);
-    return null;
-  }
+function fetchJson<T>(url: string): Promise<T | null> {
+  return fetchJsonSafe<T>(url, {}, { logLabel: "riot-datadragon", context: url });
 }
 
 /** バージョン文字列（例 "14.6.1"）から「major.minor」部分を取り出す（パッチ単位の一意性に使う）。 */

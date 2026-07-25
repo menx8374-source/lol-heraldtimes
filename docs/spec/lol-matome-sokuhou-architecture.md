@@ -42,7 +42,10 @@ status: active
 - データモデル: `CollectedItem`（`normalizedUrl` に unique 制約で同一URL取込みを自然に1件化）・`SourceFetchLog`（実行間隔判定・失敗記録）を Prisma に追加。`CollectedItem.status`: pending/queued/duplicate/articled。
 - URL正規化: ホスト小文字化・トラッキングクエリ除去（`utm_*`/`ref`/`fbclid`等）・末尾スラッシュ除去・ハッシュ除去。
 - 類似度判定（同一話題検出）: LLM非依存、文字bi-gramのJaccard係数（タイトル重み0.7・本文0.3、既定しきい値0.5）。日本語の分かち書きをしないため言語非依存だが、**言語をまたいだ類似判定はできない**（同一トピックでも日英で別候補として残る。実用上は許容）。
-- 本接続への差し替え点は `adapters/index.ts`（`getAdapter`）1箇所。live 指定時は現状エラーを返す（未実装・要認証情報）。
+- 本接続への差し替え点は `adapters/index.ts`（`getAdapter`）1箇所。段階的にlive実装をレジストリへ追加する方式（拡張E15/E16確定）:
+  - riot（拡張E15）: Riot Data Dragon（公式静的データCDN、APIキー不要）。
+  - reddit（拡張E16）: Application-only OAuth2(client_credentials)。env `REDDIT_CLIENT_ID`/`REDDIT_CLIENT_SECRET`/`REDDIT_USER_AGENT`未設定時は空配列＋ログでグレースフルスキップ（他ソースを止めない）。運用コスト: Reddit API無料枠（OAuth app-only、個人開発規模なら無料）。
+  - 5ch: 未実装。live指定時はエラー。
 
 ## 広告差し込み方式
 - 広告コード（AdSense 等のタグ文字列）は**設定/env で受け取り**、記事上部・本文中(見出し間)・記事末尾・サイドバー・一覧内の各枠コンポーネントに差し込む。
