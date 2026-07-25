@@ -4,6 +4,8 @@
  *
  * タイトルは「まとめ速報」風の仮タイトル。本格的なタイトル生成ロジックは Sprint 5 で実装する。
  */
+// prisma を含む後続 import より前に .env を読み込む（cron/CLI からの tsx 直接起動用）。
+import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import type { ArticleBodyBlock } from "../src/lib/article-body";
 import type { CategoryLabel } from "../src/lib/categories";

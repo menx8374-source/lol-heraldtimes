@@ -3,6 +3,8 @@
  * 各ソース(reddit/5ch/riot)から収集アイテムを取り込み、重複排除して記事化候補キューを再構築し、
  * 実行結果のサマリを標準出力へ表示する(evaluatorが収集/候補キューの状態を確認できるように)。
  */
+// prisma を含む後続 import より前に .env を読み込む（cron/CLI からの tsx 直接起動用）。
+import "dotenv/config";
 import { getAllAdapters } from "../src/lib/collection/adapters";
 import { runCollectionPipeline } from "../src/lib/collection/pipeline";
 import { rebuildCandidateQueue } from "../src/lib/collection/queue";

@@ -4,6 +4,8 @@
  * 失敗した候補は"generation_failed"として記録され、他候補の生成は継続する
  * (evaluatorが生成結果・候補状態を確認できるように結果を標準出力へ表示する)。
  */
+// prisma を含む後続 import より前に .env を読み込む（cron/CLI からの tsx 直接起動用）。
+import "dotenv/config";
 import { generateArticlesForQueue } from "../src/lib/generation/pipeline";
 import { prisma } from "../src/lib/prisma";
 

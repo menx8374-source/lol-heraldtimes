@@ -3,6 +3,8 @@
  * `npm run regenerate-titles` で実行する。Sprint4以前に仮タイトルで生成された記事や、
  * 静的シード記事にも後から適用できるようにするための手段。
  */
+// prisma を含む後続 import より前に .env を読み込む（cron/CLI からの tsx 直接起動用）。
+import "dotenv/config";
 import { regenerateAllArticleTitles } from "../src/lib/generation/pipeline";
 import { prisma } from "../src/lib/prisma";
 

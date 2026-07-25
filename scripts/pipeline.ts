@@ -5,6 +5,9 @@
  * 実際のcron常駐は不要（brief方針）。繰り返し実行はこのスクリプトを間隔(PIPELINE_INTERVAL_MS)を
  * 空けて再度起動する運用を想定し、次回実行の目安時刻を表示するのみに留める。
  */
+// .env を最初に読み込む（cron/CLIから tsx で直接起動されると Next.js のような自動読込が無く、
+// prisma の DATABASE_URL 等が未設定になるため、prisma を含む後続 import より前に読み込む）。
+import "dotenv/config";
 import { runFullPipeline } from "../src/lib/pipeline/run-pipeline";
 import { getPipelineConfig, computeNextRunAt } from "../src/lib/pipeline/config";
 import { prisma } from "../src/lib/prisma";
