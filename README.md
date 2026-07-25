@@ -42,9 +42,10 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
 | `DATABASE_URL` | 必須 | SQLite ファイルの場所。既定値 `file:./dev.db`（秘密情報ではない） |
 | `ANTHROPIC_API_KEY` | 後続スプリントで使用 | LLM 本接続用の Anthropic API キー（Sprint 1 時点では未使用） |
 | `ANTHROPIC_MODEL` | 任意 | 使用モデル。既定 `claude-haiku-4-5`（Sprint 1 時点では未使用） |
-| `COLLECTION_MODE` | 任意 | `mock`（既定）／`live`。`live` は本接続アダプタ未実装のためエラーになる |
+| `COLLECTION_MODE` | 任意 | `mock`（既定）／`live`。`live` は実装済みソース(riot、拡張E15)のみ本接続で収集し、未実装ソース(reddit/5ch)は「未実装」でスキップされる |
 | `COLLECTION_REDDIT_MAX_ITEMS` / `COLLECTION_5CH_MAX_ITEMS` / `COLLECTION_RIOT_MAX_ITEMS` | 任意 | ソースごとの1回の収集実行あたりの取得件数上限（既定: reddit/5ch=10, riot=20） |
 | `COLLECTION_REDDIT_MIN_INTERVAL_MS` / `COLLECTION_5CH_MIN_INTERVAL_MS` / `COLLECTION_RIOT_MIN_INTERVAL_MS` | 任意 | ソースごとの最小実行間隔(ミリ秒)。既定: reddit/5ch=600000(10分), riot=1800000(30分) |
+| `RIOT_DDRAGON_LOCALE` | 任意 | riot live収集(拡張E15、Riot Data Dragon)のlocale。既定 `ja_JP`（Data Dragonはキー不要の公開CDN） |
 | `GENERATION_MODE` | 任意 | `mock`（既定、APIキー不要の決定論的モックLLM）／`live`。`live` は本接続実装未整備のためエラーになる |
 | `PIPELINE_MAX_PUBLISH_PER_RUN` | 任意 | 統合パイプライン(`npm run pipeline`)1回の実行で処理・公開する記事本数の上限（既定5件） |
 | `PIPELINE_INTERVAL_MS` | 任意 | 統合パイプラインの繰り返し実行の目安間隔(ミリ秒)。既定14400000(4時間) |
