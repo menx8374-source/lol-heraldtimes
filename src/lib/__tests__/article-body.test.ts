@@ -90,6 +90,89 @@ describe("parseArticleBody", () => {
       ]),
     ).toThrow(InvalidArticleBodyError);
   });
+
+  it("reactionブロックのlines[].originalで原文併記(海外の反応)をパースできる(拡張E3)", () => {
+    const input = [
+      {
+        type: "reaction",
+        number: 1,
+        name: "海外プレイヤーさん",
+        lines: [{ text: "強すぎる。", original: "It is too strong." }],
+      },
+    ];
+    const result = parseArticleBody(input);
+    expect(result[0]).toEqual(input[0]);
+  });
+
+  it("reactionブロックのlines[].originalが空文字ならエラーを投げる(拡張E3)", () => {
+    expect(() =>
+      parseArticleBody([
+        { type: "reaction", number: 1, name: "海外プレイヤーさん", lines: [{ text: "x", original: "" }] },
+      ]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
+  it("画像ブロックをパースできる(url/alt/credit, 拡張E3)", () => {
+    const input = [
+      { type: "image", url: "/mock-images/sample.svg", alt: "サンプル画像", credit: "画像: 編集部" },
+    ];
+    const result = parseArticleBody(input);
+    expect(result[0]).toEqual(input[0]);
+  });
+
+  it("画像ブロックはcredit省略可(拡張E3)", () => {
+    const result = parseArticleBody([{ type: "image", url: "/mock-images/sample.svg", alt: "サンプル画像" }]);
+    expect(result[0]).toEqual({ type: "image", url: "/mock-images/sample.svg", alt: "サンプル画像" });
+  });
+
+  it("画像ブロックのurlがjavascript:スキーム等の危険な値ならエラーを投げる(拡張E3)", () => {
+    expect(() =>
+      parseArticleBody([{ type: "image", url: "javascript:alert(1)", alt: "x" }]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
+  it("画像ブロックのurlがdata:image/*なら許可する(拡張E3)", () => {
+    const url = "data:image/svg+xml;base64,PHN2Zy8+";
+    const result = parseArticleBody([{ type: "image", url, alt: "x" }]);
+    expect(result[0]).toEqual({ type: "image", url, alt: "x" });
+  });
+
+  it("画像ブロックのaltが空ならエラーを投げる(拡張E3)", () => {
+    expect(() => parseArticleBody([{ type: "image", url: "/x.svg", alt: "" }])).toThrow(
+      InvalidArticleBodyError,
+    );
+  });
+
+  it("埋め込みブロックをパースできる(provider/url/caption, 拡張E3)", () => {
+    const input = [
+      {
+        type: "embed",
+        provider: "youtube",
+        url: "https://www.youtube.com/watch?v=abc",
+        caption: "サンプル動画",
+      },
+    ];
+    const result = parseArticleBody(input);
+    expect(result[0]).toEqual(input[0]);
+  });
+
+  it("埋め込みブロックのproviderが不正ならエラーを投げる(拡張E3)", () => {
+    expect(() =>
+      parseArticleBody([{ type: "embed", provider: "facebook", url: "https://facebook.com/x" }]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
+  it("埋め込みブロックのurlがホワイトリスト外ならエラーを投げる(拡張E3)", () => {
+    expect(() =>
+      parseArticleBody([{ type: "embed", provider: "youtube", url: "https://evil.example/watch" }]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
+  it("埋め込みブロックのurlがhttpならエラーを投げる(拡張E3)", () => {
+    expect(() =>
+      parseArticleBody([{ type: "embed", provider: "twitter", url: "http://twitter.com/x/status/1" }]),
+    ).toThrow(InvalidArticleBodyError);
+  });
 });
 
 describe("blockText", () => {
@@ -105,6 +188,32 @@ describe("blockText", () => {
       lines: [{ text: "1行目" }, { text: "2行目" }],
     };
     expect(blockText(block)).toBe("国内プレイヤーさん\n1行目\n2行目");
+  });
+
+  it("reactionのlines[].originalがあれば原文もテキストに含める(拡張E3・検索/安全フィルタ対象に含める)", () => {
+    const block = {
+      type: "reaction" as const,
+      number: 1,
+      name: "海外プレイヤーさん",
+      lines: [{ text: "強すぎる。", original: "It is too strong." }],
+    };
+    expect(blockText(block)).toBe("海外プレイヤーさん\nIt is too strong.\n強すぎる。");
+  });
+
+  it("imageはalt＋creditを改行連結して返す(拡張E3)", () => {
+    expect(blockText({ type: "image", url: "/x.svg", alt: "サンプル画像", credit: "画像: 編集部" })).toBe(
+      "サンプル画像\n画像: 編集部",
+    );
+  });
+
+  it("imageはcredit省略時altのみ返す(拡張E3)", () => {
+    expect(blockText({ type: "image", url: "/x.svg", alt: "サンプル画像" })).toBe("サンプル画像");
+  });
+
+  it("embedはcaption＋urlを改行連結して返す(拡張E3)", () => {
+    expect(
+      blockText({ type: "embed", provider: "youtube", url: "https://youtu.be/abc", caption: "サンプル動画" }),
+    ).toBe("サンプル動画\nhttps://youtu.be/abc");
   });
 });
 

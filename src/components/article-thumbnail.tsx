@@ -18,8 +18,14 @@ export function ArticleThumbnail({
 }) {
   if (thumbnailUrl) {
     return (
-      // eslint-disable-next-line @next/next/no-img-element -- 外部サムネイルURLは任意設定・本スプリントでは未使用のフォールバック描画
-      <img src={thumbnailUrl} alt="" className={`object-cover ${className}`} />
+      // eslint-disable-next-line @next/next/no-img-element -- ローカルSVG等のモック画像のみを想定（拡張E3）
+      <img
+        src={thumbnailUrl}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        className={`object-cover ${className}`}
+      />
     );
   }
 

@@ -28,6 +28,8 @@ type SeedArticle = {
   comments?: SeedComment[];
   /** 絵文字リアクションのサンプル件数（拡張E1）。未指定はリアクション行なし（=0件表示）。 */
   reactions?: { emoji: string; count: number }[];
+  /** アイキャッチ画像URL（拡張E3・モック）。未指定はカテゴリ色のグラデーションプレースホルダーのまま。 */
+  thumbnailUrl?: string;
 };
 
 function body(...blocks: ArticleBodyBlock[]): ArticleBodyBlock[] {
@@ -59,6 +61,8 @@ const articles: SeedArticle[] = [
     tags: ["パッチノート", "ジャングル"],
     publishedAt: daysAgo(0, 1),
     viewCount: 4210,
+    // アイキャッチ画像（拡張E3・モック）: ローカルSVGのオリジナル作成イメージ。未設定時はカテゴリ色プレースホルダーのまま。
+    thumbnailUrl: "/mock-images/thumb-jungle-nerf.svg",
     reactions: [
       { emoji: "😡", count: 24 },
       { emoji: "😮", count: 11 },
@@ -69,6 +73,13 @@ const articles: SeedArticle[] = [
       {
         type: "paragraph",
         text: "本日配信されたパッチ14.6では、ジャングルモンスターの経験値量が全体的に引き下げられ、序盤のレベル差がつきにくくなる調整が入った。",
+      },
+      {
+        // 記事内画像（拡張E3・モック）: ローカルSVGのオリジナル作成イメージ図＋出典クレジット。
+        type: "image",
+        url: "/mock-images/article-patch-notes.svg",
+        alt: "パッチ14.6のジャングル調整イメージ図（モック画像）",
+        credit: "画像: LoLまとめ速報編集部（オリジナル作成のイメージ図・実際のパッチノート画面ではありません）",
       },
       { type: "heading", text: "海外コミュニティの反応" },
       {
@@ -111,6 +122,14 @@ const articles: SeedArticle[] = [
     ],
     body: body(
       { type: "heading", text: "反応まとめ" },
+      {
+        // 埋め込みブロック（拡張E3・モック）: 実際のクリップ埋め込みは行わず、providerが分かる
+        // プレースホルダーカード＋元URLへのリンクのみを表示する。URLはサンプル値。
+        type: "embed",
+        provider: "clip",
+        url: "https://clips.twitch.tv/SampleHighlightClipDemo",
+        caption: "話題になったプレイのクリップ（サンプルURL・実在の配信クリップではありません）",
+      },
       {
         type: "reaction",
         number: 1,
@@ -183,6 +202,26 @@ const articles: SeedArticle[] = [
         name: "国内プレイヤーさん",
         lines: [{ text: "OTPだからこそ出せる択なんだろうな、他のレーンでこの動きは再現できない。" }],
       },
+      {
+        // 顔文字デモ（拡張E3）: 単純な顔文字は通常テキストのまま崩れず表示される（等幅化しない）。
+        type: "reaction",
+        number: 10,
+        name: "国内プレイヤーさん",
+        lines: [{ text: "これは祝勝ムード全開だわ(^^)/" }],
+      },
+      {
+        // AA(アスキーアート)デモ（拡張E3・オリジナル創作の簡単な箱型AA）: 等幅フォント＋空白保持で
+        // 位置合わせが崩れないように表示される。
+        type: "reaction",
+        number: 11,
+        name: "国内プレイヤーさん",
+        lines: [
+          { text: "   _____" },
+          { text: "  |     |" },
+          { text: "  | GG! |" },
+          { text: "  |_____|" },
+        ],
+      },
     ),
     sources: [{ label: "5ch", url: "https://leagueoflegends.5ch.net/" }],
     comments: [
@@ -198,6 +237,7 @@ const articles: SeedArticle[] = [
     tags: ["世界大会", "eスポーツ"],
     publishedAt: daysAgo(1, 2),
     viewCount: 5210,
+    thumbnailUrl: "/mock-images/thumb-worlds-draw.svg",
     reactions: [
       { emoji: "😮", count: 22 },
       { emoji: "👍", count: 14 },
@@ -207,6 +247,12 @@ const articles: SeedArticle[] = [
       {
         type: "paragraph",
         text: "本日、World Championship 2026 のグループステージ組み合わせ抽選が行われ、各地域の強豪チームの対戦カードが決定した。",
+      },
+      {
+        type: "embed",
+        provider: "youtube",
+        url: "https://www.youtube.com/watch?v=sample1234xyz",
+        caption: "抽選会の様子（サンプルURL・実際の配信映像ではありません）",
       },
       { type: "heading", text: "注目カード" },
       {
@@ -232,10 +278,32 @@ const articles: SeedArticle[] = [
     body: body(
       { type: "heading", text: "反応まとめ" },
       {
+        // 記事内画像（拡張E3・モック）: ローカルSVGのオリジナル作成イメージ図＋出典クレジット。
+        type: "image",
+        url: "/mock-images/article-tier-list.svg",
+        alt: "パッチ14.6後のTierリストイメージ図（モック画像）",
+        credit: "画像: LoLまとめ速報編集部（オリジナル作成のイメージ図・実際のTierリスト画面ではありません）",
+      },
+      {
+        // 埋め込みブロック（拡張E3・モック）: X投稿の実埋め込みは行わず、プレースホルダーカード＋
+        // 元URLへのリンクのみを表示する。URLはサンプル値（実在の投稿ではない）。
+        type: "embed",
+        provider: "twitter",
+        url: "https://x.com/example_lol_fan/status/1234567890123456789",
+        caption: "Tierリストの急変を報告する海外ファンの投稿（サンプルURL・実在の投稿ではありません）",
+      },
+      {
         type: "reaction",
         number: 1,
         name: "海外プレイヤーさん",
-        lines: [{ text: "先週まで誰も使ってなかったチャンプが急にSランク入りしてて驚愕。", emphasis: "red" }],
+        lines: [
+          {
+            text: "先週まで誰も使ってなかったチャンプが急にSランク入りしてて驚愕。",
+            emphasis: "red",
+            // 海外の反応の原文併記（拡張E3・オリジナル創作テキスト、実在の投稿の複製ではない）
+            original: "I'm shocked that a champion nobody touched last week is suddenly ranked S-tier.",
+          },
+        ],
       },
       {
         type: "reaction",
@@ -251,7 +319,12 @@ const articles: SeedArticle[] = [
         type: "reaction",
         number: 3,
         name: "海外プレイヤーさん",
-        lines: [{ text: "個人的には妥当な調整だと思う。地味に強かったのがようやく評価されただけ。" }],
+        lines: [
+          {
+            text: "個人的には妥当な調整だと思う。地味に強かったのがようやく評価されただけ。",
+            original: "Honestly this feels like a fair adjustment. It was quietly strong and is finally getting recognized.",
+          },
+        ],
       },
       {
         type: "reaction",
@@ -680,6 +753,7 @@ async function main() {
         title: a.title,
         category: a.category,
         body: a.body,
+        thumbnailUrl: a.thumbnailUrl,
         publishedAt: a.publishedAt,
         viewCount: a.viewCount,
         // コメント数（拡張E2）は下で投入する実際のサンプルコメント件数と一致させる。

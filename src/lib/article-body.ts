@@ -1,16 +1,24 @@
 /**
- * 記事本文を「見出し＋段落＋引用＋レス（まとめ速報形式）」のブロック配列として構造化するための
- * 型と検証ロジック。DB には JSON として保存し（prisma/schema.prisma の Article.body）、
+ * 記事本文を「見出し＋段落＋引用＋レス（まとめ速報形式）＋画像＋埋め込み」のブロック配列として
+ * 構造化するための型と検証ロジック。DB には JSON として保存し（prisma/schema.prisma の Article.body）、
  * 表示前に必ずここでパース・検証してから使う（LLM 非依存の純関数）。
  *
  * ⚠ 記事フォーマット改修（2026-07-25・ユーザー決定）: 掲示板/SNS由来（5ch/reddit）の記事は、
  * 「AI要約段落＋短い引用」から「番号付きレスを逐語のまま羅列する、まとめ速報レス形式」に変更した。
  * その中核ブロックが `reaction` 型。旧来の heading/paragraph/quote 型は Riot公式由来の
  * 「速報＋要点整理」構成で引き続き使うため、両方を許容する（後方互換）。
+ *
+ * ⚠ コンテンツ表現拡張（拡張E3）: `image`（記事内画像）・`embed`（SNS/動画埋め込み）ブロックを追加。
+ * どちらも「実際の著作物を取り込まない」方針で、画像はローカルSVG/データURI/自サイト作成の
+ * モック画像のみ許可し、埋め込みは実iframeを読み込まずプレースホルダーカードのみを表示する
+ * （URLは provider ごとの正規ドメインのホワイトリストで検証、dangerouslySetInnerHTML は使わない）。
  */
+import { isAllowedEmbedUrl, isEmbedProvider, type EmbedProvider } from "@/lib/embed";
 
-/** レス本文の1行。重要・面白い行は決定論ヒューリスティックで赤/オレンジに強調する（compose.ts参照）。 */
-export type ArticleBodyReactionLine = { text: string; emphasis?: "red" | "orange" };
+/** レス本文の1行。重要・面白い行は決定論ヒューリスティックで赤/オレンジに強調する（compose.ts参照）。
+ * `original` は海外の反応（reddit由来）で原文（英語）を併記する場合のオリジナル創作テキスト
+ * （`text` 側が日本語訳）。 */
+export type ArticleBodyReactionLine = { text: string; emphasis?: "red" | "orange"; original?: string };
 
 /** 掲示板/SNSの1書き込み（レス）をまとめ速報形式で表すブロック。逐語表示が前提。 */
 export type ArticleBodyReactionBlock = {
@@ -24,11 +32,22 @@ export type ArticleBodyReactionBlock = {
   anchors?: number[];
 };
 
+/** 記事内画像ブロック（拡張E3）。url はローカルSVG/データURI/自サイト作成のモック画像のみを想定
+ * （`isSafeImageUrl` で検証）。credit は出典・提供元クレジット（任意、キャプションとして表示）。 */
+export type ArticleBodyImageBlock = { type: "image"; url: string; alt: string; credit?: string };
+
+/** SNS/動画の埋め込みブロック（拡張E3）。実iframeは読み込まず、provider が分かる
+ * プレースホルダーカード＋元URLへのリンクのみを表示する。url は `isAllowedEmbedUrl` で
+ * provider ごとの正規ドメインのホワイトリスト検証を行う。 */
+export type ArticleBodyEmbedBlock = { type: "embed"; provider: EmbedProvider; url: string; caption?: string };
+
 export type ArticleBodyBlock =
   | { type: "heading"; text: string }
   | { type: "paragraph"; text: string }
   | { type: "quote"; text: string; source?: string }
-  | ArticleBodyReactionBlock;
+  | ArticleBodyReactionBlock
+  | ArticleBodyImageBlock
+  | ArticleBodyEmbedBlock;
 
 export class InvalidArticleBodyError extends Error {
   constructor(message: string) {
@@ -60,7 +79,14 @@ function parseReactionBlock(b: Record<string, unknown>, index: number): ArticleB
     if (l.emphasis !== undefined && l.emphasis !== "red" && l.emphasis !== "orange") {
       throw new InvalidArticleBodyError(`本文ブロック[${index}]のlines[${lineIndex}]のemphasisが不正です`);
     }
-    return { text: l.text, ...(l.emphasis ? { emphasis: l.emphasis } : {}) };
+    if (l.original !== undefined && (typeof l.original !== "string" || l.original.trim().length === 0)) {
+      throw new InvalidArticleBodyError(`本文ブロック[${index}]のlines[${lineIndex}]のoriginalが不正です`);
+    }
+    return {
+      text: l.text,
+      ...(l.emphasis ? { emphasis: l.emphasis } : {}),
+      ...(l.original ? { original: l.original as string } : {}),
+    };
   });
   let anchors: number[] | undefined;
   if (b.anchors !== undefined) {
@@ -70,6 +96,46 @@ function parseReactionBlock(b: Record<string, unknown>, index: number): ArticleB
     anchors = b.anchors as number[];
   }
   return { type: "reaction", number: b.number, name: b.name, lines, ...(anchors ? { anchors } : {}) };
+}
+
+/**
+ * 画像ブロックの url として許可するスキームか（純関数）。ローカル配信パス（public配下）・
+ * データURI（画像のみ）・将来のhttps画像URLのみ許可し、`javascript:` 等の危険スキームを弾く。
+ */
+function isSafeImageUrl(url: string): boolean {
+  // ローカル配信パス（public配下）のみ許可。`//host`（プロトコル相対）や `/\host`（ブラウザが
+  // `//` に正規化するバックスラッシュトリック）は外部ホスト読み込みになるため除外する。
+  if (url.startsWith("/") && !url.startsWith("//") && !url.startsWith("/\\")) return true;
+  if (/^data:image\/(png|jpeg|jpg|gif|svg\+xml|webp);/i.test(url)) return true;
+  if (/^https:\/\//i.test(url)) return true;
+  return false;
+}
+
+function parseImageBlock(b: Record<string, unknown>, index: number): ArticleBodyImageBlock {
+  if (typeof b.url !== "string" || b.url.trim().length === 0 || !isSafeImageUrl(b.url)) {
+    throw new InvalidArticleBodyError(`本文ブロック[${index}]の画像urlが不正です`);
+  }
+  if (typeof b.alt !== "string" || b.alt.trim().length === 0) {
+    throw new InvalidArticleBodyError(`本文ブロック[${index}]の画像altが空です`);
+  }
+  if (b.credit !== undefined && (typeof b.credit !== "string" || b.credit.trim().length === 0)) {
+    throw new InvalidArticleBodyError(`本文ブロック[${index}]の画像creditが不正です`);
+  }
+  return { type: "image", url: b.url, alt: b.alt, ...(b.credit ? { credit: b.credit as string } : {}) };
+}
+
+function parseEmbedBlock(b: Record<string, unknown>, index: number): ArticleBodyEmbedBlock {
+  if (!isEmbedProvider(b.provider)) {
+    throw new InvalidArticleBodyError(`本文ブロック[${index}]の埋め込みproviderが不正です: ${String(b.provider)}`);
+  }
+  const provider = b.provider;
+  if (typeof b.url !== "string" || b.url.trim().length === 0 || !isAllowedEmbedUrl(provider, b.url)) {
+    throw new InvalidArticleBodyError(`本文ブロック[${index}]の埋め込みurlがホワイトリスト外、または不正です`);
+  }
+  if (b.caption !== undefined && (typeof b.caption !== "string" || b.caption.trim().length === 0)) {
+    throw new InvalidArticleBodyError(`本文ブロック[${index}]の埋め込みcaptionが不正です`);
+  }
+  return { type: "embed", provider, url: b.url, ...(b.caption ? { caption: b.caption as string } : {}) };
 }
 
 /**
@@ -90,6 +156,12 @@ export function parseArticleBody(value: unknown): ArticleBodyBlock[] {
     const b = block as Record<string, unknown>;
     if (b.type === "reaction") {
       return parseReactionBlock(b, index);
+    }
+    if (b.type === "image") {
+      return parseImageBlock(b, index);
+    }
+    if (b.type === "embed") {
+      return parseEmbedBlock(b, index);
     }
     if (typeof b.type !== "string" || !TEXT_TYPES.has(b.type)) {
       throw new InvalidArticleBodyError(
@@ -117,12 +189,22 @@ export function hasStructuredHeadings(blocks: ArticleBodyBlock[]): boolean {
 
 /**
  * ブロック1件分のテキストを取り出す（検索・文字数計算・安全フィルタの対象抽出で共通利用）。
- * heading/paragraph/quote は `text` を、reaction は「名前＋各レス行」を連結して返す
- * （レス本文も安全フィルタ・検索の対象に含めるため）。
+ * heading/paragraph/quote は `text` を、reaction は「名前＋各レス行（原文併記があれば原文も含む）」を、
+ * image は「alt＋credit」を、embed は「caption＋url」を連結して返す
+ * （画像alt・埋め込みcaption・原文併記テキストも安全フィルタ・検索の対象に含めるため）。
  */
 export function blockText(block: ArticleBodyBlock): string {
   if (block.type === "reaction") {
-    return [block.name, ...block.lines.map((l) => l.text)].join("\n");
+    return [
+      block.name,
+      ...block.lines.flatMap((l) => (l.original ? [l.original, l.text] : [l.text])),
+    ].join("\n");
+  }
+  if (block.type === "image") {
+    return [block.alt, block.credit].filter((s): s is string => Boolean(s)).join("\n");
+  }
+  if (block.type === "embed") {
+    return [block.caption, block.url].filter((s): s is string => Boolean(s)).join("\n");
   }
   return block.text;
 }

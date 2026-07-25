@@ -69,3 +69,99 @@ describe("ArticleBodyView（reactionブロック=まとめ速報レス形式）"
     expect(html.indexOf("1: ")).toBeLessThan(html.indexOf("2: "));
   });
 });
+
+describe("ArticleBodyView（画像ブロック, 拡張E3）", () => {
+  const blocksWithImage: ArticleBodyBlock[] = [
+    { type: "image", url: "/mock-images/sample.svg", alt: "サンプル画像の説明", credit: "画像: 編集部" },
+  ];
+  const html = renderToStaticMarkup(<ArticleBodyView blocks={blocksWithImage} />);
+
+  it("<img>にsrc/alt/loading=lazy/decoding=asyncを設定する", () => {
+    expect(html).toContain('src="/mock-images/sample.svg"');
+    expect(html).toContain('alt="サンプル画像の説明"');
+    expect(html).toContain('loading="lazy"');
+    expect(html).toContain('decoding="async"');
+  });
+
+  it("クレジット(出典)をキャプションとして表示する", () => {
+    expect(html).toContain("<figcaption");
+    expect(html).toContain("画像: 編集部");
+  });
+
+  it("dangerouslySetInnerHTMLをprop(JSX属性)として使わない(コンポーネントソースにも不在)", async () => {
+    const fs = await import("node:fs/promises");
+    const src = await fs.readFile(new URL("../article-body-view.tsx", import.meta.url), "utf-8");
+    // コメント文中の言及(「〜は使わない」という注記)は許容し、実際の属性使用(`dangerouslySetInnerHTML=`)のみを禁止する。
+    expect(src).not.toContain("dangerouslySetInnerHTML=");
+  });
+});
+
+describe("ArticleBodyView（埋め込みブロック, 拡張E3）", () => {
+  it("正当なprovider/urlはプレースホルダーカードとして表示し、元URLへのリンクと注記を含む", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "embed", provider: "youtube", url: "https://www.youtube.com/watch?v=abc", caption: "サンプル動画" },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("YouTube");
+    expect(html).toContain("サンプル動画");
+    expect(html).toContain("https://www.youtube.com/watch?v=abc");
+    expect(html).toContain("本番接続時に表示されます");
+    // 実iframe/scriptを読み込まない
+    expect(html).not.toContain("<iframe");
+    expect(html).not.toContain("<script");
+  });
+
+  it("ホワイトリスト外のURLを持つ埋め込みブロックは描画しない(不正データが混入した場合の二重防御)", () => {
+    // parseArticleBodyを経由せず直接不正な埋め込みブロックをArticleBodyViewに渡すケースを想定
+    const blocks = [
+      { type: "embed", provider: "youtube", url: "https://evil.example/watch" },
+    ] as unknown as ArticleBodyBlock[];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).not.toContain("evil.example");
+  });
+});
+
+describe("ResLines（AA・原文併記, 拡張E3）", () => {
+  it("AAらしい行は等幅フォント(font-mono)クラスを付与する", () => {
+    const blocks: ArticleBodyBlock[] = [
+      {
+        type: "reaction",
+        number: 1,
+        name: "国内プレイヤーさん",
+        lines: [{ text: "   _____" }, { text: "  | GG! |" }],
+      },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("font-mono");
+  });
+
+  it("単純な顔文字はfont-monoクラスを付与しない(崩れず通常テキスト表示)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      {
+        type: "reaction",
+        number: 1,
+        name: "国内プレイヤーさん",
+        lines: [{ text: "祝勝ムード全開だわ(^^)/" }],
+      },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).not.toContain("font-mono");
+    expect(html).toContain("(^^)/");
+  });
+
+  it("originalがある行は「原文: ...（英語）」を日本語訳の前に表示する", () => {
+    const blocks: ArticleBodyBlock[] = [
+      {
+        type: "reaction",
+        number: 1,
+        name: "海外プレイヤーさん",
+        lines: [{ text: "強すぎる。", original: "It is too strong." }],
+      },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("原文: It is too strong.（英語）");
+    const originalIndex = html.indexOf("原文: It is too strong.");
+    const translatedIndex = html.indexOf("強すぎる。");
+    expect(originalIndex).toBeLessThan(translatedIndex);
+  });
+});

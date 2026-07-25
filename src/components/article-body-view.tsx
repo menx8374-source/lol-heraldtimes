@@ -1,6 +1,8 @@
 import { Fragment } from "react";
 import type { ArticleBodyBlock, ArticleBodyReactionBlock } from "@/lib/article-body";
 import { AdSlot } from "@/components/ad-slot";
+import { isAsciiArtLine } from "@/lib/aa";
+import { isAllowedEmbedUrl, EMBED_PROVIDER_LABELS, type EmbedProvider } from "@/lib/embed";
 
 /** 強調(赤/オレンジ)を持つレス本文行のテキストカラー。未指定は通常色。 */
 const LINE_EMPHASIS_CLASS: Record<"red" | "orange", string> = {
@@ -18,18 +20,97 @@ export function ResHeader({ number, name }: { number: number; name: string }) {
   );
 }
 
-/** レス本文の複数行。重要行は赤、">>N"アンカー行はオレンジで強調する。記事本文・コメント欄で共用する。 */
-export function ResLines({ lines }: { lines: { text: string; emphasis?: "red" | "orange" }[] }) {
+/**
+ * レス本文の複数行。重要行は赤、">>N"アンカー行はオレンジで強調する。記事本文・コメント欄で共用する。
+ * AA（アスキーアート）らしい行（拡張E3・`isAsciiArtLine`で判定）は等幅フォント＋空白保持で
+ * 崩れないように表示する。単純な顔文字（"(^^)/" 等）はAAと判定されず通常テキストのまま表示される。
+ * `original`（拡張E3・海外の反応の原文併記）がある行は、日本語訳の前に「原文: ...（英語）」を表示する。
+ */
+export function ResLines({
+  lines,
+}: {
+  lines: { text: string; emphasis?: "red" | "orange"; original?: string }[];
+}) {
   return (
     <div className="flex flex-col gap-0.5">
-      {lines.map((line, i) => (
-        <p
-          key={i}
-          className={line.emphasis ? LINE_EMPHASIS_CLASS[line.emphasis] : "text-neutral-800 dark:text-neutral-200"}
+      {lines.map((line, i) => {
+        const aaClass = isAsciiArtLine(line.text) ? " whitespace-pre-wrap font-mono text-xs sm:text-sm" : "";
+        return (
+          <div key={i}>
+            {line.original && (
+              <p className="text-xs italic text-neutral-500 dark:text-neutral-400">
+                原文: {line.original}（英語）
+              </p>
+            )}
+            <p
+              className={
+                (line.emphasis ? LINE_EMPHASIS_CLASS[line.emphasis] : "text-neutral-800 dark:text-neutral-200") +
+                aaClass
+              }
+            >
+              {line.text}
+            </p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** 記事内画像ブロック（拡張E3）。遅延読み込み・レスポンシブ表示＋出典クレジットのキャプション。
+ * url はローカルSVG/データURI等のモック画像のみを想定（parseArticleBodyで検証済み）。 */
+function ImageBlockView({ block }: { block: Extract<ArticleBodyBlock, { type: "image" }> }) {
+  return (
+    <figure className="my-1">
+      {/* eslint-disable-next-line @next/next/no-img-element -- ローカルSVG/データURIのモック画像のみ（parseArticleBodyで検証済み） */}
+      <img
+        src={block.url}
+        alt={block.alt}
+        loading="lazy"
+        decoding="async"
+        className="block max-w-full rounded border border-neutral-200 dark:border-neutral-700"
+        style={{ maxWidth: "100%", height: "auto" }}
+      />
+      {block.credit && (
+        <figcaption className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{block.credit}</figcaption>
+      )}
+    </figure>
+  );
+}
+
+const EMBED_PROVIDER_ICON: Record<EmbedProvider, string> = { twitter: "X", youtube: "▶", clip: "🎬" };
+
+/**
+ * SNS/動画の埋め込みブロック（拡張E3）。実際のiframe・スクリプトは一切読み込まず、
+ * providerが分かるプレースホルダーカード＋元URLへのリンクのみを表示する
+ * （著作権・CSP・SSRF回避のため。dangerouslySetInnerHTMLは使わない）。
+ * parseArticleBody時点でホワイトリスト検証済みだが、表示前にも再検証し不正値は描画しない（二重防御）。
+ */
+function EmbedBlockView({ block }: { block: Extract<ArticleBodyBlock, { type: "embed" }> }) {
+  if (!isAllowedEmbedUrl(block.provider, block.url)) return null;
+  return (
+    <div className="flex flex-col gap-1 rounded border border-dashed border-neutral-400 bg-neutral-50 p-3 text-sm dark:border-neutral-600 dark:bg-neutral-900">
+      <div className="flex items-center gap-2 font-bold text-neutral-700 dark:text-neutral-300">
+        <span
+          aria-hidden="true"
+          className="flex h-5 w-5 items-center justify-center rounded bg-neutral-300 text-[10px] dark:bg-neutral-700"
         >
-          {line.text}
-        </p>
-      ))}
+          {EMBED_PROVIDER_ICON[block.provider]}
+        </span>
+        <span>{EMBED_PROVIDER_LABELS[block.provider]}</span>
+      </div>
+      {block.caption && <p className="text-neutral-600 dark:text-neutral-400">{block.caption}</p>}
+      <a
+        href={block.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="break-all text-sky-700 underline dark:text-sky-400"
+      >
+        {block.url}
+      </a>
+      <p className="text-xs text-neutral-400 dark:text-neutral-500">
+        ※埋め込みは本番接続時に表示されます（現在はリンクのみのプレースホルダー表示です）
+      </p>
     </div>
   );
 }
@@ -89,6 +170,12 @@ export function ArticleBodyView({ blocks }: { blocks: ArticleBodyBlock[] }) {
         }
         if (block.type === "reaction") {
           return <ReactionResView key={index} block={block} />;
+        }
+        if (block.type === "image") {
+          return <ImageBlockView key={index} block={block} />;
+        }
+        if (block.type === "embed") {
+          return <EmbedBlockView key={index} block={block} />;
         }
         return (
           <p key={index} className="text-sm leading-relaxed sm:text-base">
