@@ -7,8 +7,12 @@
 import { PrismaClient } from "@prisma/client";
 import type { ArticleBodyBlock } from "../src/lib/article-body";
 import type { CategoryLabel } from "../src/lib/categories";
+import { extractCommentAnchors } from "../src/lib/comments";
 
 const prisma = new PrismaClient();
+
+/** サンプルコメント（拡張E2）。オリジナルの創作テキスト（実在の書き込みの複製ではない）。 */
+type SeedComment = { name: string; body: string };
 
 type SeedArticle = {
   slug: string;
@@ -19,8 +23,9 @@ type SeedArticle = {
   viewCount: number;
   body: ArticleBodyBlock[];
   sources: { label: string; url: string }[];
-  /** コメント数（拡張E1）。見栄え用のサンプル値。未指定は0。 */
-  commentCount?: number;
+  /** サンプルコメント（拡張E2）。未指定は0件。すべて安全フィルタ通過想定の穏当な内容にする。
+   * Article.commentCount はこの配列の件数から自動算出する（実データと表示件数を一致させるため）。 */
+  comments?: SeedComment[];
   /** 絵文字リアクションのサンプル件数（拡張E1）。未指定はリアクション行なし（=0件表示）。 */
   reactions?: { emoji: string; count: number }[];
 };
@@ -54,7 +59,6 @@ const articles: SeedArticle[] = [
     tags: ["パッチノート", "ジャングル"],
     publishedAt: daysAgo(0, 1),
     viewCount: 4210,
-    commentCount: 58,
     reactions: [
       { emoji: "😡", count: 24 },
       { emoji: "😮", count: 11 },
@@ -86,6 +90,13 @@ const articles: SeedArticle[] = [
       { label: "Riot公式", url: "https://www.leagueoflegends.com/ja-jp/news/game-updates/patch-14-6-notes/" },
       { label: "Reddit", url: "https://www.reddit.com/r/leagueoflegends/" },
     ],
+    comments: [
+      { name: "名無しさん", body: "ジャングル経験値down、正直いい調整だと思う。序盤からレベル差つきすぎだった。" },
+      { name: "名無しさん", body: ">>1\nそれはそうだけど、ガンクの旨味が減って余計にファーミング特化になりそうなのが心配。" },
+      { name: "ジャングル勢", body: "個人的には序盤ガンクの成功率が上がる方向の調整の方が嬉しかったな。" },
+      { name: "名無しさん", body: ">>3\nわかる、経験値を下げるより「ガンク成功時のリターン」を上げる方向の方が試合が動きやすい気がする。" },
+      { name: "名無しさん", body: "次のパッチでどう調整されるか楽しみにしてる。" },
+    ],
   },
   {
     slug: "5ch-yasuo-otp-densetsu-no-play",
@@ -94,7 +105,6 @@ const articles: SeedArticle[] = [
     tags: ["ヤスオ", "神プレイ"],
     publishedAt: daysAgo(0, 4),
     viewCount: 3890,
-    commentCount: 41,
     reactions: [
       { emoji: "😂", count: 33 },
       { emoji: "👍", count: 19 },
@@ -175,6 +185,11 @@ const articles: SeedArticle[] = [
       },
     ),
     sources: [{ label: "5ch", url: "https://leagueoflegends.5ch.net/" }],
+    comments: [
+      { name: "ヤスオ勢", body: "この動画何度見ても壁抜けのタイミングがおかしい、練習量が違う。" },
+      { name: "名無しさん", body: ">>1\n同じく。フラッシュ温存の判断も含めてリプレイ研究の価値ある試合だと思う。" },
+      { name: "名無しさん", body: "コンボ自体もすごいけど、ここまで持っていく前のレーン戦の差も地味に大きい気がする。" },
+    ],
   },
   {
     slug: "worlds-2026-group-stage-draw-kekka",
@@ -183,7 +198,6 @@ const articles: SeedArticle[] = [
     tags: ["世界大会", "eスポーツ"],
     publishedAt: daysAgo(1, 2),
     viewCount: 5210,
-    commentCount: 27,
     reactions: [
       { emoji: "😮", count: 22 },
       { emoji: "👍", count: 14 },
@@ -201,6 +215,12 @@ const articles: SeedArticle[] = [
       },
     ),
     sources: [{ label: "Riot公式", url: "https://lolesports.com/" }],
+    comments: [
+      { name: "名無しさん", body: "このグループ、ほぼ準決勝レベルの対戦カードで草。組み合わせ運が悪すぎる。" },
+      { name: "名無しさん", body: ">>1\n逆に序盤から見応えありすぎて楽しみしかない。" },
+      { name: "eスポーツ好き", body: "毎年この時期の抽選会が一番ワクワクする。今年もどの地域が伸びるか注目してる。" },
+      { name: "名無しさん", body: ">>3\nわかる、抽選結果次第で優勝予想が全部ひっくり返るからな。" },
+    ],
   },
   {
     slug: "overseas-tier-list-patch-146-hantei",
@@ -209,7 +229,6 @@ const articles: SeedArticle[] = [
     tags: ["Tierリスト", "メタ"],
     publishedAt: daysAgo(1, 6),
     viewCount: 2980,
-    commentCount: 19,
     body: body(
       { type: "heading", text: "反応まとめ" },
       {
@@ -292,7 +311,6 @@ const articles: SeedArticle[] = [
     tags: ["新チャンピオン"],
     publishedAt: daysAgo(2, 1),
     viewCount: 6120,
-    commentCount: 63,
     reactions: [
       { emoji: "😮", count: 40 },
       { emoji: "👍", count: 12 },
@@ -319,7 +337,6 @@ const articles: SeedArticle[] = [
     tags: ["サポート", "アイテム"],
     publishedAt: daysAgo(2, 5),
     viewCount: 1870,
-    commentCount: 15,
     body: body(
       { type: "heading", text: "反応まとめ" },
       {
@@ -402,7 +419,6 @@ const articles: SeedArticle[] = [
     tags: ["eスポーツ", "新人選手"],
     publishedAt: daysAgo(3, 3),
     viewCount: 3340,
-    commentCount: 22,
     body: body(
       { type: "heading", text: "試合結果" },
       {
@@ -424,7 +440,6 @@ const articles: SeedArticle[] = [
     tags: ["ジャングル", "神プレイ"],
     publishedAt: daysAgo(4, 2),
     viewCount: 2140,
-    commentCount: 12,
     body: body(
       { type: "heading", text: "反応まとめ" },
       {
@@ -507,7 +522,6 @@ const articles: SeedArticle[] = [
     tags: ["パッチノート", "ADC", "ビルド"],
     publishedAt: daysAgo(5, 4),
     viewCount: 1560,
-    commentCount: 8,
     body: body(
       { type: "heading", text: "アイテム調整の影響" },
       {
@@ -529,7 +543,6 @@ const articles: SeedArticle[] = [
     tags: ["イベント"],
     publishedAt: daysAgo(6, 1),
     viewCount: 2670,
-    commentCount: 17,
     body: body(
       { type: "heading", text: "イベント概要" },
       {
@@ -551,7 +564,6 @@ const articles: SeedArticle[] = [
     tags: ["トップレーン"],
     publishedAt: daysAgo(7, 3),
     viewCount: 1320,
-    commentCount: 9,
     body: body(
       { type: "heading", text: "反応まとめ" },
       {
@@ -634,7 +646,6 @@ const articles: SeedArticle[] = [
     tags: ["eスポーツ", "大会"],
     publishedAt: daysAgo(8, 5),
     viewCount: 1980,
-    commentCount: 11,
     body: body(
       { type: "heading", text: "大会直前の状況" },
       {
@@ -654,6 +665,7 @@ const articles: SeedArticle[] = [
 async function main() {
   console.log(`シード投入開始: ${articles.length}件`);
 
+  await prisma.articleComment.deleteMany();
   await prisma.articleReaction.deleteMany();
   await prisma.articleTag.deleteMany();
   await prisma.articleSource.deleteMany();
@@ -661,7 +673,8 @@ async function main() {
   await prisma.tag.deleteMany();
 
   for (const a of articles) {
-    await prisma.article.create({
+    const comments = a.comments ?? [];
+    const created = await prisma.article.create({
       data: {
         slug: a.slug,
         title: a.title,
@@ -669,7 +682,8 @@ async function main() {
         body: a.body,
         publishedAt: a.publishedAt,
         viewCount: a.viewCount,
-        commentCount: a.commentCount ?? 0,
+        // コメント数（拡張E2）は下で投入する実際のサンプルコメント件数と一致させる。
+        commentCount: comments.length,
         sources: { create: a.sources },
         tags: {
           create: a.tags.map((name) => ({
@@ -684,6 +698,21 @@ async function main() {
         reactions: a.reactions ? { create: a.reactions } : undefined,
       },
     });
+
+    // サンプルコメント（拡張E2）: すべて安全フィルタ通過前提の穏当な創作テキストのため
+    // status="published" で直接投入する（本番の投稿経路は src/lib/comments-db.ts の createComment）。
+    for (const [index, c] of comments.entries()) {
+      await prisma.articleComment.create({
+        data: {
+          articleId: created.id,
+          number: index + 1,
+          name: c.name,
+          body: c.body,
+          anchors: extractCommentAnchors(c.body).length > 0 ? extractCommentAnchors(c.body) : undefined,
+          status: "published",
+        },
+      });
+    }
   }
 
   console.log("シード投入完了");

@@ -45,6 +45,7 @@ model Article {
   sources ArticleSource[]
   collectedItems CollectedItem[]
   reactions ArticleReaction[]
+  comments ArticleComment[]
 
   @@index([publishedAt])
   @@index([category])
@@ -125,6 +126,33 @@ model ArticleReaction {
 
   @@unique([articleId, emoji])
   @@index([articleId])
+}
+
+/// 記事への匿名コメント（拡張E2）。ログイン機能は無い方針のため誰でも投稿できるが、
+/// 既存の安全フィルタ（NGワード・個人中傷/晒し。lib/moderation）で判定し、通過したものだけ
+/// status="published" として公開・Article.commentCount に加算する。不通過は status="held" として
+/// 記録だけ残し、公開サイトには一切表示しない（保留コメントの一覧UIはE7の対象）。
+model ArticleComment {
+  id        String   @id @default(cuid())
+  articleId String
+  article   Article  @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  /// 記事内の表示連番（1始まり）。同一記事内で一意。
+  number    Int
+  /// 匿名ハンドル名。未入力時は既定値（lib/comments.ts の DEFAULT_COMMENT_NAME）。
+  name      String
+  /// コメント本文（閲覧者入力。表示時は必ずReact子要素として描画しHTMLとして解釈しない＝XSS対策）。
+  body      String
+  /// 本文から抽出した ">>N" 形式のアンカー参照先番号（同記事内）。JSON配列。無ければ null。
+  anchors   Json?
+  createdAt DateTime @default(now())
+  /// 公開状態: "published"（一覧に表示）| "held"（安全フィルタ不通過・非公開）。
+  status    String   @default("published")
+  /// 保留理由コード: "ng_word" | "personal_attack"。status="held" のときのみ設定される。
+  heldReason String?
+
+  @@unique([articleId, number])
+  @@index([articleId, status])
+  @@index([status, createdAt])
 }
 
 /// ソースごとの収集実行ログ（F5: 実行間隔の判定・1ソース失敗の記録に使う）。

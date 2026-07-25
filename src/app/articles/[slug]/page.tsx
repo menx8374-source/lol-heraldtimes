@@ -17,6 +17,8 @@ import { PageWithSidebar } from "@/components/page-with-sidebar";
 import { AdSlot } from "@/components/ad-slot";
 import { ShareButtons } from "@/components/share-buttons";
 import { ReactionButtons } from "@/components/reaction-buttons";
+import { CommentSection } from "@/components/comment-section";
+import { listPublishedCommentsBySlug } from "@/lib/comments-db";
 
 type Props = {
   params: Promise<{ slug: string }>;
@@ -61,10 +63,11 @@ export default async function ArticlePage({ params }: Props) {
     notFound();
   }
 
-  // 閲覧数の加算（書き込み）と関連記事の取得（読み込み）は互いに独立なので並列化する。
-  const [, related] = await Promise.all([
+  // 閲覧数の加算（書き込み）・関連記事・コメント一覧の取得は互いに独立なので並列化する。
+  const [, related, comments] = await Promise.all([
     incrementViewCount(article.slug),
     listRelatedArticles(article, 3),
+    listPublishedCommentsBySlug(article.slug),
   ]);
   const categorySlug = categorySlugFor(article.category);
   // まとめ速報レス形式(reactionブロックを含む記事)は掲示板/SNSの反応を逐語で引用・転載しているため、
@@ -180,6 +183,10 @@ export default async function ArticlePage({ params }: Props) {
             ))}
           </ul>
         </section>
+
+        <div id="comments">
+          <CommentSection slug={article.slug} initialComments={comments} />
+        </div>
 
         <section className="mt-8 border-t border-neutral-200 pt-4 dark:border-neutral-800">
           <h2 className="mb-3 text-sm font-bold text-neutral-600 dark:text-neutral-300">関連記事</h2>
