@@ -4,6 +4,8 @@ import { CATEGORY_LABELS, categorySlugFor } from "@/lib/categories";
 import { listAllTagNames } from "@/lib/tags";
 import { listArchiveMonths } from "@/lib/archive";
 import { getSiteUrl, articleUrl } from "@/lib/site";
+import { CHAMPIONS } from "@/lib/lol-data/champions";
+import { PATCHES } from "@/lib/lol-data/patches";
 
 // 自動運営パイプラインが継続的に記事を公開するため、サイトマップはビルド時に
 // 静的化せず毎リクエストDBを再読込する（そうしないと next build 直後のスナップショット
@@ -43,11 +45,23 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ...archiveMonths.map((month) => ({ url: `${siteUrl}/archive/${month.key}` })),
   ];
 
+  // 攻略・データ固定ページ（拡張E6）。DB非依存の静的モックデータで、語彙数が有界なため
+  // 記事数が増え続けてもサイトマップが線形に膨張しない。
+  const lolDataEntries: MetadataRoute.Sitemap = [
+    { url: `${siteUrl}/champions` },
+    ...CHAMPIONS.map((c) => ({ url: `${siteUrl}/champions/${c.slug}` })),
+    { url: `${siteUrl}/patches` },
+    ...PATCHES.map((p) => ({ url: `${siteUrl}/patches/${p.slug}` })),
+    { url: `${siteUrl}/tier` },
+    { url: `${siteUrl}/glossary` },
+  ];
+
   return [
     { url: siteUrl },
     ...categoryEntries,
     ...tagEntries,
     ...archiveEntries,
+    ...lolDataEntries,
     ...articleEntries,
   ];
 }

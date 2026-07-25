@@ -37,6 +37,24 @@ export function SiteHeader() {
             );
           })}
         </nav>
+        {/* 攻略・データ固定ページ（拡張E6）への導線。カテゴリnavとは分けて表示する。 */}
+        <nav
+          aria-label="攻略・データ"
+          className="mt-2 flex flex-wrap gap-x-4 gap-y-1 border-t border-neutral-800 pt-2 text-xs"
+        >
+          <Link href="/champions" className="text-neutral-400 hover:text-white hover:underline">
+            チャンピオン一覧
+          </Link>
+          <Link href="/tier" className="text-neutral-400 hover:text-white hover:underline">
+            Tier表
+          </Link>
+          <Link href="/patches" className="text-neutral-400 hover:text-white hover:underline">
+            パッチノート
+          </Link>
+          <Link href="/glossary" className="text-neutral-400 hover:text-white hover:underline">
+            用語集
+          </Link>
+        </nav>
       </div>
     </header>
   );

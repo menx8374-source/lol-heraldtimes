@@ -92,6 +92,59 @@ describe("sitemap（F13）", () => {
     expect(urls.some((u) => u.endsWith("/archive"))).toBe(true);
     expect(urls.some((u) => u.endsWith("/archive/2026-07"))).toBe(true);
   });
+
+  it("攻略・データ固定ページ一覧・個別ページを含む（拡張E6）", async () => {
+    const entries = await sitemap();
+    const urls = entries.map((e) => e.url);
+
+    expect(urls.some((u) => u.endsWith("/champions"))).toBe(true);
+    expect(urls.some((u) => u.endsWith("/champions/garen"))).toBe(true);
+    expect(urls.some((u) => u.endsWith("/patches"))).toBe(true);
+    expect(urls.some((u) => u.endsWith("/patches/14-13"))).toBe(true);
+    expect(urls.some((u) => u.endsWith("/tier"))).toBe(true);
+    expect(urls.some((u) => u.endsWith("/glossary"))).toBe(true);
+  });
+});
+
+describe("攻略・データ固定ページのメタ情報（拡張E6）", () => {
+  it("チャンピオン詳細ページのタイトルはチャンピオンごとに異なる", async () => {
+    const { generateMetadata } = await import("@/app/champions/[slug]/page");
+    const metaGaren = await generateMetadata({ params: Promise.resolve({ slug: "garen" }) });
+    const metaJinx = await generateMetadata({ params: Promise.resolve({ slug: "jinx" }) });
+    expect(metaGaren.title).not.toBe(metaJinx.title);
+    expect(metaGaren.title).toBeTruthy();
+  });
+
+  it("存在しないチャンピオンスラッグは専用タイトルを返す", async () => {
+    const { generateMetadata } = await import("@/app/champions/[slug]/page");
+    const meta = await generateMetadata({ params: Promise.resolve({ slug: "no-such-champion" }) });
+    expect(meta.title).toBe("チャンピオンが見つかりません");
+  });
+
+  it("パッチ詳細ページのタイトルはバージョンごとに異なる", async () => {
+    const { generateMetadata } = await import("@/app/patches/[version]/page");
+    const meta1 = await generateMetadata({ params: Promise.resolve({ version: "14-13" }) });
+    const meta2 = await generateMetadata({ params: Promise.resolve({ version: "14-12" }) });
+    expect(meta1.title).not.toBe(meta2.title);
+  });
+
+  it("チャンピオン一覧・Tier表・用語集・パッチ一覧はそれぞれ固有のタイトルを持つ", async () => {
+    const { generateMetadata: champMeta } = await import("@/app/champions/page");
+    const { metadata: tierMeta } = await import("@/app/tier/page");
+    const { metadata: patchMeta } = await import("@/app/patches/page");
+    const { generateMetadata: glossaryMeta } = await import("@/app/glossary/page");
+
+    const titles = [
+      (await champMeta({ searchParams: Promise.resolve({}) })).title,
+      tierMeta.title,
+      patchMeta.title,
+      (await glossaryMeta({ searchParams: Promise.resolve({}) })).title,
+    ];
+    expect(new Set(titles).size).toBe(titles.length);
+    for (const t of titles) {
+      expect(t).toBeTruthy();
+    }
+  });
 });
 
 describe("robots（F13）", () => {
