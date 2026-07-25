@@ -3,7 +3,7 @@
  * 記事URL・タイトルを安全にエンコードして埋め込むだけで、外部通信は行わない。
  */
 
-export type ShareTarget = "x" | "line" | "hatena";
+export type ShareTarget = "x" | "line" | "hatena" | "facebook";
 
 /**
  * 対象サービス・記事URL・記事タイトルから共有用URLを組み立てる。
@@ -20,6 +20,8 @@ export function buildShareUrl(target: ShareTarget, url: string, title: string): 
       return `https://social-plugins.line.me/lineit/share?url=${encodedUrl}`;
     case "hatena":
       return `https://b.hatena.ne.jp/entry/panel/?url=${encodedUrl}&title=${encodedTitle}`;
+    case "facebook":
+      return `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`;
     default: {
       const exhaustiveCheck: never = target;
       throw new Error(`未知のシェア対象です: ${String(exhaustiveCheck)}`);

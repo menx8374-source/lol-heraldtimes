@@ -26,6 +26,13 @@ describe("buildShareUrl", () => {
     );
   });
 
+  it("Facebookはシェアリンクにエンコード済みurlのみ含める（拡張E11）", () => {
+    const result = buildShareUrl("facebook", URL, TITLE);
+    expect(result).toBe(
+      `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(URL)}`,
+    );
+  });
+
   it("& や ? を含むタイトル・URLでも壊れず正しくエンコードされる", () => {
     const result = buildShareUrl("x", URL, TITLE);
     expect(result).not.toContain("&特殊文字");
