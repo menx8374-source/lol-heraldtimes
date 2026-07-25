@@ -14,6 +14,7 @@
  * （URLは provider ごとの正規ドメインのホワイトリストで検証、dangerouslySetInnerHTML は使わない）。
  */
 import { isAllowedEmbedUrl, isEmbedProvider, type EmbedProvider } from "@/lib/embed";
+import { isSafeLocalAssetPath } from "@/lib/image-url";
 
 /** レス本文の1行。重要・面白い行は決定論ヒューリスティックで赤/オレンジに強調する（compose.ts参照）。
  * `original` は海外の反応（reddit由来）で原文（英語）を併記する場合のオリジナル創作テキスト
@@ -103,9 +104,9 @@ function parseReactionBlock(b: Record<string, unknown>, index: number): ArticleB
  * データURI（画像のみ）・将来のhttps画像URLのみ許可し、`javascript:` 等の危険スキームを弾く。
  */
 function isSafeImageUrl(url: string): boolean {
-  // ローカル配信パス（public配下）のみ許可。`//host`（プロトコル相対）や `/\host`（ブラウザが
-  // `//` に正規化するバックスラッシュトリック）は外部ホスト読み込みになるため除外する。
-  if (url.startsWith("/") && !url.startsWith("//") && !url.startsWith("/\\")) return true;
+  // ローカル配信パス（public配下・`//`や`/\`の外部誘導は除外）は image-url.ts の共通ヘルパで判定。
+  // 加えて記事本文画像では データURI（画像のみ）・https画像も許可する。
+  if (isSafeLocalAssetPath(url)) return true;
   if (/^data:image\/(png|jpeg|jpg|gif|svg\+xml|webp);/i.test(url)) return true;
   if (/^https:\/\//i.test(url)) return true;
   return false;

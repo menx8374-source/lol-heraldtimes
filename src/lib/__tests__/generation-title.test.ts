@@ -5,6 +5,7 @@ import {
   checkTitleQuality,
   extractConcreteElements,
   generateHookTitle,
+  joinSubjectAndHook,
   zenkakuLength,
   type TitleGenInput,
 } from "@/lib/generation/title";
@@ -143,12 +144,34 @@ describe("generateHookTitle", () => {
     expect(matchedHook).toBeDefined();
   });
 
-  it("生成タイトルの文字数(全角相当)は20〜48に収まる", () => {
+  it("生成タイトルの文字数(全角相当)はMAX_TITLE_LENGTHを超えない(拡張E19: MIN未満は自然な区切りが無い場合のみ許容)", () => {
     for (const sample of SAMPLES) {
       const title = generateHookTitle(sample);
       const len = zenkakuLength(title);
-      expect(len).toBeGreaterThanOrEqual(20);
       expect(len).toBeLessThanOrEqual(48);
+      expect(len).toBeGreaterThan(0);
+    }
+  });
+
+  it("ほとんどのサンプルはMIN_TITLE_LENGTH(20)以上になる(ベストエフォート。自然な区切りが本文中にあれば埋める)", () => {
+    const lengths = SAMPLES.map((sample) => zenkakuLength(generateHookTitle(sample)));
+    const meetsMinCount = lengths.filter((len) => len >= 20).length;
+    expect(meetsMinCount / lengths.length).toBeGreaterThanOrEqual(0.8);
+  });
+
+  it("生成タイトルに省略記号「…」が含まれない(拡張E19 F-E19-4: 完結したタイトルにする)", () => {
+    for (const sample of SAMPLES) {
+      expect(generateHookTitle(sample)).not.toContain("…");
+    }
+  });
+
+  it("フックが読点「、」から始まる場合でも、主語との間で二重の読点にならない(拡張E19)", () => {
+    // フック候補には「、ついに判明」のように先頭に読点を持つものが含まれるため、
+    // 全HOOKSについてjoinSubjectAndHookの結合結果に「、、」が出ず、フックで終わることを確認する。
+    for (const hook of HOOKS) {
+      const joined = joinSubjectAndHook("ダリウス", hook);
+      expect(joined).not.toContain("、、");
+      expect(joined.endsWith(hook)).toBe(true);
     }
   });
 

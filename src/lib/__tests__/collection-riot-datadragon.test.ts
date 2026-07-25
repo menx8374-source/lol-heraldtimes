@@ -3,6 +3,7 @@ import {
   RiotDataDragonAdapter,
   buildChampionItem,
   buildChampionPageUrl,
+  buildChampionSplashUrl,
   buildPatchItem,
   buildPatchNoteUrl,
   selectRotatedChampionIds,
@@ -39,6 +40,11 @@ describe("純関数: buildPatchNoteUrl / buildPatchItem", () => {
     expect(item.sourceUrl).toBe(buildPatchNoteUrl("14.6.1"));
     expect(item.fetchedAt).toBe(now);
   });
+
+  it("新パッチ検知アイテムには画像を設定しない(拡張E19: チャンピオン紹介のみスプラッシュ画像を持つ)", () => {
+    const item = buildPatchItem("14.6.1", new Date());
+    expect(item.imageUrl).toBeFalsy();
+  });
 });
 
 describe("純関数: buildChampionPageUrl / buildChampionItem", () => {
@@ -53,6 +59,14 @@ describe("純関数: buildChampionPageUrl / buildChampionItem", () => {
     expect(item.title).toContain("アーリ");
     expect(item.content).toContain("九つの尾を持つ半人半狐の存在。");
     expect(item.sourceUrl).toBe(buildChampionPageUrl("Ahri"));
+  });
+
+  it("チャンピオン事実紹介アイテムはchampionIdベースのスプラッシュ画像URLをimageUrlに持つ(拡張E19 F-E19-3)", () => {
+    expect(buildChampionSplashUrl("Aatrox")).toBe(
+      "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Aatrox_0.jpg",
+    );
+    const item = buildChampionItem(CHAMPION_DATA.Ahri, new Date());
+    expect(item.imageUrl).toBe("https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ahri_0.jpg");
   });
 });
 

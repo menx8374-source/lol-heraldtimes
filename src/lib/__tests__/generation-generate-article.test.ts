@@ -35,11 +35,11 @@ describe("generateArticleForCandidate（成功パス）", () => {
     expect(() => parseArticleBody(result.body)).not.toThrow();
   });
 
-  it("riot由来はカテゴリ「公式ニュース」、5ch由来は「5chの反応」、reddit由来は「海外の反応」になる", async () => {
+  it("riot由来はカテゴリ「パッチ/メタ」、5ch由来は「5chの反応」、reddit由来は「海外の反応」になる（拡張E19）", async () => {
     const riot = await generateArticleForCandidate(candidate({ sourceType: "riot" }), llm);
     const ch5 = await generateArticleForCandidate(candidate({ sourceType: "5ch" }), llm);
     const reddit = await generateArticleForCandidate(candidate({ sourceType: "reddit" }), llm);
-    expect(riot.category).toBe("公式ニュース");
+    expect(riot.category).toBe("パッチ/メタ");
     expect(ch5.category).toBe("5chの反応");
     expect(reddit.category).toBe("海外の反応");
   });
@@ -56,9 +56,9 @@ describe("generateArticleForCandidate（clip由来=埋め込み紹介形式、�
     });
   }
 
-  it("clip由来はカテゴリ「動画・クリップ」になり、embedブロックを含む本文が生成される", async () => {
+  it("clip由来はカテゴリ「eスポーツ」になり、embedブロックを含む本文が生成される（拡張E19）", async () => {
     const result = await generateArticleForCandidate(clipCandidate(), llm);
-    expect(result.category).toBe("動画・クリップ");
+    expect(result.category).toBe("eスポーツ");
     expect(result.body.some((b) => b.type === "embed")).toBe(true);
     expect(result.body.some((b) => b.type === "heading")).toBe(true);
     expect(result.sources[0].url).toBe("https://www.youtube.com/watch?v=abc123");
@@ -71,6 +71,33 @@ describe("generateArticleForCandidate（clip由来=埋め込み紹介形式、�
     const totalLength = result.body.reduce((sum, b) => sum + blockText(b).length, 0);
     expect(totalLength).toBeLessThan(MIN_BODY_LENGTH);
     expect(result.body.some((b) => b.type === "embed")).toBe(true);
+  });
+});
+
+describe("generateArticleForCandidate（サムネイル画像、拡張E19 F-E19-3）", () => {
+  it("candidate.imageUrlがhttpsの妥当なURLならGeneratedArticle.thumbnailUrlに反映される", async () => {
+    const result = await generateArticleForCandidate(
+      candidate({ imageUrl: "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Lillia_0.jpg" }),
+      llm,
+    );
+    expect(result.thumbnailUrl).toBe(
+      "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Lillia_0.jpg",
+    );
+  });
+
+  it("candidate.imageUrlが未設定(null/undefined)ならthumbnailUrlはnullになる", async () => {
+    const noImage = await generateArticleForCandidate(candidate({ imageUrl: null }), llm);
+    expect(noImage.thumbnailUrl).toBeNull();
+    const undefinedImage = await generateArticleForCandidate(candidate({}), llm);
+    expect(undefinedImage.thumbnailUrl).toBeNull();
+  });
+
+  it("candidate.imageUrlが不正なURL(https以外)の場合はthumbnailUrlをnullにフォールバックする", async () => {
+    const result = await generateArticleForCandidate(
+      candidate({ imageUrl: "http://example.com/not-https.jpg" }),
+      llm,
+    );
+    expect(result.thumbnailUrl).toBeNull();
   });
 });
 

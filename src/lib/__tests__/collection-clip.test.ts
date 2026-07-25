@@ -49,6 +49,19 @@ describe("純関数: YouTube", () => {
     expect(item?.fetchedAt).toEqual(new Date("2026-07-24T09:00:00.000Z"));
   });
 
+  it("snippet.thumbnails.high.urlをimageUrlに設定する(拡張E19 F-E19-3)", () => {
+    const item = buildYouTubeItem({
+      id: { videoId: "vid1" },
+      snippet: { title: "t", thumbnails: { high: { url: "https://i.ytimg.com/vi/vid1/hqdefault.jpg" } } },
+    });
+    expect(item?.imageUrl).toBe("https://i.ytimg.com/vi/vid1/hqdefault.jpg");
+  });
+
+  it("thumbnailsが無ければimageUrlはnullになる", () => {
+    const item = buildYouTubeItem({ id: { videoId: "vid1" }, snippet: { title: "t" } });
+    expect(item?.imageUrl).toBeNull();
+  });
+
   it("videoId/titleが欠けている要素はnullを返す", () => {
     expect(buildYouTubeItem({ id: {}, snippet: { title: "t" } })).toBeNull();
     expect(buildYouTubeItem({ id: { videoId: "v" }, snippet: {} })).toBeNull();
@@ -79,10 +92,17 @@ describe("純関数: Twitch", () => {
       title: "ヤスオの神プレイ",
       broadcaster_name: "テスト配信者",
       created_at: "2026-07-24T10:00:00Z",
+      thumbnail_url: "https://clips-media-assets2.twitch.tv/SampleClip-preview.jpg",
     });
     expect(item?.sourceUrl).toBe("https://clips.twitch.tv/SampleClip");
     expect(item?.content).toContain("テスト配信者");
     expect(item?.fetchedAt).toEqual(new Date("2026-07-24T10:00:00Z"));
+    expect(item?.imageUrl).toBe("https://clips-media-assets2.twitch.tv/SampleClip-preview.jpg");
+  });
+
+  it("thumbnail_urlが無ければimageUrlはnullになる", () => {
+    const item = buildTwitchItem({ id: "c1", url: "https://clips.twitch.tv/SampleClip", title: "t" });
+    expect(item?.imageUrl).toBeNull();
   });
 
   it("url/titleが欠けているクリップはnullを返す", () => {

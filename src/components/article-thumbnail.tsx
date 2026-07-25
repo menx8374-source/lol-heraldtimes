@@ -1,44 +1,30 @@
-import {
-  CATEGORY_GRADIENTS,
-  DEFAULT_CATEGORY_GRADIENT,
-} from "@/lib/categories";
+import { isSafeImageUrl } from "@/lib/image-url";
+
+/** thumbnailUrl未設定/不正なURLの記事に表示する汎用LoLテーマの既定サムネイル画像（拡張E19）。 */
+const DEFAULT_THUMBNAIL_SRC = "/default-thumb.svg";
 
 /**
- * サムネイル画像枠。thumbnailUrl 未設定時はカテゴリごとの色分けプレースホルダーを表示する。
- * 実画像の調達・最適化は本スプリントの対象外（表示領域の確保のみ）。
+ * サムネイル画像枠。thumbnailUrl が安全なURL（自サイトのルート相対パス、または https の外部URL）
+ * のときはそれを表示し、未設定または不正なURLのときは汎用のLoL既定サムネイル画像を表示する
+ * （カテゴリ色のプレースホルダーは拡張E19で廃止）。
  */
 export function ArticleThumbnail({
-  category,
   thumbnailUrl,
   className = "",
 }: {
-  category: string;
   thumbnailUrl: string | null;
   className?: string;
 }) {
-  if (thumbnailUrl) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element -- ローカルSVG等のモック画像のみを想定（拡張E3）
-      <img
-        src={thumbnailUrl}
-        alt=""
-        loading="lazy"
-        decoding="async"
-        className={`object-cover ${className}`}
-      />
-    );
-  }
-
-  const gradient =
-    CATEGORY_GRADIENTS[category as keyof typeof CATEGORY_GRADIENTS] ??
-    DEFAULT_CATEGORY_GRADIENT;
+  const src = isSafeImageUrl(thumbnailUrl) ? thumbnailUrl : DEFAULT_THUMBNAIL_SRC;
 
   return (
-    <div
-      className={`flex items-center justify-center bg-gradient-to-br ${gradient} text-white text-xs font-medium ${className}`}
-      aria-hidden="true"
-    >
-      {category}
-    </div>
+    // eslint-disable-next-line @next/next/no-img-element -- 外部APIの画像URL、またはローカルの既定/モック画像のみを表示対象とする（信頼境界: isSafeImageUrlでhttps/ローカルパスを検証済み）
+    <img
+      src={src}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      className={`object-cover ${className}`}
+    />
   );
 }

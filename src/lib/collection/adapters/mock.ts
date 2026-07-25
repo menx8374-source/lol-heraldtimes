@@ -14,6 +14,8 @@ type FixtureRow = {
   title: string;
   content: string;
   fetchedAt: string;
+  /** サムネイル画像URL（拡張E19）。fixtureに無ければ未設定のままでよい。 */
+  imageUrl?: string | null;
 };
 
 function toRawItems(rows: FixtureRow[]): RawCollectionItem[] {
@@ -22,6 +24,7 @@ function toRawItems(rows: FixtureRow[]): RawCollectionItem[] {
     title: row.title,
     content: row.content,
     fetchedAt: new Date(row.fetchedAt),
+    imageUrl: row.imageUrl,
   }));
 }
 

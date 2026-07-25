@@ -23,6 +23,7 @@ import { computeVerbatimMatchRatio, DEFAULT_VERBATIM_THRESHOLD } from "@/lib/gen
 import { hasAcceptableQuoteRatio } from "@/lib/generation/quote-ratio";
 import { generateHookTitle } from "@/lib/generation/title";
 import { threadBodyText } from "@/lib/generation/thread-format";
+import { isSafeImageUrl } from "@/lib/image-url";
 
 /** 1記事あたりの本文最低文字数（見出し・段落・引用の合計、F7受け入れ基準）。riot(fact形式)のみに適用。 */
 export const MIN_BODY_LENGTH = 300;
@@ -40,6 +41,8 @@ export type GenerationCandidate = {
   sourceUrl: string;
   title: string;
   content: string;
+  /** 収集時に取得したサムネイル画像URL（拡張E19）。未設定/nullは記事のサムネイルも未設定になる。 */
+  imageUrl?: string | null;
 };
 
 export type GeneratedArticle = {
@@ -48,13 +51,20 @@ export type GeneratedArticle = {
   category: CategoryLabel;
   body: ArticleBodyBlock[];
   sources: { label: string; url: string }[];
+  /**
+   * 記事サムネイル画像URL（拡張E19）。candidate.imageUrl が https の妥当なURLのときのみ設定し、
+   * それ以外（未設定・不正値）は null にする（表示側 article-thumbnail.tsx が既定画像にフォールバックする）。
+   */
+  thumbnailUrl: string | null;
 };
 
 const CATEGORY_BY_SOURCE: Record<SourceType, CategoryLabel> = {
   "5ch": "5chの反応",
   reddit: "海外の反応",
-  riot: "公式ニュース",
-  clip: "動画・クリップ",
+  // Riot Data Dragon はパッチ/チャンピオンの公式データそのものなので「パッチ/メタ」に分類する（拡張E19 F-E19-1）。
+  riot: "パッチ/メタ",
+  // YouTube/Twitchのプレイクリップはeスポーツ的ハイライトとして扱う（拡張E19 F-E19-2）。
+  clip: "eスポーツ",
 };
 
 const ARTICLE_SOURCE_LABEL: Record<SourceType, string> = {
@@ -125,5 +135,6 @@ export async function generateArticleForCandidate(
     category: CATEGORY_BY_SOURCE[candidate.sourceType],
     body,
     sources: [{ label: ARTICLE_SOURCE_LABEL[candidate.sourceType], url: candidate.sourceUrl }],
+    thumbnailUrl: isSafeImageUrl(candidate.imageUrl) ? candidate.imageUrl : null,
   };
 }

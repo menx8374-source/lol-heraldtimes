@@ -21,7 +21,12 @@ class FakeAdapter implements SourceAdapter {
   }
 }
 
-function item(overrides: { sourceUrl: string; title: string; content: string }): RawCollectionItem {
+function item(overrides: {
+  sourceUrl: string;
+  title: string;
+  content: string;
+  imageUrl?: string | null;
+}): RawCollectionItem {
   return { fetchedAt: new Date("2026-07-20T00:00:00+09:00"), ...overrides };
 }
 
@@ -79,6 +84,44 @@ describe("runFullPipeline（統合パイプライン）", () => {
     expect(log?.collectedCount).toBe(report.collectedCount);
     expect(log?.candidateCount).toBe(report.candidateCount);
     expect(log?.publishedCount).toBe(report.publishedCount);
+  });
+
+  it("収集アイテムのimageUrlが公開記事のthumbnailUrlに反映される(拡張E19 F-E19-3)", async () => {
+    const splashUrl = "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Lillia_0.jpg";
+    const adapters = [
+      new FakeAdapter("riot", [
+        item({
+          sourceUrl: "https://www.leagueoflegends.com/ja-jp/champions/lillia/",
+          title: "【チャンピオン紹介】リリア（夢の子鹿）",
+          content: "リリアは夢を司る子鹿の精霊であり、眠りの森を守るチャンピオンだ。",
+          imageUrl: splashUrl,
+        }),
+      ]),
+    ];
+
+    const report = await runFullPipeline({ adapters, llmClient: llm, now: T0 });
+    expect(report.publishedCount).toBeGreaterThan(0);
+
+    const published = await prisma.article.findFirst({ where: { status: "published" } });
+    expect(published?.thumbnailUrl).toBe(splashUrl);
+  });
+
+  it("収集アイテムにimageUrlが無い場合、公開記事のthumbnailUrlはnullのままになる(表示側が既定画像にフォールバックする)", async () => {
+    const adapters = [
+      new FakeAdapter("riot", [
+        item({
+          sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/patch-15-9/",
+          title: "パッチ15.9ノート公開",
+          content: "本パッチではサポートアイテムの一部性能が調整された。",
+        }),
+      ]),
+    ];
+
+    const report = await runFullPipeline({ adapters, llmClient: llm, now: T0 });
+    expect(report.publishedCount).toBeGreaterThan(0);
+
+    const published = await prisma.article.findFirst({ where: { status: "published" } });
+    expect(published?.thumbnailUrl).toBeNull();
   });
 
   it("1回の実行で公開する記事本数の上限を超えて一度に公開しない", async () => {

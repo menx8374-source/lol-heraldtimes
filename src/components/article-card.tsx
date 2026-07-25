@@ -16,7 +16,6 @@ export function ArticleCard({ article }: { article: ArticleSummary }) {
       className="flex gap-3 rounded-lg border border-neutral-200 bg-white p-3 shadow-sm sm:gap-5 sm:p-4 dark:border-neutral-700 dark:bg-neutral-900"
     >
       <ArticleThumbnail
-        category={article.category}
         thumbnailUrl={article.thumbnailUrl}
         className="h-16 w-16 shrink-0 rounded-md sm:h-24 sm:w-40 md:h-28 md:w-48"
       />

@@ -24,7 +24,6 @@ export function PickupCarousel({ articles }: { articles: ArticleSummary[] }) {
           >
             <div className="relative">
               <ArticleThumbnail
-                category={article.category}
                 thumbnailUrl={article.thumbnailUrl}
                 className="h-20 w-full rounded-md sm:h-24"
               />
@@ -34,7 +33,7 @@ export function PickupCarousel({ articles }: { articles: ArticleSummary[] }) {
                 </span>
               )}
             </div>
-            <p className="line-clamp-2 text-xs font-bold leading-snug sm:text-sm">
+            <p className="text-xs font-bold leading-snug break-words sm:text-sm">
               {article.title}
             </p>
           </Link>

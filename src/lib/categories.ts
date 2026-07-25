@@ -8,8 +8,6 @@ export const CATEGORY_GRADIENTS = {
   "5chの反応": "from-amber-600 to-amber-800",
   "海外の反応": "from-emerald-600 to-emerald-800",
   "eスポーツ": "from-rose-600 to-rose-800",
-  "公式ニュース": "from-violet-600 to-violet-800",
-  "動画・クリップ": "from-red-600 to-red-800",
 } as const;
 
 /** 定義済みカテゴリの表示ラベル。 */
@@ -31,8 +29,6 @@ export const CATEGORY_SLUGS: Record<CategoryLabel, string> = {
   "5chの反応": "5ch",
   "海外の反応": "overseas",
   "eスポーツ": "esports",
-  "公式ニュース": "official",
-  "動画・クリップ": "clips",
 };
 
 const SLUG_TO_CATEGORY_LABEL: Record<string, CategoryLabel> = Object.fromEntries(

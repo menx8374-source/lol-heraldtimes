@@ -192,15 +192,27 @@ function takeZenkaku(text: string, targetLen: number): string {
   return acc;
 }
 
+/** 句読点等、テキストを自然に区切れる文字（この文字の直後で切れば読める形で完結する）。 */
+const NATURAL_BREAK_CHARS = ["。", "、", "！", "？"];
+
 /**
- * pool（本文+フィラー）から targetLen（全角相当）ぶんの文脈テキストを切り出す。
- * text-utils.ts の gistOf と同じ慣習で、途中で切れた場合は末尾に「…」を付け、
- * 生の文字列が単語の途中でぶつ切りになったまま見えるのを避ける。
+ * pool（本文+フィラー）から targetLen（全角相当）以内で、句読点等の自然な区切りまでの
+ * テキストを切り出す（拡張E19: 省略記号「…」は使わず、完結した読める形にする）。
+ * targetLen以内に自然な区切りが1つも見つからない場合は、単語の途中でぶつ切りにするより
+ * 潔く諦めて空文字を返す（呼び出し側がフィラー無しの完結したタイトルにフォールバックする）。
  */
 function buildCoreText(pool: string, targetLen: number): string {
   if (targetLen <= 0) return "";
-  const taken = takeZenkaku(pool, Math.max(0, targetLen - 1));
-  return taken.length < pool.length ? `${taken}…` : taken;
+  const taken = takeZenkaku(pool, targetLen);
+  if (taken.length >= pool.length) return taken; // プール全体がそのまま収まった(フィラーが十分長いため通常は稀)
+
+  for (let i = taken.length - 1; i >= 0; i--) {
+    if (NATURAL_BREAK_CHARS.includes(taken[i])) {
+      // 区切り文字自体は含めない(呼び出し側で「、」を付けてフックへ接続するため)。
+      return taken.slice(0, i);
+    }
+  }
+  return "";
 }
 
 export type TitleGenInput = { title: string; content: string };
@@ -215,8 +227,18 @@ function fallbackSubject(input: TitleGenInput): string {
 }
 
 /**
+ * 主語とフックを1つの文につなげる。フック自身が読点「、」から始まる場合（例「、ついに判明」）は
+ * 主語側で重ねて読点を付けない（「主語、、フック」という不自然な二重読点を避ける。拡張E19 F-E19-4）。
+ */
+export function joinSubjectAndHook(subject: string, hook: string): string {
+  return hook.startsWith("、") ? `${subject}${hook}` : `${subject}、${hook}`;
+}
+
+/**
  * 記事化候補（原題+本文）からまとめ速報型タイトルを1本生成する。
  * 冒頭に【ラベル】、本文由来の具体要素、末尾に感情フックを含み、文字数を20〜48（全角相当）に収める。
+ * 省略記号「…」は使わない。文字数がMIN_TITLE_LENGTHに満たない場合でも、本文中に自然に切れる
+ * 区切りが見つからなければ無理に埋めず、完結した「【ラベル】主語＋フック」を返す（拡張E19 F-E19-4）。
  */
 export function generateHookTitle(input: TitleGenInput): string {
   const sourceText = `${input.title}\n${input.content}`;
@@ -229,7 +251,7 @@ export function generateHookTitle(input: TitleGenInput): string {
   const hook = pickFromArray(HOOKS, `${sourceText}::hook`);
   const prefix = `【${label}】`;
 
-  const fixedText = `${prefix}${subject}、${hook}`;
+  const fixedText = `${prefix}${joinSubjectAndHook(subject, hook)}`;
   const fixedLen = zenkakuLength(fixedText);
 
   if (fixedLen > MAX_TITLE_LENGTH) {
@@ -237,38 +259,38 @@ export function generateHookTitle(input: TitleGenInput): string {
     const overBy = fixedLen - MAX_TITLE_LENGTH;
     const targetSubjectLen = Math.max(1, zenkakuLength(subject) - overBy);
     const trimmedSubject = takeZenkaku(subject, targetSubjectLen) || subject.slice(0, 1);
-    return `${prefix}${trimmedSubject}、${hook}`;
+    return `${prefix}${joinSubjectAndHook(trimmedSubject, hook)}`;
   }
 
   if (fixedLen >= MIN_TITLE_LENGTH) {
     return fixedText;
   }
 
-  // 文字数が足りない場合、本文由来のテキスト(+安全な汎用フィラー)で【主語】と【フック】の間を埋める。
-  const minCoreLen = MIN_TITLE_LENGTH - fixedLen;
+  // 文字数が足りない場合、本文由来のテキスト(+安全な汎用フィラー)から自然な区切りまでを
+  // 【主語】と【フック】の間に挟んで近づける。MAX_TITLE_LENGTHの許容枠いっぱいまでの範囲で
+  // 直近の自然な区切り(句読点)を探す（できるだけMIN_TITLE_LENGTHに近づけるため）。
+  // 自然に切れる箇所が全く見つからなければ「…」や不自然な埋め文字は使わず、
+  // 完結した fixedText をそのまま返す(MIN_TITLE_LENGTH未満でも許容)。
   const maxCoreLen = MAX_TITLE_LENGTH - fixedLen;
-  const desiredCoreLen = Math.min(maxCoreLen, minCoreLen + 4);
+  if (maxCoreLen <= 0) return fixedText;
+
   const contentPool = input.content.trim();
   const contextPool = stripNgWords(
     contentPool.length > 0 ? `${contentPool}。${FILLER_PADDING}` : FILLER_PADDING,
   );
-  let core = buildCoreText(contextPool, desiredCoreLen);
+  let core = buildCoreText(contextPool, maxCoreLen);
+  if (core.length === 0) return fixedText;
 
   let title = `${prefix}${subject}、${core}${hook}`;
 
-  // 丸め誤差(半角/全角混在)で範囲を僅かに外れるケースのみ、最終ガードとして微調整する。
+  // 丸め誤差(半角/全角混在)でMAXを僅かに超えるケースのみ、core を短縮して収める(「…」は付けない)。
   let guard = 0;
-  while (zenkakuLength(title) < MIN_TITLE_LENGTH && guard < 20) {
-    core += "。";
-    title = `${prefix}${subject}、${core}${hook}`;
-    guard++;
-  }
-  guard = 0;
   while (zenkakuLength(title) > MAX_TITLE_LENGTH && core.length > 0 && guard < 100) {
     core = core.slice(0, -1);
     title = `${prefix}${subject}、${core}${hook}`;
     guard++;
   }
+  if (core.length === 0) return fixedText;
 
   return title;
 }

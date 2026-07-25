@@ -3,18 +3,21 @@
     "sourceUrl": "https://www.youtube.com/watch?v=lolFixtureVideo01",
     "title": "【LoL】パッチ14.6 最強アウトプレイ集がヤバすぎる",
     "content": "今週のLoL神プレイをまとめたハイライト動画。（投稿者: LoLハイライトch）",
-    "fetchedAt": "2026-07-24T15:00:00+09:00"
+    "fetchedAt": "2026-07-24T15:00:00+09:00",
+    "imageUrl": "https://i.ytimg.com/vi/lolFixtureVideo01/hqdefault.jpg"
   },
   {
     "sourceUrl": "https://clips.twitch.tv/FixtureYasuoOutplayClip",
     "title": "ヤスオが壁飛びコンボでペンタキルを決める瞬間",
     "content": "配信者Nightblue3によるLeague of Legendsの配信クリップ。",
-    "fetchedAt": "2026-07-24T16:00:00+09:00"
+    "fetchedAt": "2026-07-24T16:00:00+09:00",
+    "imageUrl": "https://clips-media-assets2.twitch.tv/FixtureYasuoOutplayClip-preview.jpg"
   },
   {
     "sourceUrl": "https://www.youtube.com/watch?v=lolFixtureVideo02",
     "title": "World Championship 2026 ハイライトダイジェスト",
     "content": "eスポーツ大会の名場面をまとめたダイジェスト動画。（投稿者: LoL Esports 公式）",
-    "fetchedAt": "2026-07-24T17:00:00+09:00"
+    "fetchedAt": "2026-07-24T17:00:00+09:00",
+    "imageUrl": "https://i.ytimg.com/vi/lolFixtureVideo02/hqdefault.jpg"
   }
 ]

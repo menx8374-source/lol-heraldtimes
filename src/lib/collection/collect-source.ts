@@ -20,7 +20,16 @@ export function toCollectionItems(sourceType: SourceType, raw: RawCollectionItem
   for (const r of raw) {
     const url = r.sourceUrl?.trim();
     if (!url) continue;
-    items.push({ sourceType, sourceUrl: url, title: r.title, content: r.content, fetchedAt: r.fetchedAt });
+    items.push({
+      sourceType,
+      sourceUrl: url,
+      title: r.title,
+      content: r.content,
+      fetchedAt: r.fetchedAt,
+      // 未設定(undefined)のときはキー自体を残しても toEqual 等の比較上は無視されるため、
+      // 素直に転記するだけでよい(既存の共通フォーマット比較テストへの影響を避ける)。
+      imageUrl: r.imageUrl,
+    });
   }
   return items;
 }

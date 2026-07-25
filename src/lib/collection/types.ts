@@ -24,6 +24,12 @@ export type RawCollectionItem = {
   /** 取得本文、または反応の抜粋。 */
   content: string;
   fetchedAt: Date;
+  /**
+   * 記事サムネイルに使う画像URL（拡張E19 F-E19-3）。Riotチャンピオンのスプラッシュ画像・
+   * Redditの投稿画像・YouTube/Twitchのサムネイルなど。無ければ未設定/nullでよい
+   * （表示側 article-thumbnail.tsx が既定画像にフォールバックする）。
+   */
+  imageUrl?: string | null;
 };
 
 /** 出典URLを必ず持つ、保存可能な収集アイテム（共通フォーマット）。 */
@@ -33,6 +39,8 @@ export type CollectionItem = {
   title: string;
   content: string;
   fetchedAt: Date;
+  /** サムネイル画像URL（拡張E19）。未設定/nullは既定画像にフォールバックする。 */
+  imageUrl?: string | null;
 };
 
 /** ソースごとのレート制限設定（F5: 取得件数上限・実行間隔）。 */

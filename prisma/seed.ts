@@ -42,12 +42,12 @@ function body(...blocks: ArticleBodyBlock[]): ArticleBodyBlock[] {
 }
 
 // 値は lib/categories.ts の定義済みラベルに型で束縛し、表記ズレを防ぐ（ズレると型エラーになる）。
+// 拡張E19: 「公式ニュース」カテゴリは廃止し、Riot公式由来の記事は「パッチ/メタ」に統合した。
 const CATEGORIES = {
   patch: "パッチ/メタ",
   ch5: "5chの反応",
   overseas: "海外の反応",
   esports: "eスポーツ",
-  official: "公式ニュース",
 } as const satisfies Record<string, CategoryLabel>;
 
 const baseDate = new Date("2026-07-25T09:00:00+09:00");
@@ -393,7 +393,7 @@ const articles: SeedArticle[] = [
   {
     slug: "official-new-champion-teaser-koukai",
     title: "【公式】新チャンピオンのティザー映像が公開、正体を巡り憶測合戦に",
-    category: CATEGORIES.official,
+    category: CATEGORIES.patch,
     tags: ["新チャンピオン"],
     publishedAt: daysAgo(2, 1),
     viewCount: 6120,
@@ -625,7 +625,7 @@ const articles: SeedArticle[] = [
   {
     slug: "official-anniversary-event-kaishi",
     title: "【公式】周年記念イベント開始、限定コンテンツ多数追加",
-    category: CATEGORIES.official,
+    category: CATEGORIES.patch,
     tags: ["イベント"],
     publishedAt: daysAgo(6, 1),
     viewCount: 2670,

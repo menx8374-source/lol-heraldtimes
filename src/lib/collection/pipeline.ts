@@ -44,6 +44,7 @@ async function logFetch(data: {
 
 async function persistItem(item: CollectionItem): Promise<void> {
   const normalizedUrl = normalizeUrl(item.sourceUrl);
+  const imageUrl = item.imageUrl ?? null;
   await prisma.collectedItem.upsert({
     where: { normalizedUrl },
     create: {
@@ -53,12 +54,14 @@ async function persistItem(item: CollectionItem): Promise<void> {
       title: item.title,
       content: item.content,
       fetchedAt: item.fetchedAt,
+      imageUrl,
     },
     update: {
       sourceUrl: item.sourceUrl,
       title: item.title,
       content: item.content,
       fetchedAt: item.fetchedAt,
+      imageUrl,
     },
   });
 }

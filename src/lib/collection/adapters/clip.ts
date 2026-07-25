@@ -41,7 +41,13 @@ export function buildYouTubeSearchUrl(apiKey: string): string {
 
 type YouTubeSearchItem = {
   id?: { videoId?: string };
-  snippet?: { title?: string; description?: string; channelTitle?: string; publishedAt?: string };
+  snippet?: {
+    title?: string;
+    description?: string;
+    channelTitle?: string;
+    publishedAt?: string;
+    thumbnails?: { high?: { url?: string } };
+  };
 };
 export type YouTubeSearchResponse = { items?: YouTubeSearchItem[] };
 
@@ -67,6 +73,7 @@ export function buildYouTubeItem(item: YouTubeSearchItem): RawCollectionItem | n
     title,
     content: buildYouTubeContent(item.snippet?.description ?? "", item.snippet?.channelTitle),
     fetchedAt: item.snippet?.publishedAt ? new Date(item.snippet.publishedAt) : new Date(),
+    imageUrl: item.snippet?.thumbnails?.high?.url ?? null,
   };
 }
 
@@ -103,7 +110,14 @@ export function buildTwitchClipsUrl(): string {
   return `${TWITCH_CLIPS_URL}?${params.toString()}`;
 }
 
-type TwitchClip = { id?: string; url?: string; title?: string; broadcaster_name?: string; created_at?: string };
+type TwitchClip = {
+  id?: string;
+  url?: string;
+  title?: string;
+  broadcaster_name?: string;
+  created_at?: string;
+  thumbnail_url?: string;
+};
 export type TwitchClipsResponse = { data?: TwitchClip[] };
 
 /** クリップの配信者名を含む紹介文を組み立てる。 */
@@ -121,6 +135,7 @@ export function buildTwitchItem(clip: TwitchClip): RawCollectionItem | null {
     title: clip.title,
     content: buildTwitchContent(clip.broadcaster_name),
     fetchedAt: clip.created_at ? new Date(clip.created_at) : new Date(),
+    imageUrl: clip.thumbnail_url ?? null,
   };
 }
 

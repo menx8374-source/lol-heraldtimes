@@ -107,6 +107,7 @@ export async function generateArticlesForQueue(
       sourceUrl: item.sourceUrl,
       title: item.title,
       content: item.content,
+      imageUrl: item.imageUrl,
     };
 
     try {
@@ -131,6 +132,7 @@ export async function generateArticlesForQueue(
             title: generated.title,
             category: generated.category,
             body: generated.body,
+            thumbnailUrl: generated.thumbnailUrl,
             publishedAt: new Date(),
             status: isPublished ? "published" : "held",
             heldReason: isPublished ? null : moderation.reason,

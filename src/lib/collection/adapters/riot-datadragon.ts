@@ -61,6 +61,14 @@ export function buildChampionPageUrl(championId: string): string {
   return `https://www.leagueoflegends.com/ja-jp/champions/${championId.toLowerCase()}/`;
 }
 
+/**
+ * チャンピオンのスプラッシュ画像URLを構築する（拡張E19 F-E19-3、記事サムネイルに使用）。
+ * Data Dragon の championId（champion.json のキー、例 "Aatrox"）をそのまま使う公開CDNのURL。
+ */
+export function buildChampionSplashUrl(championId: string): string {
+  return `https://ddragon.leagueoflegends.com/cdn/img/champion/splash/${championId}_0.jpg`;
+}
+
 /** チャンピオン事実紹介アイテムを組み立てる（公式 name/title/blurb/tags ベースの事実content）。 */
 export function buildChampionItem(champion: ChampionSummary, now: Date): RawCollectionItem {
   const roleLabel = champion.tags && champion.tags.length > 0 ? `${champion.tags.join("・")}タイプの` : "";
@@ -69,6 +77,7 @@ export function buildChampionItem(champion: ChampionSummary, now: Date): RawColl
     title: `【チャンピオン紹介】${champion.name}（${champion.title}）`,
     content: `${champion.name}は${roleLabel}チャンピオン。${champion.blurb}`,
     fetchedAt: now,
+    imageUrl: buildChampionSplashUrl(champion.id),
   };
 }
 

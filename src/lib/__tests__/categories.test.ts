@@ -5,6 +5,16 @@ import {
   categorySlugFor,
 } from "@/lib/categories";
 
+describe("カテゴリ整理（拡張E19 F-E19-1/2）", () => {
+  it("「公式ニュース」「動画・クリップ」は廃止され、4カテゴリのみが残る", () => {
+    expect(CATEGORY_LABELS).not.toContain("公式ニュース");
+    expect(CATEGORY_LABELS).not.toContain("動画・クリップ");
+    expect(CATEGORY_LABELS.sort()).toEqual(
+      ["パッチ/メタ", "5chの反応", "海外の反応", "eスポーツ"].sort(),
+    );
+  });
+});
+
 describe("categorySlugFor / categoryLabelForSlug", () => {
   it("全カテゴリラベルにASCII安全なスラッグが定義され、相互変換できる", () => {
     for (const label of CATEGORY_LABELS) {

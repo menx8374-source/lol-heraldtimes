@@ -60,6 +60,10 @@ export type RedditPostData = {
   title: string;
   selftext?: string;
   created_utc: number;
+  /** 投稿画像プレビュー（Redditが自動生成する画像バリエーション）。あれば最優先で使う。 */
+  preview?: { images?: { source?: { url?: string } }[] };
+  /** サムネイルURL、または"self"/"default"/"nsfw"/"spoiler"等の非画像プレースホルダー文字列。 */
+  thumbnail?: string;
 };
 
 type RedditListingChild = { data?: RedditPostData };
@@ -82,6 +86,26 @@ export function buildPostUrl(permalink: string): string {
   return `https://www.reddit.com${permalink}`;
 }
 
+/** Redditが返す非画像のプレースホルダー thumbnail 値（"self"投稿・画像なし・NSFW/スポイラー隠し等）。 */
+const NON_IMAGE_THUMBNAIL_VALUES = new Set(["self", "default", "nsfw", "spoiler", "image", ""]);
+
+/**
+ * 投稿の画像URLを抽出する（拡張E19 F-E19-3）。`preview.images[0].source.url`（HTMLエンティティ
+ * `&amp;` をデコード）を最優先し、無ければ `thumbnail` が `http(s)` の実画像URLのときそれを使う。
+ * どちらも無ければ null（記事は既定サムネイル画像にフォールバックする）。
+ */
+export function extractRedditImageUrl(post: RedditPostData): string | null {
+  const previewUrl = post.preview?.images?.[0]?.source?.url;
+  if (previewUrl && previewUrl.trim().length > 0) {
+    return previewUrl.replace(/&amp;/g, "&");
+  }
+  const thumbnail = post.thumbnail;
+  if (thumbnail && /^https?:\/\//.test(thumbnail) && !NON_IMAGE_THUMBNAIL_VALUES.has(thumbnail.toLowerCase())) {
+    return thumbnail;
+  }
+  return null;
+}
+
 /** Reddit投稿1件を RawCollectionItem に整形する（selftext優先、無ければタイトルで代替）。 */
 export function buildRedditItem(post: RedditPostData): RawCollectionItem {
   const content = post.selftext && post.selftext.trim().length > 0 ? post.selftext : post.title;
@@ -90,6 +114,7 @@ export function buildRedditItem(post: RedditPostData): RawCollectionItem {
     title: post.title,
     content,
     fetchedAt: new Date(post.created_utc * 1000),
+    imageUrl: extractRedditImageUrl(post),
   };
 }
 

@@ -105,6 +105,9 @@ model CollectedItem {
   title         String
   /// 取得本文または反応抜粋
   content       String
+  /// サムネイル画像URL（拡張E19）。アダプタが取得元の画像（Riotスプラッシュ/Reddit投稿画像/
+  /// YouTube・Twitchサムネイル）を設定する。未設定は null（表示側が既定画像にフォールバックする）。
+  imageUrl      String?
   /// ソース側での投稿・取得日時
   fetchedAt     DateTime
   createdAt     DateTime @default(now())

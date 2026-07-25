@@ -4,6 +4,7 @@ import {
   buildPostUrl,
   buildRedditItem,
   extractPosts,
+  extractRedditImageUrl,
   type RedditListingResponse,
   type RedditPostData,
 } from "@/lib/collection/adapters/reddit";
@@ -72,6 +73,37 @@ describe("純関数: buildPostUrl / buildRedditItem / extractPosts", () => {
 
   it("children未定義でも空配列を返す", () => {
     expect(extractPosts({})).toEqual([]);
+  });
+});
+
+describe("extractRedditImageUrl（拡張E19 F-E19-3）", () => {
+  it("preview.images[0].source.urlがあれば最優先で使い、HTMLエンティティ&amp;をデコードする", () => {
+    const p = post({
+      preview: {
+        images: [{ source: { url: "https://preview.redd.it/abc.jpg?width=640&amp;auto=webp&amp;s=xyz" } }],
+      },
+      thumbnail: "https://b.thumbs.redditmedia.com/should-not-be-used.jpg",
+    });
+    expect(extractRedditImageUrl(p)).toBe("https://preview.redd.it/abc.jpg?width=640&auto=webp&s=xyz");
+  });
+
+  it("previewが無くthumbnailがhttp(s)の実画像URLならそれを使う", () => {
+    const p = post({ thumbnail: "https://b.thumbs.redditmedia.com/real-thumb.jpg" });
+    expect(extractRedditImageUrl(p)).toBe("https://b.thumbs.redditmedia.com/real-thumb.jpg");
+  });
+
+  it("thumbnailが'self'/'default'等の非画像プレースホルダーの場合はnullを返す", () => {
+    expect(extractRedditImageUrl(post({ thumbnail: "self" }))).toBeNull();
+    expect(extractRedditImageUrl(post({ thumbnail: "default" }))).toBeNull();
+  });
+
+  it("previewもthumbnailも無ければnullを返す", () => {
+    expect(extractRedditImageUrl(post({ thumbnail: undefined }))).toBeNull();
+  });
+
+  it("buildRedditItemはimageUrlをRawCollectionItemに反映する", () => {
+    const p = post({ thumbnail: "https://b.thumbs.redditmedia.com/real-thumb.jpg" });
+    expect(buildRedditItem(p).imageUrl).toBe("https://b.thumbs.redditmedia.com/real-thumb.jpg");
   });
 });
 
