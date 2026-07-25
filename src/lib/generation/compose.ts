@@ -1,8 +1,9 @@
 /**
  * 記事本文の構成組み立て（F7）。LLMClient経由でリライト文を取得しつつ、
  * ソース種別による構成分岐を適用する。
- * - 掲示板/Reddit（5ch/reddit）: 収集したスレッドのレス群を番号付きレスとして逐語のまま並べる
- *   「まとめ速報レス形式」（2026-07-25 ユーザー決定の記事フォーマット改修）。
+ * - 掲示板/Reddit（5ch/reddit）: AI要約段落を持たず、「反応まとめ」見出し＋収集したスレッドの
+ *   レス群を番号付きレスとして逐語のまま並べるだけの「レス羅列中心」構成（2026-07-25 ユーザー決定の
+ *   記事フォーマット改修。同日の追加改修でAI導入/まとめ段落を除去しさらにシンプル化）。
  * - Riot公式（riot）: 「事実の速報＋要点整理」構成（従来どおり、引用ブロックは主従関係を保つ）。
  */
 import type { ArticleBodyBlock, ArticleBodyReactionBlock } from "@/lib/article-body";
@@ -103,26 +104,17 @@ async function composeFactBody(
 
 /**
  * 掲示板/Reddit（5ch/reddit）由来: 「まとめ速報レス形式」で本文ブロックを組み立てる。
- * 導入・まとめは自サイト生成文（LLM）だが、中核はスレッドのレス群を逐語のまま並べた reaction ブロック。
+ * AI要約段落は付けず、「反応まとめ」見出し＋スレッドのレス群を逐語のまま並べた reaction ブロックのみで
+ * 構成する（2026-07-25 ユーザー決定: レスの羅列中心のシンプルなまとめ構成への改修）。
  */
-async function composeReactionBody(
+function composeReactionBody(
   candidate: GenerationCandidateInput,
   sourceType: "5ch" | "reddit",
-  llmClient: LLMClient,
-): Promise<ArticleBodyBlock[]> {
-  const { title } = candidate;
+): ArticleBodyBlock[] {
   const blocks: ArticleBodyBlock[] = [];
 
-  blocks.push({ type: "heading", text: "話題" });
-  blocks.push({ type: "paragraph", text: await askLLM(llmClient, { kind: "intro", sourceType, title }) });
-
-  blocks.push({ type: "heading", text: "寄せられたレス" });
+  blocks.push({ type: "heading", text: "反応まとめ" });
   blocks.push(...buildReactionBlocks(candidate, sourceType));
-
-  blocks.push({ type: "paragraph", text: await askLLM(llmClient, { kind: "context", sourceType, title }) });
-
-  blocks.push({ type: "heading", text: "まとめ" });
-  blocks.push({ type: "paragraph", text: await askLLM(llmClient, { kind: "closing", sourceType, title }) });
 
   return blocks;
 }
@@ -139,5 +131,5 @@ export async function composeArticleBody(
     const sentences = splitIntoSentences(candidate.content);
     return composeFactBody(candidate, sentences, llmClient);
   }
-  return composeReactionBody(candidate, candidate.sourceType, llmClient);
+  return composeReactionBody(candidate, candidate.sourceType);
 }

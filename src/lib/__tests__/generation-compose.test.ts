@@ -22,7 +22,7 @@ describe("composeArticleBody", () => {
     expect(body.some((b) => b.type === "quote")).toBe(true);
   });
 
-  it("5ch由来は「話題」→「寄せられたレス」→「まとめ」の見出し構成になる(まとめ速報レス形式)", async () => {
+  it("5ch由来は「反応まとめ」見出し＋レス群のみになる(AI要約段落なし・まとめ速報レス形式)", async () => {
     const body = await composeArticleBody(
       {
         sourceType: "5ch",
@@ -33,7 +33,9 @@ describe("composeArticleBody", () => {
       llm,
     );
     const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
-    expect(headings).toEqual(["話題", "寄せられたレス", "まとめ"]);
+    expect(headings).toEqual(["反応まとめ"]);
+    // AI導入段落・contextの雑談段落は無い(見出し＋reactionブロックのみ)
+    expect(body.every((b) => b.type === "heading" || b.type === "reaction")).toBe(true);
 
     // レス群がreactionブロックとして番号付きで並んでいる(逐語表示・まとめ速報レス形式)
     const reactionBlocks = body.filter((b) => b.type === "reaction");
@@ -66,7 +68,7 @@ describe("composeArticleBody", () => {
       llm,
     );
     const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
-    expect(headings).toEqual(["話題", "寄せられたレス", "まとめ"]);
+    expect(headings).toEqual(["反応まとめ"]);
     const reactionBlocks = body.filter((b) => b.type === "reaction");
     expect(reactionBlocks.every((b) => b.type === "reaction" && b.name === "海外プレイヤーさん")).toBe(true);
   });

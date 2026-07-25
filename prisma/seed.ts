@@ -85,12 +85,7 @@ const articles: SeedArticle[] = [
     publishedAt: daysAgo(0, 4),
     viewCount: 3890,
     body: body(
-      { type: "heading", text: "スレの発端" },
-      {
-        type: "paragraph",
-        text: "5chの実況スレにて、ランクマッチで発生したヤスオの立ち回りが話題となり、多くのレスが付く展開となった。",
-      },
-      { type: "heading", text: "寄せられたレス" },
+      { type: "heading", text: "反応まとめ" },
       {
         type: "reaction",
         number: 1,
@@ -115,11 +110,6 @@ const articles: SeedArticle[] = [
         number: 3,
         name: "国内プレイヤーさん",
         lines: [{ text: "相手チームが可哀想になってきた。" }],
-      },
-      { type: "heading", text: "まとめ" },
-      {
-        type: "paragraph",
-        text: "「これは公式に取り上げられるレベル」「相手チームが可哀想」など、驚きと称賛のコメントが相次いだ。",
       },
     ),
     sources: [{ label: "5ch", url: "https://leagueoflegends.5ch.net/" }],
@@ -153,12 +143,7 @@ const articles: SeedArticle[] = [
     publishedAt: daysAgo(1, 6),
     viewCount: 2980,
     body: body(
-      { type: "heading", text: "海外分析サイトの最新Tierリスト" },
-      {
-        type: "paragraph",
-        text: "海外の統計分析サイトが公開した最新Tierリストでは、パッチ14.6の影響で上位ランクの顔ぶれが大きく変わった。",
-      },
-      { type: "heading", text: "寄せられたレス" },
+      { type: "heading", text: "反応まとめ" },
       {
         type: "reaction",
         number: 1,
@@ -180,11 +165,6 @@ const articles: SeedArticle[] = [
         number: 3,
         name: "海外プレイヤーさん",
         lines: [{ text: "個人的には妥当な調整だと思う。" }],
-      },
-      { type: "heading", text: "コミュニティの受け止め" },
-      {
-        type: "paragraph",
-        text: "急激なメタ変化に対して、プレイヤーからは歓迎と困惑の両方の声が上がっている。",
       },
     ),
     sources: [{ label: "Reddit", url: "https://www.reddit.com/r/leagueoflegends/" }],
@@ -218,12 +198,7 @@ const articles: SeedArticle[] = [
     publishedAt: daysAgo(2, 5),
     viewCount: 1870,
     body: body(
-      { type: "heading", text: "改修内容" },
-      {
-        type: "paragraph",
-        text: "サポート専用アイテムの一部性能が調整され、5chの該当スレッドでは早速議論が始まった。",
-      },
-      { type: "heading", text: "寄せられたレス" },
+      { type: "heading", text: "反応まとめ" },
       {
         type: "reaction",
         number: 1,
@@ -278,12 +253,7 @@ const articles: SeedArticle[] = [
     publishedAt: daysAgo(4, 2),
     viewCount: 2140,
     body: body(
-      { type: "heading", text: "話題のクリップ" },
-      {
-        type: "paragraph",
-        text: "海外配信者が投稿した対面ジャングラーとの差が際立つクリップが拡散され、大きな反響を呼んでいる。",
-      },
-      { type: "heading", text: "寄せられたレス" },
+      { type: "heading", text: "反応まとめ" },
       {
         type: "reaction",
         number: 1,
@@ -353,12 +323,7 @@ const articles: SeedArticle[] = [
     publishedAt: daysAgo(7, 3),
     viewCount: 1320,
     body: body(
-      { type: "heading", text: "話題のマッチアップ" },
-      {
-        type: "paragraph",
-        text: "特定のチャンピオン同士のマッチアップについて、5chで有利不利を巡る議論が長期化している。",
-      },
-      { type: "heading", text: "寄せられたレス" },
+      { type: "heading", text: "反応まとめ" },
       {
         type: "reaction",
         number: 1,

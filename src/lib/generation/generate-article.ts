@@ -4,11 +4,13 @@
  * 満たすかを検証し、満たさない場合は GenerationError を投げる（DB連携側 pipeline.ts が
  * これを捕捉して「生成失敗」として記録し、他候補の生成を継続する）。
  *
- * ⚠ 記事フォーマット改修（2026-07-25・ユーザー決定）: 掲示板/SNS由来（5ch/reddit）は
- * 「まとめ速報レス形式」（レス本文を逐語表示）に変更したため、逐語一致率チェック・引用主従比率
- * チェックは reaction 形式の記事（sourceType !== "riot"）には適用しない（逐語が意図的なため）。
- * Riot公式（riot）は従来どおり両チェックを適用する。安全フィルタ（F9: NGワード・個人中傷・
- * 出典欠落・重複）は形式によらず必ず適用する（pipeline.ts の moderateArticleContent）。
+ * ⚠ 記事フォーマット改修（2026-07-25・ユーザー決定、同日追加改修でAI要約段落も除去）: 掲示板/SNS由来
+ * （5ch/reddit）は「まとめ速報レス形式」（AI要約段落なし・レス本文を逐語表示のみ）に変更したため、
+ * 逐語一致率チェック・引用主従比率チェック・最低文字数(300字)チェックは reaction 形式の記事
+ * （sourceType !== "riot"）には適用せず、代わりに「reactionブロックが1件以上あること」を最低条件に
+ * する。Riot公式（riot）は従来どおり300字・逐語一致率・引用主従比率チェックを適用する。安全フィルタ
+ * （F9: NGワード・個人中傷・出典欠落・重複）は形式によらず必ず適用する（pipeline.ts の
+ * moderateArticleContent）。
  */
 import { blockText, type ArticleBodyBlock } from "@/lib/article-body";
 import type { CategoryLabel } from "@/lib/categories";
@@ -20,7 +22,7 @@ import { hasAcceptableQuoteRatio } from "@/lib/generation/quote-ratio";
 import { generateHookTitle } from "@/lib/generation/title";
 import { threadBodyText } from "@/lib/generation/thread-format";
 
-/** 1記事あたりの本文最低文字数（見出し・段落・引用の合計、F7受け入れ基準）。 */
+/** 1記事あたりの本文最低文字数（見出し・段落・引用の合計、F7受け入れ基準）。riot(fact形式)のみに適用。 */
 export const MIN_BODY_LENGTH = 300;
 
 export class GenerationError extends Error {
@@ -71,19 +73,25 @@ export async function generateArticleForCandidate(
   }
 
   const body = await composeArticleBody(candidate, llmClient);
-  // reaction形式(まとめ速報のレス羅列)はレス本文の逐語表示が意図的なため、逐語一致率・引用主従比率の
-  // チェックは対象外にする(F9のNGワード等の安全フィルタは形式によらずpipeline.tsで必ず適用する)。
-  // 判定は sourceType ではなく実際に組み上がった body のブロック型から行う(compose側の分岐変更に追随)。
-  const isReactionFormat = body.some((b) => b.type === "reaction");
+  // reaction形式(まとめ速報のレス羅列、5ch/reddit由来)はAI要約段落を持たずレス本文が逐語表示のため、
+  // 最低文字数(300字)・逐語一致率・引用主従比率のチェックは対象外にし、代わりに「reactionブロック
+  // (レス)が1件以上あること」だけを最低条件にする(F9のNGワード等の安全フィルタは形式によらず
+  // pipeline.tsで必ず適用する)。riot(fact形式)のみ従来どおり300字・逐語・引用比率を適用する。
+  const isReactionFormat = candidate.sourceType !== "riot";
 
-  const totalLength = body.reduce((sum, b) => sum + blockText(b).length, 0);
-  if (totalLength < MIN_BODY_LENGTH) {
-    throw new GenerationError(
-      `生成本文が最低文字数(${MIN_BODY_LENGTH}字)に満たません(実際:${totalLength}字)`,
-    );
-  }
+  if (isReactionFormat) {
+    const reactionCount = body.filter((b) => b.type === "reaction").length;
+    if (reactionCount === 0) {
+      throw new GenerationError("反応まとめ記事にレス(reactionブロック)が1件もありません");
+    }
+  } else {
+    const totalLength = body.reduce((sum, b) => sum + blockText(b).length, 0);
+    if (totalLength < MIN_BODY_LENGTH) {
+      throw new GenerationError(
+        `生成本文が最低文字数(${MIN_BODY_LENGTH}字)に満たません(実際:${totalLength}字)`,
+      );
+    }
 
-  if (!isReactionFormat) {
     const generatedText = body.map(blockText).join("");
     const verbatimRatio = computeVerbatimMatchRatio(generatedText, candidate.content);
     if (verbatimRatio > DEFAULT_VERBATIM_THRESHOLD) {

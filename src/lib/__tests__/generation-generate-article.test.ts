@@ -95,5 +95,33 @@ describe("generateArticleForCandidate（まとめ速報レス形式=5ch/reddit�
     expect(
       reactionBlocks[0].type === "reaction" && reactionBlocks[0].lines.map((l) => l.text),
     ).toEqual(["このジャングルナーフはマジでキツい。", "パワースパイクが遅れるとか勘弁してくれ。"]);
+
+    // body は「反応まとめ」見出し＋reactionブロックのみ(AI導入・まとめ段落なし)
+    expect(result.body[0]).toEqual({ type: "heading", text: "反応まとめ" });
+    expect(result.body.every((b) => b.type === "heading" || b.type === "reaction")).toBe(true);
+  });
+
+  it("300字未満の短いレスでもGenerationErrorにならない(AI要約段落を持たないため最低文字数チェック対象外)", async () => {
+    const content = "1: 短いけど盛り上がってるスレ。";
+    const result = await generateArticleForCandidate(
+      candidate({
+        sourceType: "5ch",
+        sourceUrl: "https://leagueoflegends.5ch.net/test/read.cgi/game/2/",
+        content,
+      }),
+      llm,
+    );
+    const totalLength = result.body.reduce((sum, b) => sum + blockText(b).length, 0);
+    expect(totalLength).toBeLessThan(MIN_BODY_LENGTH);
+    expect(result.body.some((b) => b.type === "reaction")).toBe(true);
+  });
+
+  it("reactionブロックが1件も組み立てられない(空content)場合はGenerationErrorになる", async () => {
+    await expect(
+      generateArticleForCandidate(
+        candidate({ sourceType: "5ch", content: "" }),
+        llm,
+      ),
+    ).rejects.toBeInstanceOf(GenerationError);
   });
 });
