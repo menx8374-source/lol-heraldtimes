@@ -21,11 +21,18 @@ export function PickupCarousel({ articles }: { articles: ArticleSummary[] }) {
             href={`/articles/${article.slug}`}
             className="flex w-40 shrink-0 flex-col gap-2 rounded-lg border border-neutral-200 bg-white p-2 shadow-sm hover:shadow-md dark:border-neutral-700 dark:bg-neutral-900 sm:w-48"
           >
-            <ArticleThumbnail
-              category={article.category}
-              thumbnailUrl={article.thumbnailUrl}
-              className="h-20 w-full rounded-md sm:h-24"
-            />
+            <div className="relative">
+              <ArticleThumbnail
+                category={article.category}
+                thumbnailUrl={article.thumbnailUrl}
+                className="h-20 w-full rounded-md sm:h-24"
+              />
+              {article.pinned && (
+                <span className="absolute left-1 top-1 rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                  📌 注目
+                </span>
+              )}
+            </div>
             <p className="line-clamp-2 text-xs font-bold leading-snug sm:text-sm">
               {article.title}
             </p>

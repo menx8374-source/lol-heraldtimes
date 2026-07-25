@@ -35,6 +35,8 @@ export type ArticleSummary = {
   excerpt: string;
   /** コメント数（拡張E1）。コメント投稿機能自体は無く、表示専用のカウンタ。 */
   commentCount: number;
+  /** ピン留め（注目記事固定、拡張E7）。true の記事は一覧・注目枠の先頭に優先表示される。 */
+  pinned: boolean;
 };
 
 export type ArticleDetail = ArticleSummary & {
@@ -67,6 +69,7 @@ export const summarySelect = {
   viewCount: true,
   commentCount: true,
   body: true,
+  pinned: true,
 } satisfies Prisma.ArticleSelect;
 
 type SummaryRow = {
@@ -78,6 +81,7 @@ type SummaryRow = {
   viewCount: number;
   commentCount: number;
   body: unknown;
+  pinned: boolean;
 };
 
 /** 本文(Json)から抜粋テキストを作る。不正な本文データは空文字にフォールバックし一覧表示自体は止めない。 */
@@ -94,7 +98,7 @@ function excerptFromBody(body: unknown): string {
  * ArticleSummary に射影する共有ヘルパ。ArticleSummary の列定義を一箇所に集約する。
  */
 export function toSummary<T extends SummaryRow>(row: T): ArticleSummary {
-  const { slug, title, category, thumbnailUrl, publishedAt, viewCount, commentCount, body } = row;
+  const { slug, title, category, thumbnailUrl, publishedAt, viewCount, commentCount, body, pinned } = row;
   return {
     slug,
     title,
@@ -103,6 +107,7 @@ export function toSummary<T extends SummaryRow>(row: T): ArticleSummary {
     publishedAt,
     viewCount,
     commentCount,
+    pinned,
     excerpt: excerptFromBody(body),
   };
 }
@@ -161,7 +166,8 @@ export async function paginatedFindMany(
   const rows = await prisma.article.findMany({
     where,
     select: summarySelect,
-    orderBy: { publishedAt: "desc" },
+    // ピン留め（拡張E7）記事を各一覧の先頭に優先表示する。pinned=false 同士は従来どおり publishedAt desc。
+    orderBy: [{ pinned: "desc" }, { publishedAt: "desc" }],
     skip: paginationOffset(clampedPage, pageSize),
     take: pageSize,
   });
@@ -217,7 +223,8 @@ export async function listPopularArticles(limit = 5): Promise<ArticleSummary[]> 
   const rows = await prisma.article.findMany({
     where: PUBLISHED_ONLY,
     select: summarySelect,
-    orderBy: { viewCount: "desc" },
+    // トップの注目記事(PickupCarousel)もピン留め（拡張E7）記事を優先表示する。
+    orderBy: [{ pinned: "desc" }, { viewCount: "desc" }],
     take: limit,
   });
   return rows.map(toSummary);
@@ -318,6 +325,7 @@ export async function listRelatedArticles(
     publishedAt: s.publishedAt,
     viewCount: s.viewCount,
     commentCount: s.commentCount,
+    pinned: s.pinned,
     excerpt: s.excerpt,
   }));
 }

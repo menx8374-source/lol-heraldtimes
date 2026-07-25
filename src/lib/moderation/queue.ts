@@ -5,6 +5,7 @@
 import { prisma } from "@/lib/prisma";
 
 export type HeldArticleSummary = {
+  id: string;
   slug: string;
   title: string;
   category: string;
@@ -20,7 +21,7 @@ export type HeldArticleSummary = {
 export async function listHeldArticles(options: { take?: number } = {}): Promise<HeldArticleSummary[]> {
   return prisma.article.findMany({
     where: { status: "held" },
-    select: { slug: true, title: true, category: true, heldReason: true, heldDetail: true, createdAt: true },
+    select: { id: true, slug: true, title: true, category: true, heldReason: true, heldDetail: true, createdAt: true },
     orderBy: { createdAt: "desc" },
     ...(options.take != null ? { take: options.take } : {}),
   });

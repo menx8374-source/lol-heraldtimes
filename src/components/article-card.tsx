@@ -19,6 +19,11 @@ export function ArticleCard({ article }: { article: ArticleSummary }) {
           />
         </div>
         <h2 className="mt-1 text-sm font-bold leading-snug break-words sm:text-base">
+          {article.pinned && (
+            <span className="mr-1 inline-block rounded bg-amber-500 px-1.5 py-0.5 align-middle text-[10px] font-bold text-white">
+              📌 注目
+            </span>
+          )}
           <Link href={`/articles/${article.slug}`} className="hover:underline">
             {article.title}
           </Link>

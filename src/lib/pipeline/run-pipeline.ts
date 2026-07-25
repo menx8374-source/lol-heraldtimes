@@ -20,6 +20,7 @@ import type { SourceAdapter, SourceConfig, SourceType } from "@/lib/collection/t
 import { generateArticlesForQueue, type GenerationRunSummary } from "@/lib/generation/pipeline";
 import { getLLMClient, type LLMClient } from "@/lib/generation/llm-client";
 import { getPipelineConfig } from "@/lib/pipeline/config";
+import { promoteScheduledArticles } from "@/lib/generation/scheduled-publish";
 
 export type PipelineRunOptions = {
   /** 収集に使うアダプタ群。未指定時は設定（COLLECTION_MODE）に従った既定アダプタ。 */
@@ -35,6 +36,7 @@ export type PipelineRunOptions = {
   runCollection?: typeof runCollectionPipeline;
   rebuildQueue?: typeof rebuildCandidateQueue;
   generateArticles?: typeof generateArticlesForQueue;
+  promoteScheduled?: typeof promoteScheduledArticles;
 };
 
 export type PipelineRunReport = {
@@ -48,6 +50,8 @@ export type PipelineRunReport = {
   generationFailed: number;
   publishedCount: number;
   heldCount: number;
+  /** 予約公開（拡張E7）: このパイプライン実行で scheduledAt 到来により公開へ昇格した件数。 */
+  scheduledPublishedCount: number;
   errorMessage?: string;
   sourceSummaries: SourceRunSummary[];
   generationSummary?: GenerationRunSummary;
@@ -87,6 +91,7 @@ export async function runFullPipeline(options: PipelineRunOptions = {}): Promise
   const runCollection = options.runCollection ?? runCollectionPipeline;
   const rebuildQueue = options.rebuildQueue ?? rebuildCandidateQueue;
   const generateArticles = options.generateArticles ?? generateArticlesForQueue;
+  const promoteScheduled = options.promoteScheduled ?? promoteScheduledArticles;
 
   let sourceSummaries: SourceRunSummary[] = [];
   let collectedCount = 0;
@@ -95,11 +100,16 @@ export async function runFullPipeline(options: PipelineRunOptions = {}): Promise
   let generationFailed = 0;
   let publishedCount = 0;
   let heldCount = 0;
+  let scheduledPublishedCount = 0;
   let generationSummary: GenerationRunSummary | undefined;
   let status: "success" | "failure" = "success";
   let errorMessage: string | undefined;
 
   try {
+    // 予約投稿（拡張E7）: scheduledAt <= startedAt の記事を先に公開へ昇格する。
+    const promotion = await promoteScheduled(startedAt);
+    scheduledPublishedCount = promotion.publishedCount;
+
     const adapters = options.adapters ?? getAllAdapters();
     const sourceConfigs = options.sourceConfigs ?? getDefaultSourceConfigs();
     sourceSummaries = await runCollection(adapters, sourceConfigs, startedAt);
@@ -137,6 +147,7 @@ export async function runFullPipeline(options: PipelineRunOptions = {}): Promise
     generationFailed,
     publishedCount,
     heldCount,
+    scheduledPublishedCount,
     errorMessage,
     sourceSummaries,
     generationSummary,

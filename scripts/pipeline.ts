@@ -37,7 +37,7 @@ async function main() {
   }
 
   console.log(
-    `実行サマリ: 収集=${report.collectedCount} 候補=${report.candidateCount} 生成成功=${report.generationSucceeded} 生成失敗=${report.generationFailed} 公開=${report.publishedCount} 保留=${report.heldCount}`,
+    `実行サマリ: 収集=${report.collectedCount} 候補=${report.candidateCount} 生成成功=${report.generationSucceeded} 生成失敗=${report.generationFailed} 公開=${report.publishedCount} 保留=${report.heldCount} 予約公開昇格=${report.scheduledPublishedCount}`,
   );
   if (report.status === "failure") {
     console.log(`  ※想定外のエラーが発生しましたが、パイプラインは正常終了しました: ${report.errorMessage}`);

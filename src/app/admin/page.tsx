@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import {
   listRunHistory,
   countPublishedArticles,
@@ -7,6 +8,24 @@ import {
   listFailureLog,
 } from "@/lib/dashboard";
 import { formatPublishedAt } from "@/lib/format";
+import { listHeldCommentsForAdmin } from "@/lib/admin/comments-admin";
+import { listArticlesForAdmin } from "@/lib/admin/articles-admin";
+import {
+  approveArticleAction,
+  rejectArticleAction,
+  pinArticleAction,
+  scheduleArticleAction,
+  cancelScheduleAction,
+  approveCommentAction,
+  rejectCommentAction,
+} from "@/app/admin/actions";
+
+const STATUS_LABELS: Record<string, string> = {
+  published: "公開中",
+  held: "保留中",
+  rejected: "却下済み",
+  scheduled: "予約公開待ち",
+};
 
 // パイプライン実行直後の最新状態を必ず反映するため、キャッシュせず毎回DBから取得する。
 export const dynamic = "force-dynamic";
@@ -24,13 +43,16 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 export default async function AdminDashboardPage() {
-  const [runHistory, publishedTotal, popularArticles, heldArticles, failureLog] = await Promise.all([
-    listRunHistory(),
-    countPublishedArticles(),
-    getPopularArticlesForDashboard(),
-    getHeldArticlesForDashboard(),
-    listFailureLog(),
-  ]);
+  const [runHistory, publishedTotal, popularArticles, heldArticles, failureLog, heldComments, adminArticles] =
+    await Promise.all([
+      listRunHistory(),
+      countPublishedArticles(),
+      getPopularArticlesForDashboard(),
+      getHeldArticlesForDashboard(),
+      listFailureLog(),
+      listHeldCommentsForAdmin(),
+      listArticlesForAdmin(),
+    ]);
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100">
@@ -90,14 +112,14 @@ export default async function AdminDashboardPage() {
         </section>
 
         <section className="mt-8">
-          <h2 className="text-lg font-bold">保留キュー（保留理由付き）</h2>
+          <h2 className="text-lg font-bold">保留キュー（承認/却下・予約公開）</h2>
           {heldArticles.length === 0 ? (
             <p className="mt-2 text-sm text-neutral-400">保留中の記事はありません。</p>
           ) : (
             <ul className="mt-3 flex flex-col gap-2">
               {heldArticles.map((article) => (
                 <li
-                  key={article.slug}
+                  key={article.id}
                   className="rounded-lg border border-amber-900 bg-amber-950/40 px-3 py-2 text-sm"
                 >
                   <div className="flex flex-wrap items-baseline gap-2">
@@ -108,6 +130,150 @@ export default async function AdminDashboardPage() {
                     理由: {article.heldReason ?? "不明"}
                     {article.heldDetail ? ` — ${article.heldDetail}` : ""}
                   </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <form action={approveArticleAction}>
+                      <input type="hidden" name="articleId" value={article.id} />
+                      <button
+                        type="submit"
+                        className="rounded bg-emerald-700 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-600"
+                      >
+                        承認して公開
+                      </button>
+                    </form>
+                    <form action={rejectArticleAction}>
+                      <input type="hidden" name="articleId" value={article.id} />
+                      <button
+                        type="submit"
+                        className="rounded bg-red-800 px-3 py-1 text-xs font-bold text-white hover:bg-red-700"
+                      >
+                        却下
+                      </button>
+                    </form>
+                    <form action={scheduleArticleAction} className="flex items-center gap-1">
+                      <input type="hidden" name="articleId" value={article.id} />
+                      <input
+                        type="datetime-local"
+                        name="scheduledAt"
+                        required
+                        className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100"
+                      />
+                      <button
+                        type="submit"
+                        className="rounded bg-sky-800 px-3 py-1 text-xs font-bold text-white hover:bg-sky-700"
+                      >
+                        予約公開に設定
+                      </button>
+                    </form>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="mt-8">
+          <h2 className="text-lg font-bold">保留コメント（承認/削除）</h2>
+          {heldComments.length === 0 ? (
+            <p className="mt-2 text-sm text-neutral-400">保留中のコメントはありません。</p>
+          ) : (
+            <ul className="mt-3 flex flex-col gap-2">
+              {heldComments.map((comment) => (
+                <li
+                  key={comment.id}
+                  className="rounded-lg border border-amber-900 bg-amber-950/40 px-3 py-2 text-sm"
+                >
+                  <div className="flex flex-wrap items-baseline gap-2">
+                    <span className="font-bold">
+                      #{comment.number} {comment.name}
+                    </span>
+                    <span className="text-xs text-neutral-500">
+                      {comment.articleTitle}（{formatPublishedAt(comment.createdAt)}）
+                    </span>
+                  </div>
+                  <p className="mt-1 whitespace-pre-wrap text-neutral-200">{comment.body}</p>
+                  <p className="mt-1 text-amber-300">理由: {comment.heldReason ?? "不明"}</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <form action={approveCommentAction}>
+                      <input type="hidden" name="commentId" value={comment.id} />
+                      <button
+                        type="submit"
+                        className="rounded bg-emerald-700 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-600"
+                      >
+                        承認して公開
+                      </button>
+                    </form>
+                    <form action={rejectCommentAction}>
+                      <input type="hidden" name="commentId" value={comment.id} />
+                      <button
+                        type="submit"
+                        className="rounded bg-red-800 px-3 py-1 text-xs font-bold text-white hover:bg-red-700"
+                      >
+                        削除
+                      </button>
+                    </form>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="mt-8">
+          <h2 className="text-lg font-bold">記事管理（編集・ピン留め・予約公開）</h2>
+          {adminArticles.length === 0 ? (
+            <p className="mt-2 text-sm text-neutral-400">記事がありません。</p>
+          ) : (
+            <ul className="mt-3 flex flex-col gap-2">
+              {adminArticles.map((article) => (
+                <li
+                  key={article.id}
+                  className="rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm"
+                >
+                  <div className="flex flex-wrap items-baseline gap-2">
+                    {article.pinned && (
+                      <span className="rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                        📌 注目
+                      </span>
+                    )}
+                    <span className="rounded bg-neutral-800 px-2 py-0.5 text-xs text-neutral-300">
+                      {STATUS_LABELS[article.status] ?? article.status}
+                    </span>
+                    <span className="font-bold">{article.title}</span>
+                    {article.status === "scheduled" && article.scheduledAt && (
+                      <span className="text-xs text-sky-400">
+                        予約: {formatPublishedAt(article.scheduledAt)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Link
+                      href={`/admin/articles/${article.id}/edit`}
+                      className="rounded border border-neutral-700 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+                    >
+                      編集
+                    </Link>
+                    <form action={pinArticleAction}>
+                      <input type="hidden" name="articleId" value={article.id} />
+                      <input type="hidden" name="pinned" value={article.pinned ? "false" : "true"} />
+                      <button
+                        type="submit"
+                        className="rounded border border-neutral-700 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+                      >
+                        {article.pinned ? "ピン留め解除" : "ピン留めする"}
+                      </button>
+                    </form>
+                    {article.status === "scheduled" && (
+                      <form action={cancelScheduleAction}>
+                        <input type="hidden" name="articleId" value={article.id} />
+                        <button
+                          type="submit"
+                          className="rounded border border-neutral-700 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+                        >
+                          予約解除
+                        </button>
+                      </form>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>
