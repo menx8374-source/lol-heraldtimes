@@ -1,0 +1,33 @@
+# nginx リバースプロキシ設定例（本番・VPS）。
+# /etc/nginx/sites-available/lol-matome として配置し、server_name を自分のドメインに書き換える。
+# certbot --nginx を実行すると 443(HTTPS)ブロックと証明書・HTTPリダイレクトは自動で追記される
+# （DEPLOY.md 手順6 参照）。ここでは 80番の最小構成のみ記載。
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name example.com www.example.com;   # ← 自分のドメインに変更
+
+    # アップロードや長いリクエストの上限（コメント投稿等。適宜調整）
+    client_max_body_size 1m;
+
+    # Next.js アプリ（pm2 で 127.0.0.1:3000 待受）へプロキシ
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # Next.js のビルド済み静的アセットは長期キャッシュしてよい
+    location /_next/static/ {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+}
