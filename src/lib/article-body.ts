@@ -188,6 +188,39 @@ export function hasStructuredHeadings(blocks: ArticleBodyBlock[]): boolean {
 }
 
 /**
+ * 表示用のグルーピング結果（拡張E12）。連続する reaction ブロックを1つの枠にまとめて表示するため、
+ * `groupArticleBodyBlocksForDisplay` がブロック配列をこの表現に変換する。それ以外のブロックは
+ * 従来どおり1件ずつ描画する（`single`）。
+ */
+export type ArticleBodyDisplayGroup =
+  | { kind: "reaction-group"; blocks: ArticleBodyReactionBlock[]; startIndex: number }
+  | { kind: "single"; block: Exclude<ArticleBodyBlock, ArticleBodyReactionBlock>; index: number };
+
+/**
+ * 記事本文ブロック配列を表示用にグルーピングする純関数（拡張E12: まとめレスの1枠統合）。
+ * 連続する reaction ブロックは1つの `reaction-group` にまとめ、heading 等が間に挟まって
+ * 非連続になった reaction は別々のグループにする。reaction 以外のブロックは `single` のまま、
+ * 元の配列中のインデックス（広告差し込み位置の判定等に使う）を保持する。
+ */
+export function groupArticleBodyBlocksForDisplay(blocks: ArticleBodyBlock[]): ArticleBodyDisplayGroup[] {
+  const groups: ArticleBodyDisplayGroup[] = [];
+  for (let index = 0; index < blocks.length; index++) {
+    const block = blocks[index];
+    if (block.type === "reaction") {
+      const last = groups[groups.length - 1];
+      if (last && last.kind === "reaction-group") {
+        last.blocks.push(block);
+        continue;
+      }
+      groups.push({ kind: "reaction-group", blocks: [block], startIndex: index });
+      continue;
+    }
+    groups.push({ kind: "single", block, index });
+  }
+  return groups;
+}
+
+/**
  * ブロック1件分のテキストを取り出す（検索・文字数計算・安全フィルタの対象抽出で共通利用）。
  * heading/paragraph/quote は `text` を、reaction は「名前＋各レス行（原文併記があれば原文も含む）」を、
  * image は「alt＋credit」を、embed は「caption＋url」を連結して返す

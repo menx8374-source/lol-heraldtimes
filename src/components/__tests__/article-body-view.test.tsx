@@ -65,8 +65,47 @@ describe("ArticleBodyView（reactionブロック=まとめ速報レス形式）"
     expect(html).toContain("text-orange-600");
   });
 
-  it("複数レスを個別のブロックとして描画する", () => {
+  it("複数レスを出現順に描画する", () => {
     expect(html.indexOf("1: ")).toBeLessThan(html.indexOf("2: "));
+  });
+});
+
+describe("ArticleBodyView（連続レスの1枠統合, 拡張E12）", () => {
+  it("連続する reaction ブロックは1つのコンテナ(divide-y)にまとまり、区切り線で仕切られる", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "reaction", number: 1, name: "国内プレイヤーさん", lines: [{ text: "レス1" }] },
+      { type: "reaction", number: 2, name: "国内プレイヤーさん", lines: [{ text: "レス2" }] },
+      { type: "reaction", number: 3, name: "国内プレイヤーさん", lines: [{ text: "レス3" }] },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    // 3レスとも1つの区切り線コンテナ内に収まっている（レスごとの独立した角丸ボックスではない）
+    expect(html.match(/divide-y/g)?.length).toBe(1);
+    expect(html.indexOf("1: ")).toBeLessThan(html.indexOf("2: "));
+    expect(html.indexOf("2: ")).toBeLessThan(html.indexOf("3: "));
+  });
+
+  it("heading等を挟んで非連続な reaction は、まとまりごとに別枠になる", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "reaction", number: 1, name: "国内プレイヤーさん", lines: [{ text: "レス1" }] },
+      { type: "reaction", number: 2, name: "国内プレイヤーさん", lines: [{ text: "レス2" }] },
+      { type: "heading", text: "次の話題" },
+      { type: "reaction", number: 3, name: "国内プレイヤーさん", lines: [{ text: "レス3" }] },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    // 2つの独立したグループ(枠)ができる
+    expect(html.match(/divide-y/g)?.length).toBe(2);
+  });
+
+  it("reaction以外のブロック(heading/paragraph/quote/image/embed)の表示は従来どおり", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "heading", text: "見出し" },
+      { type: "paragraph", text: "段落本文" },
+      { type: "reaction", number: 1, name: "国内プレイヤーさん", lines: [{ text: "レス1" }] },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("<h2");
+    expect(html).toContain("見出し");
+    expect(html).toContain("段落本文");
   });
 });
 

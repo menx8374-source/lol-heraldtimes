@@ -10,7 +10,7 @@ import {
   type CommentView,
   type CommentReplyView,
 } from "@/lib/comments";
-import { ResHeader, ResLines } from "@/components/article-body-view";
+import { ResLines } from "@/components/article-body-view";
 import { CommentVoteButtons } from "@/components/comment-vote-buttons";
 import { formatRelativeTime, formatPublishedAt } from "@/lib/format";
 
@@ -128,7 +128,43 @@ function ReplyForm({
   );
 }
 
-/** コメント・返信1件分の共通表示（拡張E8: 賛否ボタン＋返信ボタン付き）。 */
+/** コメント投稿者のアイコンバッジ（丸形、名前の先頭1文字）。まとめ本文レスの「番号:名前(緑)」
+ * 体裁とは異なる見た目にして、読者コメントと一目で区別できるようにする（拡張E12）。 */
+function CommentAvatar({ name }: { name: string }) {
+  const initial = Array.from(name.trim())[0] ?? "?";
+  return (
+    <span
+      aria-hidden="true"
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-sky-600 text-xs font-bold text-white dark:bg-sky-500"
+    >
+      {initial}
+    </span>
+  );
+}
+
+/** コメント専用ヘッダー（アイコンバッジ＋ハンドル名＋相対時刻）（拡張E12）。まとめ本文レスの
+ * `ResHeader`（番号:名前が緑の見出し）とは意図的に共用せず、別コンポーネントとして用意することで
+ * 「レス」と「読者コメント」を配色・レイアウトの両面で差別化する。 */
+function CommentHeader({ name, createdAt }: { name: string; createdAt: Date }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <CommentAvatar name={name} />
+      <span className="font-bold text-sky-800 dark:text-sky-300">{name}</span>
+      <time
+        dateTime={createdAt.toISOString()}
+        title={formatPublishedAt(createdAt)}
+        className="text-xs text-neutral-400 dark:text-neutral-500"
+      >
+        {formatRelativeTime(createdAt, new Date())}
+      </time>
+    </div>
+  );
+}
+
+/** コメント・返信1件分の共通表示（拡張E8: 賛否ボタン＋返信ボタン付き）。
+ * 拡張E12: まとめ本文のレス（角丸の白背景ボックス＋番号:名前緑の`ResHeader`）とは
+ * 見た目を差別化するため、左アクセント帯＋淡い青背景のカード＋アイコンバッジ付きヘッダーにする。
+ * 本文表示自体は`ResLines`/`commentBodyToLines`を流用する（`>>N`アンカーの橙強調・逐語表示は維持）。 */
 function CommentRow({
   slug,
   comment,
@@ -143,18 +179,11 @@ function CommentRow({
   children?: React.ReactNode;
 }) {
   return (
-    <li className="rounded border border-neutral-300 bg-white px-3 py-2 text-sm sm:text-base dark:border-neutral-700 dark:bg-neutral-900">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <ResHeader number={comment.number} name={comment.name} />
-        <time
-          dateTime={comment.createdAt.toISOString()}
-          title={formatPublishedAt(comment.createdAt)}
-          className="text-xs text-neutral-400 dark:text-neutral-500"
-        >
-          {formatRelativeTime(comment.createdAt, new Date())}
-        </time>
+    <li className="rounded-lg border-l-4 border-sky-400 bg-sky-50 px-3 py-2 text-sm shadow-sm sm:text-base dark:border-sky-500 dark:bg-sky-950/40">
+      <CommentHeader name={comment.name} createdAt={comment.createdAt} />
+      <div className="mt-1.5">
+        <ResLines lines={commentBodyToLines(comment.body)} />
       </div>
-      <ResLines lines={commentBodyToLines(comment.body)} />
       <div className="mt-2 flex flex-wrap items-center gap-3">
         <CommentVoteButtons
           slug={slug}

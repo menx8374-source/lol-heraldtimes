@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   blockText,
+  groupArticleBodyBlocksForDisplay,
   hasStructuredHeadings,
   parseArticleBody,
   InvalidArticleBodyError,
+  type ArticleBodyBlock,
+  type ArticleBodyReactionBlock,
 } from "@/lib/article-body";
 
 describe("parseArticleBody", () => {
@@ -229,5 +232,63 @@ describe("hasStructuredHeadings", () => {
   it("heading が無ければ false", () => {
     const blocks = parseArticleBody([{ type: "paragraph", text: "本文だけ" }]);
     expect(hasStructuredHeadings(blocks)).toBe(false);
+  });
+});
+
+describe("groupArticleBodyBlocksForDisplay（レスの1枠統合, 拡張E12）", () => {
+  const reaction = (number: number): ArticleBodyReactionBlock => ({
+    type: "reaction",
+    number,
+    name: "国内プレイヤーさん",
+    lines: [{ text: `レス${number}` }],
+  });
+
+  it("連続する reaction ブロックを1つの reaction-group にまとめる", () => {
+    const blocks: ArticleBodyBlock[] = [reaction(1), reaction(2), reaction(3)];
+    const groups = groupArticleBodyBlocksForDisplay(blocks);
+    expect(groups).toEqual([
+      { kind: "reaction-group", blocks: [reaction(1), reaction(2), reaction(3)], startIndex: 0 },
+    ]);
+  });
+
+  it("reaction が無ければ全て single のまま、元のインデックスを保持する", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "heading", text: "見出し" },
+      { type: "paragraph", text: "本文" },
+    ];
+    const groups = groupArticleBodyBlocksForDisplay(blocks);
+    expect(groups).toEqual([
+      { kind: "single", block: blocks[0], index: 0 },
+      { kind: "single", block: blocks[1], index: 1 },
+    ]);
+  });
+
+  it("heading等を挟んで非連続な reaction は、まとまりごとに別々のグループになる", () => {
+    const blocks: ArticleBodyBlock[] = [
+      reaction(1),
+      reaction(2),
+      { type: "heading", text: "次のトピック" },
+      reaction(3),
+    ];
+    const groups = groupArticleBodyBlocksForDisplay(blocks);
+    expect(groups).toEqual([
+      { kind: "reaction-group", blocks: [reaction(1), reaction(2)], startIndex: 0 },
+      { kind: "single", block: blocks[2], index: 2 },
+      { kind: "reaction-group", blocks: [reaction(3)], startIndex: 3 },
+    ]);
+  });
+
+  it("先頭・末尾が非reactionで中間にreactionが混在するケース", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "paragraph", text: "導入" },
+      reaction(1),
+      { type: "paragraph", text: "まとめ" },
+    ];
+    const groups = groupArticleBodyBlocksForDisplay(blocks);
+    expect(groups).toEqual([
+      { kind: "single", block: blocks[0], index: 0 },
+      { kind: "reaction-group", blocks: [reaction(1)], startIndex: 1 },
+      { kind: "single", block: blocks[2], index: 2 },
+    ]);
   });
 });

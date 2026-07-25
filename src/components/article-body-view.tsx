@@ -1,5 +1,9 @@
 import { Fragment } from "react";
-import type { ArticleBodyBlock, ArticleBodyReactionBlock } from "@/lib/article-body";
+import {
+  groupArticleBodyBlocksForDisplay,
+  type ArticleBodyBlock,
+  type ArticleBodyReactionBlock,
+} from "@/lib/article-body";
 import { AdSlot } from "@/components/ad-slot";
 import { isAsciiArtLine } from "@/lib/aa";
 import { isAllowedEmbedUrl, EMBED_PROVIDER_LABELS, type EmbedProvider } from "@/lib/embed";
@@ -10,8 +14,9 @@ const LINE_EMPHASIS_CLASS: Record<"red" | "orange", string> = {
   orange: "font-bold text-orange-600",
 };
 
-/** レスの「番号: 名前」見出し行（名前は緑）。記事のreactionブロック・コメント欄の双方で共用する。 */
-export function ResHeader({ number, name }: { number: number; name: string }) {
+/** レスの「番号: 名前」見出し行（名前は緑）。まとめ本文の reaction ブロック描画でのみ使う
+ * （拡張E12でコメント欄は専用ヘッダーに差別化したため、このファイル内ローカル関数に降格）。 */
+function ResHeader({ number, name }: { number: number; name: string }) {
   return (
     <div className="mb-1 font-bold">
       <span className="text-neutral-700 dark:text-neutral-300">{number}: </span>
@@ -115,13 +120,18 @@ function EmbedBlockView({ block }: { block: Extract<ArticleBodyBlock, { type: "e
   );
 }
 
-/** まとめ速報のレス1件（reactionブロック）を描画する（F: 記事フォーマット改修）。
- * 「番号: 名前」(名前は緑)＋本文行(逐語・複数行)＋重要行の赤/オレンジ強調＋">>N"アンカー。 */
-function ReactionResView({ block }: { block: ArticleBodyReactionBlock }) {
+/** 連続するまとめ速報レス（reactionブロック）群を1つの枠にまとめて描画する（拡張E12）。
+ * 各レスは枠内で縦に連続し、レス間は薄い区切り線（divide-y）で仕切る（レスごとの独立ボックスにしない）。
+ * 各レスの中身（番号:名前緑＋本文行＋赤/オレンジ強調＋">>N"アンカー）は従来どおり。 */
+function ReactionGroupView({ blocks }: { blocks: ArticleBodyReactionBlock[] }) {
   return (
-    <div className="rounded border border-neutral-300 bg-white px-3 py-2 text-sm sm:text-base dark:border-neutral-700 dark:bg-neutral-900">
-      <ResHeader number={block.number} name={block.name} />
-      <ResLines lines={block.lines} />
+    <div className="flex flex-col divide-y divide-neutral-200 rounded border border-neutral-300 bg-white text-sm sm:text-base dark:divide-neutral-800 dark:border-neutral-700 dark:bg-neutral-900">
+      {blocks.map((block, i) => (
+        <div key={i} className="px-3 py-2">
+          <ResHeader number={block.number} name={block.name} />
+          <ResLines lines={block.lines} />
+        </div>
+      ))}
     </div>
   );
 }
@@ -136,10 +146,16 @@ export function ArticleBodyView({ blocks }: { blocks: ArticleBodyBlock[] }) {
   // 「記事の真ん中あたり」に収まるよう、見出し数の中央インデックスを使う（3見出しなら2番目＝従来と同じ）。
   const headings = headingBlockIndices(blocks);
   const adBeforeBlockIndex = headings.length > 0 ? headings[Math.floor(headings.length / 2)] : -1;
+  // 連続する reaction ブロックを1枠にまとめる（拡張E12）。それ以外のブロックは従来どおり1件ずつ描画する。
+  const groups = groupArticleBodyBlocksForDisplay(blocks);
 
   return (
     <div className="flex flex-col gap-3">
-      {blocks.map((block, index) => {
+      {groups.map((group) => {
+        if (group.kind === "reaction-group") {
+          return <ReactionGroupView key={`reaction-group-${group.startIndex}`} blocks={group.blocks} />;
+        }
+        const { block, index } = group;
         if (block.type === "heading") {
           return (
             <Fragment key={index}>
@@ -167,9 +183,6 @@ export function ArticleBodyView({ blocks }: { blocks: ArticleBodyBlock[] }) {
               )}
             </blockquote>
           );
-        }
-        if (block.type === "reaction") {
-          return <ReactionResView key={index} block={block} />;
         }
         if (block.type === "image") {
           return <ImageBlockView key={index} block={block} />;
