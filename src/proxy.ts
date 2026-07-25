@@ -1,22 +1,39 @@
 /**
- * 運営ダッシュボード（/admin, 拡張E7）のアクセス制御。Next.js Proxy（旧middleware）による Basic 認証。
- * /admin 配下のページ・サーバーアクション（同一URLへのPOSTとして送られる）を保護する。
- * 公開サイト（記事閲覧・コメント投稿等）はこの対象外で、認証不要のまま。
+ * アクセス制御（Next.js Proxy＝旧middleware・Basic認証）。
  *
- * 認証情報未設定（ADMIN_USER/ADMIN_PASSWORD 未設定）時は管理機能ごと無効化し、常に拒否する
- * （「未設定なら誰でも見られる」より安全側に倒す）。
+ * 1) /admin 配下（運営ダッシュボード・そのサーバーアクション）は常に保護する（拡張E7）。
+ * 2) `SITE_PRIVATE=true`（env）のときは、**サイト全体**を同じ Basic 認証で保護し一般公開を止める
+ *    （公開前の準備・更新中の非公開化に使う。閲覧には ADMIN_USER/ADMIN_PASSWORD が必要になる）。
+ *    `SITE_PRIVATE` 未設定/false のときは従来どおり公開サイト（記事閲覧・コメント投稿等）は認証不要。
+ *
+ * 認証情報未設定（ADMIN_USER/ADMIN_PASSWORD 未設定）時は保護対象へのアクセスを拒否する
+ * （「未設定なら誰でも見られる」より安全側に倒す）。証明書更新（/.well-known/acme-challenge）は
+ * nginx 側で処理されるためこの Proxy を通らず、非公開化しても更新は妨げない。
  */
 import { NextResponse, type NextRequest } from "next/server";
 import { isAdminAuthConfigured, verifyBasicAuthHeader } from "@/lib/auth/basic-auth";
 
 const UNAUTHORIZED_HEADERS = {
-  "WWW-Authenticate": 'Basic realm="admin", charset="UTF-8"',
+  "WWW-Authenticate": 'Basic realm="lolheraldtimes", charset="UTF-8"',
 };
 
+/** サイト全体を非公開（Basic認証必須）にするか。env `SITE_PRIVATE=true` で有効。 */
+function isSitePrivate(): boolean {
+  return process.env.SITE_PRIVATE === "true";
+}
+
 export function proxy(request: NextRequest) {
+  const path = request.nextUrl.pathname;
+  const isAdminPath = path === "/admin" || path.startsWith("/admin/");
+
+  // 保護対象: 常に /admin、加えて SITE_PRIVATE 有効時はサイト全体。それ以外（公開ページ）は素通し。
+  if (!isAdminPath && !isSitePrivate()) {
+    return NextResponse.next();
+  }
+
   if (!isAdminAuthConfigured()) {
     return new NextResponse(
-      "管理機能は現在利用できません（ADMIN_USER/ADMIN_PASSWORD が未設定のため無効化されています）。",
+      "認証情報（ADMIN_USER/ADMIN_PASSWORD）が未設定のためアクセスできません。",
       { status: 503 },
     );
   }
@@ -30,5 +47,7 @@ export function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin", "/admin/:path*"],
+  // SITE_PRIVATE でサイト全体を保護できるよう全ルートを対象にする（Next内部・静的アセット・画像は除外）。
+  // 公開モードでは /admin 以外は上の early-return で素通しされるため実害のあるオーバーヘッドは無い。
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
