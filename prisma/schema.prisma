@@ -46,6 +46,7 @@ model Article {
   collectedItems CollectedItem[]
   reactions ArticleReaction[]
   comments ArticleComment[]
+  views   ArticleView[]
 
   @@index([publishedAt])
   @@index([category])
@@ -153,6 +154,21 @@ model ArticleComment {
   @@unique([articleId, number])
   @@index([articleId, status])
   @@index([status, createdAt])
+}
+
+/// 記事の閲覧イベント（拡張E4: 期間別ランキングF3拡張）。累計 Article.viewCount とは別に、
+/// 直近N日の閲覧数を集計するための軽量な1行1閲覧のログ。行数は増え続けるため、集計クエリは
+/// 必ず viewedAt の cutoff で絞り込み、cutoff より古い行は集計対象から単に除外する
+/// （物理削除はこのスプリントでは行わない。将来的に cutoff より十分に古い行を定期削除する
+/// バッチ処理を追加する余地がある）。
+model ArticleView {
+  id        String   @id @default(cuid())
+  articleId String
+  article   Article  @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  viewedAt  DateTime @default(now())
+
+  @@index([articleId])
+  @@index([viewedAt])
 }
 
 /// ソースごとの収集実行ログ（F5: 実行間隔の判定・1ソース失敗の記録に使う）。

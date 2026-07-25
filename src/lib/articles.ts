@@ -4,6 +4,7 @@ import { parseArticleBody, type ArticleBodyBlock } from "@/lib/article-body";
 import { selectRelatedArticles } from "@/lib/related-articles";
 import { buildArticleExcerpt } from "@/lib/seo";
 import { mergeReactionCounts, type ReactionCounts } from "@/lib/reactions";
+import { cutoffForPeriod, mapRankingOrder, type RankingPeriod } from "@/lib/ranking";
 import {
   DEFAULT_PAGE_SIZE,
   clampPage,
@@ -145,8 +146,11 @@ export const getArticleBySlug = cache(
   },
 );
 
-/** listArticles/listArticlesByCategory/listArticlesByTag に共通の「絞り込み条件→ページ結果」処理。 */
-async function paginatedFindMany(
+/**
+ * listArticles/listArticlesByCategory/listArticlesByTag に共通の「絞り込み条件→ページ結果」処理。
+ * 月別アーカイブ（拡張E4, lib/archive.ts）も同じページング契約で流用するため export する。
+ */
+export async function paginatedFindMany(
   where: Prisma.ArticleWhereInput,
   page: number,
   pageSize: number,
@@ -220,16 +224,53 @@ export async function listPopularArticles(limit = 5): Promise<ArticleSummary[]> 
 }
 
 /**
+ * 期間別人気記事ランキング（拡張E4: 日間/週間/月間）。累計 viewCount ではなく、
+ * ArticleView（閲覧イベント）を cutoff（期間の下限日時）で絞って articleId ごとに件数集計し、
+ * 多い順に上位 limit 件を返す。
+ *
+ * cutoff より古い ArticleView 行は、削除せずに集計クエリの where 条件で除外するだけにする
+ * （物理削除はこのスプリントでは行わない。行数は増え続けるため、将来的に cutoff より十分に
+ * 古い行を定期的に削除するバッチ処理を追加する余地があるが、集計自体は viewedAt インデックス
+ * と limit/cutoff で有界化されているため当面は不要）。
+ */
+export async function listPopularArticlesByPeriod(
+  period: RankingPeriod,
+  limit = 5,
+): Promise<ArticleSummary[]> {
+  const cutoff = cutoffForPeriod(period);
+  const grouped = await prisma.articleView.groupBy({
+    by: ["articleId"],
+    where: { viewedAt: { gte: cutoff }, article: PUBLISHED_ONLY },
+    _count: { articleId: true },
+    orderBy: { _count: { articleId: "desc" } },
+    take: limit,
+  });
+  if (grouped.length === 0) return [];
+
+  const rows = await prisma.article.findMany({
+    where: { id: { in: grouped.map((g) => g.articleId) }, ...PUBLISHED_ONLY },
+    select: { id: true, ...summarySelect },
+  });
+  const byId = new Map(rows.map((r) => [r.id, toSummary(r)]));
+  return mapRankingOrder(
+    grouped.map((g) => g.articleId),
+    byId,
+  );
+}
+
+/**
  * 記事閲覧時に閲覧数を1加算する（F3）。連打・多重カウント対策は行わず、
- * ページ表示のたびに単純加算するシンプルな仕様とする。
- * 閲覧数更新の失敗は記事表示自体を止めてはいけないため、ここで捕捉してログのみ残す。
+ * ページ表示のたびに単純加算するシンプルな仕様とする。あわせて期間別ランキング（拡張E4）の
+ * 集計用に閲覧イベント（ArticleView）を1件記録する。
+ * 閲覧数更新・イベント記録の失敗は記事表示自体を止めてはいけないため、ここで捕捉してログのみ残す。
  */
 export async function incrementViewCount(slug: string): Promise<void> {
   try {
-    await prisma.article.update({
+    const article = await prisma.article.update({
       where: { slug },
       data: { viewCount: { increment: 1 } },
     });
+    await prisma.articleView.create({ data: { articleId: article.id } });
   } catch (err) {
     console.error(`viewCount の更新に失敗しました (slug=${slug}):`, err);
   }

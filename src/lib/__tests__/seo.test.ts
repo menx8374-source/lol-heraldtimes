@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildArticleDescription, buildArticleExcerpt, toSafeJsonLd } from "@/lib/seo";
+import {
+  buildArticleDescription,
+  buildArticleExcerpt,
+  buildBreadcrumbJsonLd,
+  toSafeJsonLd,
+} from "@/lib/seo";
 import type { ArticleBodyBlock } from "@/lib/article-body";
 
 describe("buildArticleDescription", () => {
@@ -60,5 +65,45 @@ describe("toSafeJsonLd", () => {
     expect(JSON.parse(json.replace(/\\u003c/g, "<"))).toEqual({
       headline: "</script><script>alert(1)</script>",
     });
+  });
+});
+
+describe("buildBreadcrumbJsonLd（パンくずリスト構造化データ, 拡張E4）", () => {
+  it("BreadcrumbList形式で、位置(position)は1始まりの連番、itemは絶対URLになる", () => {
+    const jsonLd = buildBreadcrumbJsonLd(
+      [
+        { name: "トップ", path: "/" },
+        { name: "パッチ/メタ", path: "/category/patch-meta" },
+        { name: "テスト記事", path: "/articles/test-slug" },
+      ],
+      "https://example.com",
+    );
+
+    expect(jsonLd["@type"]).toBe("BreadcrumbList");
+    expect(jsonLd.itemListElement).toEqual([
+      { "@type": "ListItem", position: 1, name: "トップ", item: "https://example.com" },
+      {
+        "@type": "ListItem",
+        position: 2,
+        name: "パッチ/メタ",
+        item: "https://example.com/category/patch-meta",
+      },
+      {
+        "@type": "ListItem",
+        position: 3,
+        name: "テスト記事",
+        item: "https://example.com/articles/test-slug",
+      },
+    ]);
+  });
+
+  it("toSafeJsonLd と組み合わせると、名前にスクリプトタグが混入していても安全に埋め込める", () => {
+    const jsonLd = buildBreadcrumbJsonLd(
+      [{ name: "</script><script>alert(1)</script>", path: "/" }],
+      "https://example.com",
+    );
+    const json = toSafeJsonLd(jsonLd);
+    expect(json).not.toContain("</script>");
+    expect(json).not.toContain("<script>");
   });
 });

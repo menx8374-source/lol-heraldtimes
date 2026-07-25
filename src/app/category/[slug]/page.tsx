@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { categoryLabelForSlug } from "@/lib/categories";
 import { listArticlesByCategory } from "@/lib/articles";
@@ -7,6 +6,7 @@ import { parsePageParam } from "@/lib/pagination";
 import { ArticleList } from "@/components/article-list";
 import { PageWithSidebar } from "@/components/page-with-sidebar";
 import { Pagination } from "@/components/pagination";
+import { Breadcrumbs } from "@/components/breadcrumbs";
 
 type Props = {
   params: Promise<{ slug: string }>;
@@ -35,11 +35,12 @@ export default async function CategoryPage({ params, searchParams }: Props) {
 
   return (
     <PageWithSidebar>
-      <nav className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">
-        <Link href="/" className="hover:underline">
-          トップ
-        </Link>
-      </nav>
+      <Breadcrumbs
+        items={[
+          { name: "トップ", path: "/" },
+          { name: category, path: `/category/${slug}` },
+        ]}
+      />
       <h1 className="mb-4 text-lg font-bold">{category}</h1>
       <ArticleList articles={result.items} emptyMessage="記事がありません" />
       <Pagination

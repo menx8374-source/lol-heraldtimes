@@ -14,6 +14,7 @@ import { ArticleThumbnail } from "@/components/article-thumbnail";
 import { ArticleMeta } from "@/components/article-meta";
 import { ArticleList } from "@/components/article-list";
 import { PageWithSidebar } from "@/components/page-with-sidebar";
+import { Breadcrumbs } from "@/components/breadcrumbs";
 import { AdSlot } from "@/components/ad-slot";
 import { ShareButtons } from "@/components/share-buttons";
 import { ReactionButtons } from "@/components/reaction-buttons";
@@ -97,19 +98,15 @@ export default async function ArticlePage({ params }: Props) {
         dangerouslySetInnerHTML={{ __html: toSafeJsonLd(structuredData) }}
       />
       <PageWithSidebar>
-        <nav className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">
-          <Link href="/" className="hover:underline">
-            トップ
-          </Link>
-          <span className="mx-1">/</span>
-          {categorySlug ? (
-            <Link href={`/category/${categorySlug}`} className="hover:underline">
-              {article.category}
-            </Link>
-          ) : (
-            <span>{article.category}</span>
-          )}
-        </nav>
+        <Breadcrumbs
+          items={[
+            { name: "トップ", path: "/" },
+            ...(categorySlug
+              ? [{ name: article.category, path: `/category/${categorySlug}` }]
+              : []),
+            { name: article.title, path: `/articles/${article.slug}` },
+          ]}
+        />
 
         <AdSlot position="article-top" />
 

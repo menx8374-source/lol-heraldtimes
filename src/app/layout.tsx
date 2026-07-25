@@ -10,6 +10,12 @@ export const metadata: Metadata = {
   },
   description:
     "League of Legends（LoL）の海外・5chの反応やパッチノート・大会結果をまとめる速報サイト。",
+  // RSSフィード（拡張E4）。<head>に <link rel="alternate" type="application/rss+xml"> を出力する。
+  alternates: {
+    types: {
+      "application/rss+xml": "/feed.xml",
+    },
+  },
 };
 
 // ダークモード（拡張E1）の初期テーマを描画前に決定し、<html>にクラスを付与するスクリプト。

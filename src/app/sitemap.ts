@@ -1,6 +1,8 @@
 import type { MetadataRoute } from "next";
 import { listArticlesForSitemap } from "@/lib/articles";
 import { CATEGORY_LABELS, categorySlugFor } from "@/lib/categories";
+import { listAllTagNames } from "@/lib/tags";
+import { listArchiveMonths } from "@/lib/archive";
 import { getSiteUrl, articleUrl } from "@/lib/site";
 
 // 自動運営パイプラインが継続的に記事を公開するため、サイトマップはビルド時に
@@ -9,13 +11,19 @@ import { getSiteUrl, articleUrl } from "@/lib/site";
 export const dynamic = "force-dynamic";
 
 /**
- * サイトマップ（F13）。全公開記事（status="published" のみ。保留記事は含めない）と
- * 全カテゴリページを列挙する。トップページも含める。
+ * サイトマップ（F13 + 拡張E4）。全公開記事（status="published" のみ。保留記事は含めない）・
+ * 全カテゴリページ・タグページ・月別アーカイブページを列挙する。トップページも含める。
+ * タグ・アーカイブ月の総数は記事数とは独立に語彙として有界（チャンピオン名/月単位）なため、
+ * 記事数が増え続けても線形に膨張しない。
  */
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const siteUrl = getSiteUrl();
 
-  const articles = await listArticlesForSitemap();
+  const [articles, tagNames, archiveMonths] = await Promise.all([
+    listArticlesForSitemap(),
+    listAllTagNames(),
+    listArchiveMonths(),
+  ]);
 
   const articleEntries: MetadataRoute.Sitemap = articles.map((article) => ({
     url: articleUrl(article.slug),
@@ -26,5 +34,20 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     url: `${siteUrl}/category/${categorySlugFor(label)}`,
   }));
 
-  return [{ url: siteUrl }, ...categoryEntries, ...articleEntries];
+  const tagEntries: MetadataRoute.Sitemap = tagNames.map((name) => ({
+    url: `${siteUrl}/tags/${encodeURIComponent(name)}`,
+  }));
+
+  const archiveEntries: MetadataRoute.Sitemap = [
+    { url: `${siteUrl}/archive` },
+    ...archiveMonths.map((month) => ({ url: `${siteUrl}/archive/${month.key}` })),
+  ];
+
+  return [
+    { url: siteUrl },
+    ...categoryEntries,
+    ...tagEntries,
+    ...archiveEntries,
+    ...articleEntries,
+  ];
 }

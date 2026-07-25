@@ -36,3 +36,28 @@ export function buildArticleExcerpt(blocks: ArticleBodyBlock[]): string {
 export function toSafeJsonLd(data: unknown): string {
   return JSON.stringify(data).replace(/</g, "\\u003c");
 }
+
+/**
+ * パンくずリスト（拡張E4）1項目。`path` はサイト内相対パス（"/", "/category/patch-meta" 等）で、
+ * 可視のパンくずナビ（<Link>）にはそのまま使い、構造化データ用の絶対URLは
+ * `buildBreadcrumbJsonLd` 側で `siteUrl` と組み合わせて作る。
+ */
+export type BreadcrumbItem = { name: string; path: string };
+
+/**
+ * BreadcrumbList の JSON-LD オブジェクトを組み立てる純関数（F13拡張）。
+ * schema.org の推奨に沿い `item` は絶対URLにする。埋め込み時は必ず `toSafeJsonLd` を通すこと
+ * （記事タイトル等の閲覧者/収集由来テキストが `name` に入り得るため）。
+ */
+export function buildBreadcrumbJsonLd(items: BreadcrumbItem[], siteUrl: string) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: items.map((item, index) => ({
+      "@type": "ListItem",
+      position: index + 1,
+      name: item.name,
+      item: item.path === "/" ? siteUrl : `${siteUrl}${item.path}`,
+    })),
+  };
+}

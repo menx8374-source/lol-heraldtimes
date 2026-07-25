@@ -52,6 +52,7 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
 | `AD_SLOT_ARTICLE_TOP` / `AD_SLOT_ARTICLE_IN_BODY` / `AD_SLOT_ARTICLE_BOTTOM` / `AD_SLOT_SIDEBAR` / `AD_SLOT_LISTING` | 任意 | 各広告枠（記事上部／本文中／記事末尾／サイドバー／一覧内）に差し込む広告タグ文字列（AdSense等）。未設定時はプレースホルダー枠を表示 |
 | `CONTACT_EMAIL` | 任意 | `/contact`（お問い合わせ・掲載削除依頼ページ）に表示する連絡先メールアドレス。未設定時は `SITE_URL` のホスト名から `contact@<host>` を自動生成 |
 | `SITE_NOTICE` | 任意 | 運営お知らせバー（拡張E1、サイト最上部）に表示する1行の文言。未設定時はバー自体を表示しない |
+| `BLOG_RANKING_HTML` | 任意 | ブログランキング/外部集客枠（拡張E4、サイドバー）に差し込む外部ランキング（にほんブログ村等）のバナー/リンクHTML。未設定時はプレースホルダーを表示 |
 
 ## 外部サービス接続の方針（現時点）
 当面はすべて **モック実装** で全スプリントを通し、将来の実運用時に順次本接続へ差し替える。いずれも差し替え可能な抽象越しに呼ぶ設計。
@@ -83,6 +84,13 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
 - `/disclaimer`（免責事項）: 非公認・AI生成・出典/外部リンクの責任範囲・法的助言でない旨
 - `/privacy`（プライバシーポリシー）: アクセス解析・広告(Cookie)・個人情報の取り扱い方針
 - `/contact`（お問い合わせ・掲載削除依頼）: 掲載内容の削除依頼（オプトアウト）の連絡先案内
+
+## SEO/集客（拡張E4）
+- `/feed.xml`: 公開記事のRSS 2.0フィード（直近30件、タイトル/リンク/抜粋/公開日時）。`<head>` に `<link rel="alternate" type="application/rss+xml">` を出力。
+- 期間別人気ランキング: サイドバーの人気記事ランキングに累計/日間/週間/月間タブを追加（`ArticleView` テーブルの閲覧イベントを期間cutoffで集計。切替は `GET /api/ranking?period=day|week|month` をクライアント側から呼ぶ）。
+- サイドバーに人気タグ（タグクラウド）・月別アーカイブウィジェットを追加。`/archive`（月一覧）・`/archive/[YYYY-MM]`（月別記事一覧）ページを新設。
+- 個別記事・カテゴリ・タグ・アーカイブページにパンくずリスト（可視表示＋BreadcrumbList JSON-LD）を追加。
+- サイトマップにタグページ・アーカイブページを追加（公開記事のみ）。
 
 ## 開発フロー
 このプロジェクトは `planner` / `architect` / `generator` / `evaluator` の4サブエージェントを `spec-pipeline` スキルがオーケストレーションする自律開発フローで進める。詳細は [CLAUDE.md](CLAUDE.md) を参照。

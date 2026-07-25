@@ -7,6 +7,7 @@ import { describe, expect, it, beforeEach } from "vitest";
 import { prisma } from "@/lib/prisma";
 import sitemap from "@/app/sitemap";
 import robots from "@/app/robots";
+import { GET as getFeed } from "@/app/feed.xml/route";
 import { generateMetadata as generateArticleMetadata } from "@/app/articles/[slug]/page";
 import { generateMetadata as generateCategoryMetadata } from "@/app/category/[slug]/page";
 import { metadata as rootMetadata } from "@/app/layout";
@@ -34,6 +35,9 @@ beforeEach(async () => {
       publishedAt: new Date("2026-07-20T00:00:00+09:00"),
       status: "published",
       sources: { create: [{ label: "Riot公式", url: "https://example.com/a" }] },
+      tags: {
+        create: [{ tag: { connectOrCreate: { where: { name: "ヤスオ" }, create: { name: "ヤスオ" } } } }],
+      },
     },
   });
   await prisma.article.create({
@@ -78,6 +82,15 @@ describe("sitemap（F13）", () => {
     expect(urls.some((u) => u.endsWith("/category/patch-meta"))).toBe(true);
     expect(urls.some((u) => u.endsWith("/category/5ch"))).toBe(true);
     expect(urls.some((u) => /^https?:\/\/[^/]+\/?$/.test(u))).toBe(true);
+  });
+
+  it("公開記事に付いたタグのページと月別アーカイブページを含む（拡張E4）", async () => {
+    const entries = await sitemap();
+    const urls = entries.map((e) => e.url);
+
+    expect(urls.some((u) => u.endsWith(`/tags/${encodeURIComponent("ヤスオ")}`))).toBe(true);
+    expect(urls.some((u) => u.endsWith("/archive"))).toBe(true);
+    expect(urls.some((u) => u.endsWith("/archive/2026-07"))).toBe(true);
   });
 });
 
@@ -138,5 +151,29 @@ describe("ページごとのタイトル固有性（F13）", () => {
 
     expect(rootTitle).toBeTruthy();
     expect(rootTitle).not.toBe(metaArticle.title);
+  });
+});
+
+describe("feed.xml（RSSフィード, 拡張E4）", () => {
+  it("公開記事のみを含み、保留記事のタイトルは含めない", async () => {
+    const res = await getFeed();
+    expect(res.headers.get("Content-Type")).toContain("application/rss+xml");
+
+    const xml = await res.text();
+    expect(xml).toContain("<title>公開記事A</title>");
+    expect(xml).toContain("<title>公開記事B</title>");
+    expect(xml).not.toContain("保留中の記事");
+    expect(xml).toContain("/articles/published-article-a");
+    expect(xml).not.toContain("/articles/held-article-hidden");
+  });
+
+  it("新しい記事が先に並ぶ（publishedAt降順）", async () => {
+    const res = await getFeed();
+    const xml = await res.text();
+    const indexB = xml.indexOf("公開記事B"); // publishedAtが新しい
+    const indexA = xml.indexOf("公開記事A");
+    expect(indexB).toBeGreaterThan(-1);
+    expect(indexA).toBeGreaterThan(-1);
+    expect(indexB).toBeLessThan(indexA);
   });
 });

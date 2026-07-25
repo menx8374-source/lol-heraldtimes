@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodeTagParam } from "@/lib/tags";
+import { decodeTagParam, rankTags, tagCloudSizeClass } from "@/lib/tags";
 
 describe("decodeTagParam", () => {
   it("日本語タグ名がブラウザ／Linkによってエンコードされた形をデコードして元のタグ名に戻す", () => {
@@ -18,5 +18,45 @@ describe("decodeTagParam", () => {
     const malformed = "%E3%82"; // 途中で途切れた不正なシーケンス
     expect(() => decodeTagParam(malformed)).not.toThrow();
     expect(decodeTagParam(malformed)).toBe(malformed);
+  });
+});
+
+describe("rankTags（人気タグ集計, 拡張E4）", () => {
+  it("記事数の多い順に並べ、0件タグは除外し、上限件数に絞る", () => {
+    const rows = [
+      { name: "ヤスオ", count: 3 },
+      { name: "アリ", count: 0 },
+      { name: "ジンクス", count: 5 },
+      { name: "ゼド", count: 1 },
+    ];
+    expect(rankTags(rows, 2)).toEqual([
+      { name: "ジンクス", count: 5 },
+      { name: "ヤスオ", count: 3 },
+    ]);
+  });
+
+  it("件数が同じ場合は名前順で安定する", () => {
+    const rows = [
+      { name: "ゼド", count: 2 },
+      { name: "アリ", count: 2 },
+    ];
+    expect(rankTags(rows, 5)).toEqual([
+      { name: "アリ", count: 2 },
+      { name: "ゼド", count: 2 },
+    ]);
+  });
+});
+
+describe("tagCloudSizeClass（タグクラウド文字サイズ, 拡張E4）", () => {
+  it("最大件数と同数のタグは最大サイズになる", () => {
+    expect(tagCloudSizeClass(10, 10)).toBe("text-xl");
+  });
+
+  it("件数が少ないタグは小さいサイズになる", () => {
+    expect(tagCloudSizeClass(1, 10)).toBe("text-xs");
+  });
+
+  it("maxCountが0以下（タグなし）は最小サイズにフォールバックする", () => {
+    expect(tagCloudSizeClass(0, 0)).toBe("text-xs");
   });
 });

@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { listArticlesByTag } from "@/lib/articles";
 import { decodeTagParam } from "@/lib/tags";
 import { parsePageParam } from "@/lib/pagination";
 import { ArticleList } from "@/components/article-list";
 import { PageWithSidebar } from "@/components/page-with-sidebar";
 import { Pagination } from "@/components/pagination";
+import { Breadcrumbs } from "@/components/breadcrumbs";
 
 type Props = {
   params: Promise<{ tag: string }>;
@@ -26,11 +26,12 @@ export default async function TagPage({ params, searchParams }: Props) {
 
   return (
     <PageWithSidebar>
-      <nav className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">
-        <Link href="/" className="hover:underline">
-          トップ
-        </Link>
-      </nav>
+      <Breadcrumbs
+        items={[
+          { name: "トップ", path: "/" },
+          { name: `#${tagName}`, path: `/tags/${tag}` },
+        ]}
+      />
       <h1 className="mb-4 text-lg font-bold">#{tagName}</h1>
       <ArticleList articles={result.items} emptyMessage="記事がありません" />
       <Pagination
