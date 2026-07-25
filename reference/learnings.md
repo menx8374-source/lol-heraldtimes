@@ -62,6 +62,13 @@ status: active
 - 分類: impl
 - 記録日: 2026-07-25
 
+### クライアント専用状態（localStorage等）由来のUIは useState遅延初期化+suppressHydrationWarning では反映されない
+- 症状: localStorageに保存した「選択中」状態のハイライト（`aria-pressed`/背景色）が、リロード後に一切表示されない（フラッシュではなく恒久的に非表示）。しかも内部stateは復元されているため、未選択に見えるボタンを押すと逆の挙動（加算でなく取り消し）になる。既存のテーマ切替トグルは同じ書き方で問題なかったため見落としやすい。
+- 原因: SSRはlocalStorageを読めず「未選択」でHTMLを描画する。クライアントで `useState(初期値=localStorage読み)` にしても、hydration時にReactはサーバー描画DOMを維持し、`suppressHydrationWarning` は不一致の警告を黙らせるだけでDOMを更新しない。マウント後に再レンダーを起こす契機が無いため、次のユーザー操作までハイライトが出ない。テーマトグルが成立するのは `<head>` のブロッキングno-flashスクリプトが描画前にクラスを付けDOMを一致させているからで、そのスクリプトが無い局所UIには同じ手が使えない。
+- 次への適用: 「サーバーでは確定できずクライアントのlocalStorage等でのみ決まる表示状態」は **`useSyncExternalStore`（`getServerSnapshot`は常に未選択相当を返し、`getSnapshot`でlocalStorageを読む）** で実装する。書き込み時に購読者へ通知して再レンダーを起こす。代替として post-mount の `useEffect` でstateを設定して再レンダーさせる（外部ストア同期の正当用途）。`suppressHydrationWarning` でごまかさず実際にDOMを更新すること。検証は必ず「操作→リロード→ハイライトが復元される」まで実機で確認する。
+- 分類: impl
+- 記録日: 2026-07-25
+
 ### 推移的依存のHigh脆弱性は「本番影響の有無」で対応を分ける。overrides は互換性を検証してから
 - 症状: (a) 新規 Next.js プロジェクトで `npm audit` が postcss / sharp（本番ランタイム依存）に High を報告。`npm audit fix --force` は Next 本体を大幅ダウングレード（破壊的）しようとする。(b) 開発中に新しいアドバイザリが公開され、eslint ツールチェーン（brace-expansion→minimatch→eslint-plugin群、いずれも devDependencies）に High が多数出る。
 - 原因: 脆弱性はフレームワーク/ツールの推移的依存にあり、パッチ取り込みまで各アプリに出続ける。naive な audit fix はメジャーダウングレード/破壊的アップグレードを提案する。
