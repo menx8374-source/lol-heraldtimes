@@ -10,7 +10,6 @@ import { categorySlugFor } from "@/lib/categories";
 import { buildArticleDescription, toSafeJsonLd } from "@/lib/seo";
 import { getSiteUrl } from "@/lib/site";
 import { ArticleBodyView } from "@/components/article-body-view";
-import { ArticleThumbnail } from "@/components/article-thumbnail";
 import { ArticleMeta } from "@/components/article-meta";
 import { ArticleList } from "@/components/article-list";
 import { PageWithSidebar } from "@/components/page-with-sidebar";
@@ -71,9 +70,6 @@ export default async function ArticlePage({ params }: Props) {
     listPublishedCommentsBySlug(article.slug),
   ]);
   const categorySlug = categorySlugFor(article.category);
-  // まとめ速報レス形式(reactionブロックを含む記事)は掲示板/SNSの反応を逐語で引用・転載しているため、
-  // その旨が伝わる注記にする(F15の出典・AI注記と整合。従来のRiot公式形式の記事はAI自動生成の注記のまま)。
-  const isReactionFormatArticle = article.body.some((b) => b.type === "reaction");
 
   const siteUrl = getSiteUrl();
   const articleUrl = `${siteUrl}/articles/${article.slug}`;
@@ -110,12 +106,6 @@ export default async function ArticlePage({ params }: Props) {
 
         <AdSlot position="article-top" />
 
-        <ArticleThumbnail
-          category={article.category}
-          thumbnailUrl={article.thumbnailUrl}
-          className="mb-4 h-32 w-full rounded-lg sm:h-48"
-        />
-
         <h1 className="text-xl font-bold leading-snug sm:text-2xl">{article.title}</h1>
 
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
@@ -140,11 +130,6 @@ export default async function ArticlePage({ params }: Props) {
           ))}
         </div>
 
-        <p className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
-          {isReactionFormatArticle
-            ? "本記事は掲示板・SNSの反応を引用・転載してまとめたものです。AIにより自動編集されており、内容は変動し得ます。"
-            : "この記事は AI により自動生成された記事です。内容は変動・変更される場合があります。"}
-        </p>
         {article.unconfirmed && (
           <p className="mt-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
             【未確認】この記事は未確定・噂レベルの情報を含みます。内容の真偽は確認されていません。

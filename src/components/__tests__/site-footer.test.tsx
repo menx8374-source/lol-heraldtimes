@@ -10,8 +10,10 @@ describe("SiteFooter", () => {
     expect(html).toContain("承認・関与・後援するものではありません");
   });
 
-  it("記事が AI により自動生成されている旨を表示する（F15）", () => {
-    expect(html).toContain("AI により自動生成された");
+  it("AI・自動生成・自動編集をにおわせる文言を表示しない（ユーザー要望）", () => {
+    expect(html).not.toContain("AI");
+    expect(html).not.toContain("自動生成");
+    expect(html).not.toContain("自動編集");
   });
 
   it("免責事項・プライバシーポリシー・お問い合わせ（掲載削除依頼）への導線を持つ（F15）", () => {

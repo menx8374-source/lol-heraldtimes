@@ -4,7 +4,7 @@ import Link from "next/link";
 export const metadata: Metadata = {
   title: "免責事項",
   description:
-    "本サイトの非公認ディスクレーマー・AI自動生成記事に関する免責事項について説明します。",
+    "本サイトの非公認ディスクレーマー・掲載内容や引用・転載に関する免責事項について説明します。",
 };
 
 export default function DisclaimerPage() {
@@ -23,11 +23,12 @@ export default function DisclaimerPage() {
       </section>
 
       <section className="mt-6">
-        <h2 className="text-base font-bold">AI による自動生成記事について</h2>
+        <h2 className="text-base font-bold">掲載内容について</h2>
         <p className="mt-2 text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
-          本サイトに掲載する記事は AI により自動生成されています。内容の正確性・最新性・完全性を
-          保証するものではなく、公開後に事実関係が変動・修正される場合があります。重要な判断を行う
-          際は、必ず一次情報（公式サイト・公式発表等）をご確認ください。
+          本サイトに掲載する記事は、掲示板（5ch 等）・SNS（Reddit 等）・公式サイト等の公開情報を
+          もとにまとめたものです。内容の正確性・最新性・完全性を保証するものではなく、公開後に
+          事実関係が変動・修正される場合があります。重要な判断を行う際は、必ず一次情報（公式サイト・
+          公式発表等）をご確認ください。
         </p>
       </section>
 
@@ -35,8 +36,8 @@ export default function DisclaimerPage() {
         <h2 className="text-base font-bold">出典・引用について</h2>
         <p className="mt-2 text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
           記事内で紹介する掲示板（5ch 等）・SNS（Reddit 等）・公式サイトの投稿内容は、各出典元の
-          ものであり、その内容の真偽・正確性について本サイトは責任を負いません。引用箇所は本文の
-          自動生成部分と視覚的に区別（枠線・斜体表示・「引用」表示）して掲載しています。
+          ものであり、その内容の真偽・正確性について本サイトは責任を負いません。引用箇所は本文と
+          視覚的に区別（枠線・斜体表示・「引用」表示）して掲載しています。
         </p>
       </section>
 

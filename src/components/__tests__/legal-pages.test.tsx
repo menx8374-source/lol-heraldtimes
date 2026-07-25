@@ -7,11 +7,13 @@ import ContactPage from "@/app/contact/page";
 describe("固定ページ: /disclaimer（免責事項）", () => {
   const html = renderToStaticMarkup(<DisclaimerPage />);
 
-  it("Riot 非公認・AI自動生成・法的助言でない旨の記載を含む（F15）", () => {
+  it("Riot 非公認・掲載内容・法的助言でない旨の記載を含み、AI示唆文言を含まない（F15/ユーザー要望）", () => {
     expect(html).toContain("免責事項");
     expect(html).toContain("承認・関与・後援するもの");
-    expect(html).toContain("AI により自動生成");
+    expect(html).toContain("掲載内容について");
     expect(html).toContain("法律上の助言");
+    expect(html).not.toContain("AI");
+    expect(html).not.toContain("自動生成");
   });
 
   it("お問い合わせ（掲載削除依頼）ページへの導線を持つ", () => {
