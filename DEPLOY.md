@@ -127,16 +127,69 @@ crontab -e
 
 ---
 
-## 更新デプロイ（コード変更を反映するとき）
+## 予行テスト（ステージング）環境 — 本番へ適用する前に検証する
+
+いきなり本番へ反映せず、**同じVPS内に本番と分離した「ステージング」**を用意し、そこで確認してから本番へ上げる。
+本番(`lol-matome` / `/var/www/lol-matome` / DB `prod.db` / ポート3000)とは、**別ディレクトリ・別DB・別ポート(3001)・
+別pm2プロセス・`staging`ブランチ**で分離する。
+
+推奨ワークフロー: **ローカル(`npm run dev`)で開発 → `staging`ブランチにpush → ステージングで確認 → 問題なければ
+`main`にマージ → 本番へ反映**。※コミット前に「テスト全Green＋`npm run build`成功」が必須（このプロジェクトの規律）なので、
+壊れた変更は基本ここまで来ない。
+
+### 初回セットアップ（VPSで一度だけ）
+```bash
+# ステージング用ディレクトリにクローン（本番と同じデプロイキーでOK）
+sudo mkdir -p /var/www/lol-matome-staging && sudo chown -R "$USER":"$USER" /var/www/lol-matome-staging
+cd /var/www/lol-matome-staging
+git clone git@github-lol:<あなた>/<リポジトリ名>.git .
+git checkout -b staging origin/staging   # staging ブランチを使う（無ければ作ってpush）
+npm ci
+
+# ステージング用 .env（本番と別のDB・URL。実収集は控えめ or mock 推奨）
+cp .env.example .env && nano .env
+#   DATABASE_URL="file:/var/lib/lol-matome/staging.db"
+#   SITE_URL=https://staging.lolheraldtimes.com   # or http://<IP>:3001 で見るなら未設定でも可
+#   COLLECTION_MODE=mock                            # ステージングは基本モックで十分
+#   ADMIN_USER=... / ADMIN_PASSWORD=...            # 本番と別の値に
+
+npx prisma migrate deploy
+npm run db:seed            # ← ステージングはモックデータを入れて見た目確認してよい（本番は入れない）
+npm run build
+pm2 start deploy/ecosystem.staging.config.cjs && pm2 save
+```
+
+### 公開方法（どちらか）
+- **簡単**: ufw で 3001 を一時的に開け（`sudo ufw allow 3001`）、`http://160.251.254.119:3001` で確認。確認後 `sudo ufw delete allow 3001` で閉じる。
+- **きれい**: サブドメイン `staging.lolheraldtimes.com` のAレコードを同じIPに向け、nginxに staging 用 server_block（`proxy_pass http://127.0.0.1:3001`）を追加。**検索エンジンに載せない**よう Basic 認証をかけるか `X-Robots-Tag: noindex` を付ける（本番と重複コンテンツ扱いにされないため）。
+
+### ステージングの更新
+```bash
+cd /var/www/lol-matome-staging
+git pull
+npm ci && npx prisma migrate deploy && npm run build
+pm2 restart lol-matome-staging
+```
+
+> ステージングで問題なければ、下の「更新デプロイ」で**本番**に反映する。
+
+---
+
+## 更新デプロイ（本番へ反映するとき）
+
+**先にステージングで確認してから**実行する。
 
 ```bash
 cd /var/www/lol-matome
-git pull
+git pull                    # main(本番ブランチ)を取得
 npm ci
 npx prisma migrate deploy   # スキーマ変更があれば適用
 npm run build
 pm2 restart lol-matome
 ```
+
+万一の切り戻し（ロールバック）: `git checkout <直前の正常なコミット>` → `npm ci && npx prisma migrate deploy && npm run build`
+→ `pm2 restart lol-matome`。SQLiteは日次バックアップ（下記手順8）から復元できる。
 
 ---
 
