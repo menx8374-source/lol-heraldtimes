@@ -3,25 +3,26 @@
  * （architecture.md「収集アダプタ構造」）。live 実装は本接続用の認証情報・実装が
  * 揃ったソースから段階的にこのレジストリへ追加する（拡張E15: riotはキー不要のため実装済み。
  * 拡張E16: reddit はOAuth(app-only)実装済み・クレデンシャル未設定時は空配列で自動グレースフル。
+ * 拡張E17: clip はYouTube+Twitch実装済み・各社キー未設定時はその社のみ空配列で自動グレースフル。
  * 5chは未実装のため、live モード指定時は明示的にエラーにする）。
  */
-import type { SourceAdapter, SourceType } from "@/lib/collection/types";
+import { SOURCE_TYPES, type SourceAdapter, type SourceType } from "@/lib/collection/types";
 import { MockSourceAdapter } from "@/lib/collection/adapters/mock";
 import { RiotDataDragonAdapter } from "@/lib/collection/adapters/riot-datadragon";
 import { RedditAdapter } from "@/lib/collection/adapters/reddit";
+import { ClipAdapter } from "@/lib/collection/adapters/clip";
 import { getCollectionMode } from "@/lib/collection/config";
-
-const SOURCE_TYPES: SourceType[] = ["reddit", "5ch", "riot"];
 
 /** live実装が用意されているソースのみここに登録する（未登録ソースは「未実装」エラーになる）。 */
 const LIVE_ADAPTER_FACTORIES: Partial<Record<SourceType, () => SourceAdapter>> = {
   riot: () => new RiotDataDragonAdapter(),
   reddit: () => new RedditAdapter(),
+  clip: () => new ClipAdapter(),
 };
 
 /**
  * 指定ソース種別のアダプタを返す。`mode` 省略時は `getCollectionMode()`（env `COLLECTION_MODE`）に従う。
- * live モードで実装済みのソース（riot・reddit）は live 実装を返す。未実装ソース（5ch）は
+ * live モードで実装済みのソース（riot・reddit・clip）は live 実装を返す。未実装ソース（5ch）は
  * 呼び出すと分かりやすいエラーで失敗する（本接続の認証情報・実装が揃い次第 LIVE_ADAPTER_FACTORIES に追加する）。
  */
 export function getAdapter(sourceType: SourceType, mode: "mock" | "live" = getCollectionMode()): SourceAdapter {

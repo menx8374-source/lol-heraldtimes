@@ -23,7 +23,8 @@ export type GenerationTask =
   | { kind: "intro"; sourceType: SourceType; title: string }
   | { kind: "fact-summary"; sentence: string; index: number }
   | { kind: "context"; sourceType: SourceType; title: string }
-  | { kind: "closing"; sourceType: SourceType; title: string };
+  | { kind: "closing"; sourceType: SourceType; title: string }
+  | { kind: "clip-intro"; title: string; hint: string };
 
 function renderIntro(task: Extract<GenerationTask, { kind: "intro" }>): string {
   if (task.sourceType === "riot") {
@@ -50,6 +51,11 @@ function renderClosing(task: Extract<GenerationTask, { kind: "closing" }>): stri
   return `以上、「${task.title}」というスレッドに寄せられた反応を要約してまとめた。今後の展開や追加の反応にも引き続き注目していきたい。`;
 }
 
+/** clip由来（拡張E17）: 「注目クリップ」見出し直後の短い紹介文（1〜2文）。 */
+function renderClipIntro(task: Extract<GenerationTask, { kind: "clip-intro" }>): string {
+  return `「${task.title}」が今、LoLプレイヤーの間で話題になっているクリップだ。${task.hint}という内容で、詳しくは下記の動画・クリップ本編をチェックしてほしい。`;
+}
+
 function renderTask(task: GenerationTask): string {
   switch (task.kind) {
     case "intro":
@@ -60,6 +66,8 @@ function renderTask(task: GenerationTask): string {
       return renderContext(task);
     case "closing":
       return renderClosing(task);
+    case "clip-intro":
+      return renderClipIntro(task);
   }
 }
 

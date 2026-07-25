@@ -45,6 +45,35 @@ describe("generateArticleForCandidate（成功パス）", () => {
   });
 });
 
+describe("generateArticleForCandidate（clip由来=埋め込み紹介形式、拡張E17）", () => {
+  function clipCandidate(overrides: Partial<GenerationCandidate> = {}): GenerationCandidate {
+    return candidate({
+      sourceType: "clip",
+      sourceUrl: "https://www.youtube.com/watch?v=abc123",
+      title: "LoLハイライト動画",
+      content: "今週のLoL神プレイをまとめました。",
+      ...overrides,
+    });
+  }
+
+  it("clip由来はカテゴリ「動画・クリップ」になり、embedブロックを含む本文が生成される", async () => {
+    const result = await generateArticleForCandidate(clipCandidate(), llm);
+    expect(result.category).toBe("動画・クリップ");
+    expect(result.body.some((b) => b.type === "embed")).toBe(true);
+    expect(result.body.some((b) => b.type === "heading")).toBe(true);
+    expect(result.sources[0].url).toBe("https://www.youtube.com/watch?v=abc123");
+    // DBに保存する形式(JSON)としても壊れずパースできる
+    expect(() => parseArticleBody(result.body)).not.toThrow();
+  });
+
+  it("clipのcontentが短くても(300字未満)GenerationErrorにならない(埋め込み紹介形式は最低文字数チェック対象外)", async () => {
+    const result = await generateArticleForCandidate(clipCandidate({ content: "短い紹介文。" }), llm);
+    const totalLength = result.body.reduce((sum, b) => sum + blockText(b).length, 0);
+    expect(totalLength).toBeLessThan(MIN_BODY_LENGTH);
+    expect(result.body.some((b) => b.type === "embed")).toBe(true);
+  });
+});
+
 describe("generateArticleForCandidate（失敗パス）", () => {
   it("出典URLが無い候補はGenerationErrorになる", async () => {
     await expect(generateArticleForCandidate(candidate({ sourceUrl: "" }), llm)).rejects.toBeInstanceOf(

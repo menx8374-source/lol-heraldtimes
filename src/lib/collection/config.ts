@@ -66,6 +66,14 @@ export function getDefaultSourceConfigs(): Record<SourceType, SourceConfig> {
       },
       relevance: { keywords: DEFAULT_LOL_KEYWORDS },
     },
+    clip: {
+      sourceType: "clip",
+      rateLimit: {
+        maxItemsPerRun: envInt("COLLECTION_CLIP_MAX_ITEMS", 10),
+        minIntervalMsBetweenRuns: envInt("COLLECTION_CLIP_MIN_INTERVAL_MS", 30 * 60 * 1000),
+      },
+      relevance: { keywords: DEFAULT_LOL_KEYWORDS },
+    },
   };
 }
 

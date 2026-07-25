@@ -9,8 +9,26 @@
  * 認証ヘッダ・トークン等のシークレットは出さない（呼び出し側で context に秘密を渡さないこと）。
  */
 
+import type { RawCollectionItem } from "@/lib/collection/types";
+
 /** 1回のfetchあたりのタイムアウト（外部が応答しない場合に収集全体を止めないため）。 */
 export const COLLECTION_FETCH_TIMEOUT_MS = 8000;
+
+/**
+ * `sourceUrl` をキーに重複を除いた「順序保持」の配列を返す（`sourceUrl` 無しは除外）。
+ * 複数エンドポイント/サブレディット/プロバイダから集めた候補の run 内重複を落とすため、各アダプタで共用する
+ * （最終的な永続化時の重複排除は normalizedUrl 一意制約が担うが、ここで run 内の無駄も先に除く）。
+ */
+export function dedupeBySourceUrl(items: RawCollectionItem[]): RawCollectionItem[] {
+  const seen = new Set<string>();
+  const result: RawCollectionItem[] = [];
+  for (const item of items) {
+    if (!item.sourceUrl || seen.has(item.sourceUrl)) continue;
+    seen.add(item.sourceUrl);
+    result.push(item);
+  }
+  return result;
+}
 
 export type FetchJsonOptions = {
   /** ログ接頭辞（例 "riot-datadragon" / "reddit"）。 */

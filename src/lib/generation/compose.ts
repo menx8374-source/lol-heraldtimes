@@ -9,13 +9,16 @@
 import type { ArticleBodyBlock, ArticleBodyReactionBlock } from "@/lib/article-body";
 import type { SourceType } from "@/lib/collection/types";
 import type { LLMClient, GenerationTask } from "@/lib/generation/llm-client";
-import { splitIntoSentences, excerptForQuote } from "@/lib/generation/text-utils";
+import { splitIntoSentences, excerptForQuote, gistOf } from "@/lib/generation/text-utils";
 import { parseThreadReses, extractAnchors, computeLineEmphasis } from "@/lib/generation/thread-format";
+import { isAllowedEmbedUrl, embedProviderForUrl } from "@/lib/embed";
 
 export type GenerationCandidateInput = {
   sourceType: SourceType;
   title: string;
   content: string;
+  /** clip由来の埋め込みブロック構築にのみ使う出典URL（それ以外のソース種別では未使用）。 */
+  sourceUrl?: string;
 };
 
 /** レス投稿者の匿名化ハンドル（実名・個人特定情報は出さない）。ソース種別ごとに固定。 */
@@ -54,6 +57,7 @@ const QUOTE_SOURCE_LABEL: Record<SourceType, string> = {
   "5ch": "5chの反応",
   reddit: "Redditの反応",
   riot: "Riot公式",
+  clip: "クリップ紹介",
 };
 
 async function askLLM(llmClient: LLMClient, task: GenerationTask): Promise<string> {
@@ -120,8 +124,38 @@ function composeReactionBody(
 }
 
 /**
+ * clip由来（拡張E17）: 「埋め込み紹介」形式。見出し＋短い紹介文（askLLM）＋embedブロックのみで構成する
+ * （逐語転載ではなく紹介＋埋め込みなので、他ソースのような300字下限・逐語一致率・引用比率は課さない。
+ * 代わりに generate-article.ts 側で「embedブロックが必ず1件あること」を最低条件にする）。
+ */
+async function composeClipBody(
+  candidate: GenerationCandidateInput,
+  llmClient: LLMClient,
+): Promise<ArticleBodyBlock[]> {
+  const blocks: ArticleBodyBlock[] = [];
+  blocks.push({ type: "heading", text: "注目クリップ" });
+  blocks.push({
+    type: "paragraph",
+    text: await askLLM(llmClient, {
+      kind: "clip-intro",
+      title: candidate.title,
+      hint: gistOf(candidate.content, 60),
+    }),
+  });
+
+  const sourceUrl = candidate.sourceUrl ?? "";
+  const provider = sourceUrl ? embedProviderForUrl(sourceUrl) : null;
+  if (provider && isAllowedEmbedUrl(provider, sourceUrl)) {
+    blocks.push({ type: "embed", provider, url: sourceUrl });
+  }
+
+  return blocks;
+}
+
+/**
  * 記事化候補から構造化された本文ブロック配列を組み立てる（F7）。
- * sourceType が "riot" なら速報＋要点整理、それ以外（5ch/reddit）ならまとめ速報レス形式にする。
+ * sourceType が "riot" なら速報＋要点整理、"clip" なら埋め込み紹介形式、
+ * それ以外（5ch/reddit）ならまとめ速報レス形式にする。
  */
 export async function composeArticleBody(
   candidate: GenerationCandidateInput,
@@ -130,6 +164,9 @@ export async function composeArticleBody(
   if (candidate.sourceType === "riot") {
     const sentences = splitIntoSentences(candidate.content);
     return composeFactBody(candidate, sentences, llmClient);
+  }
+  if (candidate.sourceType === "clip") {
+    return composeClipBody(candidate, llmClient);
   }
   return composeReactionBody(candidate, candidate.sourceType);
 }

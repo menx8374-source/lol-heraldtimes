@@ -3,8 +3,16 @@
  * architecture.md の `SourceAdapter` 抽象（reddit/5ch/riot、mock↔live 切替）に対応する。
  */
 
-/** 収集元ソースの種別。 */
-export type SourceType = "reddit" | "5ch" | "riot";
+/**
+ * 収集元ソースの全種別。**この配列が単一の source of truth** で、`SourceType` はここから導出する。
+ * ソースを増やすときはこの配列に足すだけで `SourceType` が更新され、`Record<SourceType,...>`（config・
+ * mock・カテゴリ対応表等）に網羅漏れがあればコンパイルエラーになる（拡張E17 自浄で導入）。
+ * clip: YouTube/Twitchクリップ（拡張E17、埋め込み紹介記事）。
+ */
+export const SOURCE_TYPES = ["reddit", "5ch", "riot", "clip"] as const;
+
+/** 収集元ソースの種別。`SOURCE_TYPES` から導出。 */
+export type SourceType = (typeof SOURCE_TYPES)[number];
 
 /**
  * アダプタが返す生の収集アイテム。出典URLが無い場合は `sourceUrl` を省略してよく、

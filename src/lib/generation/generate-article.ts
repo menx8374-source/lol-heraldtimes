@@ -7,9 +7,11 @@
  * ⚠ 記事フォーマット改修（2026-07-25・ユーザー決定、同日追加改修でAI要約段落も除去）: 掲示板/SNS由来
  * （5ch/reddit）は「まとめ速報レス形式」（AI要約段落なし・レス本文を逐語表示のみ）に変更したため、
  * 逐語一致率チェック・引用主従比率チェック・最低文字数(300字)チェックは reaction 形式の記事
- * （sourceType !== "riot"）には適用せず、代わりに「reactionブロックが1件以上あること」を最低条件に
- * する。Riot公式（riot）は従来どおり300字・逐語一致率・引用主従比率チェックを適用する。安全フィルタ
- * （F9: NGワード・個人中傷・出典欠落・重複）は形式によらず必ず適用する（pipeline.ts の
+ * （5ch/reddit）には適用せず、代わりに「reactionブロックが1件以上あること」を最低条件にする。
+ * Riot公式（riot）は従来どおり300字・逐語一致率・引用主従比率チェックを適用する。
+ * ⚠ 拡張E17: clip（YouTube/Twitch由来）は「埋め込み紹介」形式（見出し＋短い紹介文＋embedブロック）
+ * のため、上記いずれのチェックも適用せず、代わりに「embedブロックが1件以上あること」を最低条件にする。
+ * 安全フィルタ（F9: NGワード・個人中傷・出典欠落・重複）は形式によらず必ず適用する（pipeline.ts の
  * moderateArticleContent）。
  */
 import { blockText, type ArticleBodyBlock } from "@/lib/article-body";
@@ -52,12 +54,14 @@ const CATEGORY_BY_SOURCE: Record<SourceType, CategoryLabel> = {
   "5ch": "5chの反応",
   reddit: "海外の反応",
   riot: "公式ニュース",
+  clip: "動画・クリップ",
 };
 
 const ARTICLE_SOURCE_LABEL: Record<SourceType, string> = {
   "5ch": "5ch",
   reddit: "Reddit",
   riot: "Riot公式",
+  clip: "YouTube/Twitch",
 };
 
 /**
@@ -77,12 +81,20 @@ export async function generateArticleForCandidate(
   // 最低文字数(300字)・逐語一致率・引用主従比率のチェックは対象外にし、代わりに「reactionブロック
   // (レス)が1件以上あること」だけを最低条件にする(F9のNGワード等の安全フィルタは形式によらず
   // pipeline.tsで必ず適用する)。riot(fact形式)のみ従来どおり300字・逐語・引用比率を適用する。
-  const isReactionFormat = candidate.sourceType !== "riot";
+  // clip形式(埋め込み紹介、拡張E17)は逐語転載ではなく紹介＋埋め込みのため、代わりに
+  // 「embedブロックが1件以上あること」だけを最低条件にする。
+  const isReactionFormat = candidate.sourceType === "5ch" || candidate.sourceType === "reddit";
+  const isClipFormat = candidate.sourceType === "clip";
 
   if (isReactionFormat) {
     const reactionCount = body.filter((b) => b.type === "reaction").length;
     if (reactionCount === 0) {
       throw new GenerationError("反応まとめ記事にレス(reactionブロック)が1件もありません");
+    }
+  } else if (isClipFormat) {
+    const embedCount = body.filter((b) => b.type === "embed").length;
+    if (embedCount === 0) {
+      throw new GenerationError("クリップ紹介記事に埋め込み(embedブロック)がありません");
     }
   } else {
     const totalLength = body.reduce((sum, b) => sum + blockText(b).length, 0);

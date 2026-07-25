@@ -36,6 +36,26 @@ function isHostAllowed(host: string, allowed: string): boolean {
 }
 
 /**
+ * URLのホストから対応する EmbedProvider を判定する純関数（`EMBED_ALLOWED_HOSTS` が単一の source of
+ * truth。ホスト判定を各所に散らさずここに集約する）。どの provider にも該当しない／URL不正なら null。
+ * 例: youtube.com→"youtube"、clips.twitch.tv→"clip"、x.com→"twitter"。
+ */
+export function embedProviderForUrl(url: string): EmbedProvider | null {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+  for (const provider of Object.keys(EMBED_ALLOWED_HOSTS) as EmbedProvider[]) {
+    if (EMBED_ALLOWED_HOSTS[provider].some((allowed) => isHostAllowed(host, allowed))) {
+      return provider;
+    }
+  }
+  return null;
+}
+
+/**
  * 埋め込みURLが provider 既定のホワイトリストドメイン（https限定）かどうかを検証する純関数。
  * URLとして解釈できない値・http(平文)・ホワイトリスト外ドメインはすべて false（=表示しない）。
  */

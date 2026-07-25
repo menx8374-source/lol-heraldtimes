@@ -16,7 +16,7 @@
  */
 import type { RawCollectionItem, SourceAdapter } from "@/lib/collection/types";
 import { DEFAULT_ALLOWED_SUBREDDITS } from "@/lib/collection/config";
-import { fetchJsonSafe } from "@/lib/collection/adapters/http";
+import { fetchJsonSafe, dedupeBySourceUrl } from "@/lib/collection/adapters/http";
 
 const TOKEN_URL = "https://www.reddit.com/api/v1/access_token";
 /** 1リクエストで取得するリスティング件数（最終的な件数上限は呼び出し側pipelineのconfigが適用）。 */
@@ -150,18 +150,12 @@ export class RedditAdapter implements SourceAdapter {
     });
     if (!token) return [];
 
-    const seenUrls = new Set<string>();
     const items: RawCollectionItem[] = [];
     for (const subreddit of this.subreddits) {
       const listing = await fetchListing(subreddit, token, this.userAgent);
       if (!listing) continue;
-      for (const post of extractPosts(listing)) {
-        const item = buildRedditItem(post);
-        if (!item.sourceUrl || seenUrls.has(item.sourceUrl)) continue;
-        seenUrls.add(item.sourceUrl);
-        items.push(item);
-      }
+      for (const post of extractPosts(listing)) items.push(buildRedditItem(post));
     }
-    return items;
+    return dedupeBySourceUrl(items);
   }
 }

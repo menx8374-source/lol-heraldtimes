@@ -42,12 +42,14 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
 | `DATABASE_URL` | 必須 | SQLite ファイルの場所。既定値 `file:./dev.db`（秘密情報ではない） |
 | `ANTHROPIC_API_KEY` | 後続スプリントで使用 | LLM 本接続用の Anthropic API キー（Sprint 1 時点では未使用） |
 | `ANTHROPIC_MODEL` | 任意 | 使用モデル。既定 `claude-haiku-4-5`（Sprint 1 時点では未使用） |
-| `COLLECTION_MODE` | 任意 | `mock`（既定）／`live`。`live` は実装済みソース(riot=拡張E15, reddit=拡張E16)は本接続で収集し、未実装ソース(5ch)は「未実装」でスキップされる |
-| `COLLECTION_REDDIT_MAX_ITEMS` / `COLLECTION_5CH_MAX_ITEMS` / `COLLECTION_RIOT_MAX_ITEMS` | 任意 | ソースごとの1回の収集実行あたりの取得件数上限（既定: reddit/5ch=10, riot=20） |
-| `COLLECTION_REDDIT_MIN_INTERVAL_MS` / `COLLECTION_5CH_MIN_INTERVAL_MS` / `COLLECTION_RIOT_MIN_INTERVAL_MS` | 任意 | ソースごとの最小実行間隔(ミリ秒)。既定: reddit/5ch=600000(10分), riot=1800000(30分) |
+| `COLLECTION_MODE` | 任意 | `mock`（既定）／`live`。`live` は実装済みソース(riot=拡張E15, reddit=拡張E16, clip=拡張E17)は本接続で収集し、未実装ソース(5ch)は「未実装」でスキップされる |
+| `COLLECTION_REDDIT_MAX_ITEMS` / `COLLECTION_5CH_MAX_ITEMS` / `COLLECTION_RIOT_MAX_ITEMS` / `COLLECTION_CLIP_MAX_ITEMS` | 任意 | ソースごとの1回の収集実行あたりの取得件数上限（既定: reddit/5ch=10, riot=20, clip=10） |
+| `COLLECTION_REDDIT_MIN_INTERVAL_MS` / `COLLECTION_5CH_MIN_INTERVAL_MS` / `COLLECTION_RIOT_MIN_INTERVAL_MS` / `COLLECTION_CLIP_MIN_INTERVAL_MS` | 任意 | ソースごとの最小実行間隔(ミリ秒)。既定: reddit/5ch=600000(10分), riot/clip=1800000(30分) |
 | `RIOT_DDRAGON_LOCALE` | 任意 | riot live収集(拡張E15、Riot Data Dragon)のlocale。既定 `ja_JP`（Data Dragonはキー不要の公開CDN） |
 | `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` | reddit live収集(拡張E16)を使うなら必須 | Reddit アプリ（https://www.reddit.com/prefs/apps ）のクレデンシャル。Application-only OAuth2(client_credentials)でトークン取得に使う。**秘密情報のため必ず `.env` のみに設定しコミットしない**。未設定時はReddit収集のみ空配列＋ログでスキップ（他ソースは継続） |
 | `REDDIT_USER_AGENT` | reddit live収集(拡張E16)を使うなら必須 | Reddit規約で必須の説明的User-Agent文字列（秘密ではない。例 `lol-matome/1.0 by <運用者>`） |
+| `YOUTUBE_API_KEY` | clip収集(拡張E17)のYouTube部分を使うなら必須 | YouTube Data API v3のAPIキー（Google Cloud Console発行）。**秘密情報のため必ず `.env` のみに設定しコミットしない**。未設定時はYouTube分のみ空配列＋ログでスキップ |
+| `TWITCH_CLIENT_ID` / `TWITCH_CLIENT_SECRET` | clip収集(拡張E17)のTwitch部分を使うなら必須 | Twitchアプリ（https://dev.twitch.tv/console/apps ）のクレデンシャル。app access token(client_credentials)取得に使う。**秘密情報のため必ず `.env` のみに設定しコミットしない**。未設定時はTwitch分のみ空配列＋ログでスキップ（YouTube等の他ソースは継続） |
 | `GENERATION_MODE` | 任意 | `mock`（既定、APIキー不要の決定論的モックLLM）／`live`。`live` は本接続実装未整備のためエラーになる |
 | `PIPELINE_MAX_PUBLISH_PER_RUN` | 任意 | 統合パイプライン(`npm run pipeline`)1回の実行で処理・公開する記事本数の上限（既定5件） |
 | `PIPELINE_INTERVAL_MS` | 任意 | 統合パイプラインの繰り返し実行の目安間隔(ミリ秒)。既定14400000(4時間) |
@@ -61,7 +63,7 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
 ## 外部サービス接続の方針（現時点）
 当面はすべて **モック実装** で全スプリントを通し、将来の実運用時に順次本接続へ差し替える。いずれも差し替え可能な抽象越しに呼ぶ設計。
 - **LLM 記事・タイトル生成（F7・F8）**: `LLMClient` 抽象越しの決定論的モック実装（API キー不要）。将来は Anthropic Claude（`ANTHROPIC_API_KEY`・既定 `claude-haiku-4-5`）へ差し替え可能。
-- **ソース収集（Reddit／5ch／Riot 公式・F5）**: `SourceAdapter` 抽象越しの fixture モック（既定）。`COLLECTION_MODE=live` で riot（拡張E15）・reddit（拡張E16）は本接続、5chは認証情報・実装が揃い次第切り替える。
+- **ソース収集（Reddit／5ch／Riot 公式／YouTube・Twitchクリップ・F5）**: `SourceAdapter` 抽象越しの fixture モック（既定）。`COLLECTION_MODE=live` で riot（拡張E15）・reddit（拡張E16）・clip（拡張E17、YouTube+Twitch）は本接続、5chは認証情報・実装が揃い次第切り替える。
 - **AdSense 広告（F12）**: アカウント開設・審査は Non-Goal。広告タグを差し込める枠と、設定でタグ文字列を受け取る仕組みまで（未設定時はプレースホルダー枠）。
 
 ## 回遊・エンゲージメントUI（拡張E1）

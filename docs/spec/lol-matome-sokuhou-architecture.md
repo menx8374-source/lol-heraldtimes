@@ -45,6 +45,7 @@ status: active
 - 本接続への差し替え点は `adapters/index.ts`（`getAdapter`）1箇所。段階的にlive実装をレジストリへ追加する方式（拡張E15/E16確定）:
   - riot（拡張E15）: Riot Data Dragon（公式静的データCDN、APIキー不要）。
   - reddit（拡張E16）: Application-only OAuth2(client_credentials)。env `REDDIT_CLIENT_ID`/`REDDIT_CLIENT_SECRET`/`REDDIT_USER_AGENT`未設定時は空配列＋ログでグレースフルスキップ（他ソースを止めない）。運用コスト: Reddit API無料枠（OAuth app-only、個人開発規模なら無料）。
+  - clip（拡張E17）: YouTube Data API v3（検索、env `YOUTUBE_API_KEY`）＋Twitch helix clips（client_credentials、env `TWITCH_CLIENT_ID`/`TWITCH_CLIENT_SECRET`）を1つの`ClipAdapter`が両方から取得。各社キーは独立に任意、未設定の社だけ空配列＋ログでスキップ。記事化は逐語転載ではなく「埋め込み紹介」形式（新カテゴリ「動画・クリップ」）。運用コスト: 両API無料枠内（個人開発規模・低頻度ポーリングなら無料）。
   - 5ch: 未実装。live指定時はエラー。
 
 ## 広告差し込み方式
