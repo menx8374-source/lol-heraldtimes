@@ -8,7 +8,7 @@ import {
 } from "@/lib/articles";
 import { categorySlugFor } from "@/lib/categories";
 import { buildArticleDescription, toSafeJsonLd } from "@/lib/seo";
-import { getSiteUrl } from "@/lib/site";
+import { getSiteUrl, SITE_NAME } from "@/lib/site";
 import { ArticleBodyView } from "@/components/article-body-view";
 import { ArticleMeta } from "@/components/article-meta";
 import { ArticleList } from "@/components/article-list";
@@ -83,7 +83,7 @@ export default async function ArticlePage({ params }: Props) {
     articleSection: article.category,
     mainEntityOfPage: { "@type": "WebPage", "@id": articleUrl },
     image: [resolveOgImageUrl(siteUrl, article.thumbnailUrl)],
-    publisher: { "@type": "Organization", name: "LoLまとめ速報" },
+    publisher: { "@type": "Organization", name: SITE_NAME },
   };
 
   return (

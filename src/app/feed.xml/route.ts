@@ -6,12 +6,12 @@
 import { prisma } from "@/lib/prisma";
 import { PUBLISHED_ONLY, summarySelect, toSummary } from "@/lib/articles";
 import { buildRssFeed } from "@/lib/feed";
-import { getSiteUrl, articleUrl } from "@/lib/site";
+import { getSiteUrl, articleUrl, SITE_NAME } from "@/lib/site";
 
 export const dynamic = "force-dynamic";
 
 const FEED_ITEM_LIMIT = 30;
-const FEED_TITLE = "LoLまとめ速報";
+const FEED_TITLE = SITE_NAME;
 const FEED_DESCRIPTION =
   "League of Legends（LoL）の海外・5chの反応やパッチノート・大会結果をまとめる速報サイト。";
 

@@ -3,6 +3,7 @@ import { CATEGORY_LABELS, categorySlugFor } from "@/lib/categories";
 import { SearchForm } from "@/components/search-form";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { DesignToggle } from "@/components/design-toggle";
+import { SITE_NAME } from "@/lib/site";
 
 export function SiteHeader() {
   return (
@@ -10,7 +11,7 @@ export function SiteHeader() {
       <div className="mx-auto max-w-7xl px-4 py-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Link href="/" className="inline-flex flex-col">
-            <span className="text-xl font-bold tracking-tight">LoLまとめ速報</span>
+            <span className="text-lg font-bold tracking-tight sm:text-xl">{SITE_NAME}</span>
             <span className="text-xs text-neutral-400">
               海外・5chの反応 / パッチ情報 / eスポーツをまとめて速報
             </span>

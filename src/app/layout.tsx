@@ -4,11 +4,12 @@ import { SiteChrome } from "@/components/site-chrome";
 import { getSiteNotice } from "@/lib/notice";
 import { getAdSlotCode } from "@/lib/ads/config";
 import { NO_FLASH_DESIGN_SCRIPT } from "@/lib/no-flash-scripts";
+import { SITE_NAME } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: {
-    default: "LoLまとめ速報",
-    template: "%s | LoLまとめ速報",
+    default: SITE_NAME,
+    template: `%s | ${SITE_NAME}`,
   },
   description:
     "League of Legends（LoL）の海外・5chの反応やパッチノート・大会結果をまとめる速報サイト。",
