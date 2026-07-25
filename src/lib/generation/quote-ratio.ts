@@ -3,14 +3,14 @@
  * 引用が記事全体に占める文字数割合が過大でない(自サイト生成文が主・引用が従)ことを
  * LLMに依存せず判定する純関数。
  */
-import type { ArticleBodyBlock } from "@/lib/article-body";
+import { blockText, type ArticleBodyBlock } from "@/lib/article-body";
 
 /** 既定の引用比率しきい値。これ以下であれば「引用が従」とみなす。 */
 export const DEFAULT_QUOTE_RATIO_THRESHOLD = 0.4;
 
 /** 本文ブロック配列全体に対する引用(quote)ブロックの文字数割合(0〜1)を返す。 */
 export function computeQuoteRatio(blocks: ArticleBodyBlock[]): number {
-  const totalLength = blocks.reduce((sum, b) => sum + b.text.length, 0);
+  const totalLength = blocks.reduce((sum, b) => sum + blockText(b).length, 0);
   if (totalLength === 0) return 0;
   const quoteLength = blocks
     .filter((b) => b.type === "quote")

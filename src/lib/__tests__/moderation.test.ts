@@ -4,6 +4,8 @@ import { detectPersonalAttack } from "@/lib/moderation/personal-attack";
 import { containsRumorMarker } from "@/lib/moderation/rumor";
 import { findDuplicateArticle } from "@/lib/moderation/duplicate";
 import { moderateArticleContent } from "@/lib/moderation/moderate";
+import { bodyBlocksToText } from "@/lib/search";
+import type { ArticleBodyBlock } from "@/lib/article-body";
 
 describe("findNgWord / stripNgWords（NGワード検出, F9）", () => {
   it("定義済みNGワードを含む文からその語を検出する", () => {
@@ -151,5 +153,43 @@ describe("moderateArticleContent（公開前安全フィルタの統合判定, F
       sourceCount: 1,
     });
     expect(result).toMatchObject({ status: "published", unconfirmed: true });
+  });
+
+  it("まとめ速報レス形式(reactionブロック)のレス本文にNGワードが含まれる場合もheldになる(F9はレス本文も対象)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "heading", text: "話題" },
+      { type: "paragraph", text: "スレッドが投稿され反応が寄せられている。" },
+      {
+        type: "reaction",
+        number: 1,
+        name: "国内プレイヤーさん",
+        lines: [{ text: "このチャンピオンはカスだと思う" }],
+      },
+    ];
+    const bodyText = bodyBlocksToText(blocks);
+    const result = moderateArticleContent({
+      title: "【LoL】あるチャンピオンについて語るスレ",
+      bodyText,
+      sourceCount: 1,
+    });
+    expect(result).toMatchObject({ status: "held", reason: "ng_word" });
+  });
+
+  it("NGワード・中傷の無い通常のreactionブロック記事は公開される", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "heading", text: "話題" },
+      {
+        type: "reaction",
+        number: 1,
+        name: "国内プレイヤーさん",
+        lines: [{ text: "壁飛び5連続でキャリーとか草生える", emphasis: "red" }],
+      },
+    ];
+    const result = moderateArticleContent({
+      title: "【5ch】ヤスオの伝説的プレイ",
+      bodyText: bodyBlocksToText(blocks),
+      sourceCount: 1,
+    });
+    expect(result.status).toBe("published");
   });
 });

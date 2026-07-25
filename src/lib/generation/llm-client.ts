@@ -21,7 +21,6 @@ export interface LLMClient {
 /** compose.ts がモックへ渡す生成タスクの内容（テンプレート分岐のキー）。 */
 export type GenerationTask =
   | { kind: "intro"; sourceType: SourceType; title: string }
-  | { kind: "reaction-summary"; sentence: string; index: number }
   | { kind: "fact-summary"; sentence: string; index: number }
   | { kind: "context"; sourceType: SourceType; title: string }
   | { kind: "closing"; sourceType: SourceType; title: string };
@@ -31,10 +30,6 @@ function renderIntro(task: Extract<GenerationTask, { kind: "intro" }>): string {
     return `【速報】Riot Gamesは「${task.title}」に関する新たな情報を公式に発表した。この一報を受けて、日本国内外のLoLプレイヤーコミュニティでは早くも話題が広がっており、SNSや掲示板でも取り沙汰されている。`;
   }
   return `「${task.title}」というスレッドが投稿され、SNSや掲示板上で複数のユーザーから多様な反応が寄せられている。ここではその反応をまとめて要約し、要点を整理してお届けする。`;
-}
-
-function renderReactionSummary(task: Extract<GenerationTask, { kind: "reaction-summary" }>): string {
-  return `${task.index + 1}件目の反応として、「${gistOf(task.sentence)}」といった趣旨のコメントが寄せられた。原文のニュアンスについては下記の引用も参考にしてほしい。`;
 }
 
 function renderFactSummary(task: Extract<GenerationTask, { kind: "fact-summary" }>): string {
@@ -59,8 +54,6 @@ function renderTask(task: GenerationTask): string {
   switch (task.kind) {
     case "intro":
       return renderIntro(task);
-    case "reaction-summary":
-      return renderReactionSummary(task);
     case "fact-summary":
       return renderFactSummary(task);
     case "context":

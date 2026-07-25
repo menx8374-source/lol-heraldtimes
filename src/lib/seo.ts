@@ -2,7 +2,7 @@
  * SEO出力の純関数群（F13）。LLM非依存・DB非依存で、メタディスクリプション生成と
  * JSON-LD の安全な直列化だけを担う（ページ側の generateMetadata/構造化データ埋め込みから使う）。
  */
-import type { ArticleBodyBlock } from "@/lib/article-body";
+import { blockText, type ArticleBodyBlock } from "@/lib/article-body";
 
 const DESCRIPTION_MAX_LENGTH = 120;
 
@@ -12,7 +12,7 @@ const DESCRIPTION_MAX_LENGTH = 120;
  */
 export function buildArticleDescription(blocks: ArticleBodyBlock[]): string {
   const firstParagraph = blocks.find((b) => b.type === "paragraph");
-  const text = firstParagraph?.text ?? blocks[0]?.text ?? "";
+  const text = (firstParagraph ? blockText(firstParagraph) : blocks[0] ? blockText(blocks[0]) : "");
   const normalized = text.replace(/\s+/g, " ").trim();
   return normalized.length <= DESCRIPTION_MAX_LENGTH
     ? normalized

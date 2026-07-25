@@ -18,6 +18,7 @@ import { listCandidateQueue } from "@/lib/collection/queue";
 import { generateArticleForCandidate, GenerationError, type GenerationCandidate } from "@/lib/generation/generate-article";
 import { getLLMClient, type LLMClient } from "@/lib/generation/llm-client";
 import { generateHookTitle } from "@/lib/generation/title";
+import { threadBodyText } from "@/lib/generation/thread-format";
 import { parseArticleBody } from "@/lib/article-body";
 import { bodyBlocksToText } from "@/lib/search";
 import { moderateArticleContent } from "@/lib/moderation/moderate";
@@ -204,7 +205,7 @@ export async function regenerateArticleTitle(articleId: string): Promise<TitleRe
 
   const source = article.collectedItems[0];
   const sourceInput = source
-    ? { title: source.title, content: source.content }
+    ? { title: source.title, content: threadBodyText(source.content) }
     : { title: article.title, content: bodyBlocksToText(parseArticleBody(article.body)) };
 
   const newTitle = generateHookTitle(sourceInput);

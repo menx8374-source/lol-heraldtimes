@@ -65,6 +65,9 @@ export default async function ArticlePage({ params }: Props) {
     listRelatedArticles(article, 3),
   ]);
   const categorySlug = categorySlugFor(article.category);
+  // まとめ速報レス形式(reactionブロックを含む記事)は掲示板/SNSの反応を逐語で引用・転載しているため、
+  // その旨が伝わる注記にする(F15の出典・AI注記と整合。従来のRiot公式形式の記事はAI自動生成の注記のまま)。
+  const isReactionFormatArticle = article.body.some((b) => b.type === "reaction");
 
   const siteUrl = getSiteUrl();
   const articleUrl = `${siteUrl}/articles/${article.slug}`;
@@ -132,7 +135,9 @@ export default async function ArticlePage({ params }: Props) {
         </div>
 
         <p className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          この記事は AI により自動生成された記事です。内容は変動・変更される場合があります。
+          {isReactionFormatArticle
+            ? "本記事は掲示板・SNSの反応を引用・転載してまとめたものです。AIにより自動編集されており、内容は変動し得ます。"
+            : "この記事は AI により自動生成された記事です。内容は変動・変更される場合があります。"}
         </p>
         {article.unconfirmed && (
           <p className="mt-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">

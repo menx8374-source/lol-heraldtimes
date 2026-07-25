@@ -5,12 +5,12 @@
  * 判定ロジック自体は DB に依存しない純関数として切り出し、Vitest で検証する。
  */
 import { prisma } from "@/lib/prisma";
-import { parseArticleBody, type ArticleBodyBlock } from "@/lib/article-body";
+import { parseArticleBody, blockText, type ArticleBodyBlock } from "@/lib/article-body";
 import { summarySelect, toSummary, PUBLISHED_ONLY, type ArticleSummary } from "@/lib/articles";
 
-/** 本文ブロック配列から検索対象テキストを連結して作る純関数。 */
+/** 本文ブロック配列から検索対象テキストを連結して作る純関数（reactionブロックのレス本文も対象に含む）。 */
 export function bodyBlocksToText(blocks: ArticleBodyBlock[]): string {
-  return blocks.map((b) => b.text).join(" ");
+  return blocks.map(blockText).join(" ");
 }
 
 /**

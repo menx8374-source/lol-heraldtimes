@@ -1,6 +1,35 @@
 import { Fragment } from "react";
-import type { ArticleBodyBlock } from "@/lib/article-body";
+import type { ArticleBodyBlock, ArticleBodyReactionBlock } from "@/lib/article-body";
 import { AdSlot } from "@/components/ad-slot";
+
+/** 強調(赤/オレンジ)を持つレス本文行のテキストカラー。未指定は通常色。 */
+const LINE_EMPHASIS_CLASS: Record<"red" | "orange", string> = {
+  red: "font-bold text-red-600",
+  orange: "font-bold text-orange-600",
+};
+
+/** まとめ速報のレス1件（reactionブロック）を描画する（F: 記事フォーマット改修）。
+ * 「番号: 名前」(名前は緑)＋本文行(逐語・複数行)＋重要行の赤/オレンジ強調＋">>N"アンカー。 */
+function ReactionResView({ block }: { block: ArticleBodyReactionBlock }) {
+  return (
+    <div className="rounded border border-neutral-300 bg-white px-3 py-2 text-sm sm:text-base">
+      <div className="mb-1 font-bold">
+        <span className="text-neutral-700">{block.number}: </span>
+        <span className="text-green-700">{block.name}</span>
+      </div>
+      <div className="flex flex-col gap-0.5">
+        {block.lines.map((line, i) => (
+          <p
+            key={i}
+            className={line.emphasis ? LINE_EMPHASIS_CLASS[line.emphasis] : "text-neutral-800"}
+          >
+            {line.text}
+          </p>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /** 本文ブロック配列中、見出しブロックが何番目(blocksのindex)にあるかを列挙する純関数。 */
 function headingBlockIndices(blocks: ArticleBodyBlock[]): number[] {
@@ -43,6 +72,9 @@ export function ArticleBodyView({ blocks }: { blocks: ArticleBodyBlock[] }) {
               )}
             </blockquote>
           );
+        }
+        if (block.type === "reaction") {
+          return <ReactionResView key={index} block={block} />;
         }
         return (
           <p key={index} className="text-sm leading-relaxed sm:text-base">

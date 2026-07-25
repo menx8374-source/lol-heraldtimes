@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  blockText,
   hasStructuredHeadings,
   parseArticleBody,
   InvalidArticleBodyError,
@@ -40,6 +41,70 @@ describe("parseArticleBody", () => {
     expect(() => parseArticleBody([{ type: "paragraph", text: "" }])).toThrow(
       InvalidArticleBodyError,
     );
+  });
+
+  it("reaction(まとめ速報レス)ブロックをパースできる(番号・名前・複数行・強調・アンカー)", () => {
+    const input = [
+      {
+        type: "reaction",
+        number: 1,
+        name: "国内プレイヤーさん",
+        lines: [{ text: "本文1行目" }, { text: "神プレイすぎる", emphasis: "red" }],
+      },
+      {
+        type: "reaction",
+        number: 2,
+        name: "国内プレイヤーさん",
+        lines: [{ text: ">>1", emphasis: "orange" }],
+        anchors: [1],
+      },
+    ];
+    const result = parseArticleBody(input);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toEqual(input[0]);
+    expect(result[1]).toEqual(input[1]);
+  });
+
+  it("reactionブロックのnumberが不正(0以下・非整数)ならエラーを投げる", () => {
+    expect(() =>
+      parseArticleBody([{ type: "reaction", number: 0, name: "国内プレイヤーさん", lines: [{ text: "x" }] }]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
+  it("reactionブロックのnameが空ならエラーを投げる", () => {
+    expect(() =>
+      parseArticleBody([{ type: "reaction", number: 1, name: "", lines: [{ text: "x" }] }]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
+  it("reactionブロックのlinesが空配列ならエラーを投げる", () => {
+    expect(() =>
+      parseArticleBody([{ type: "reaction", number: 1, name: "国内プレイヤーさん", lines: [] }]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
+  it("reactionブロックのemphasisが不正な値ならエラーを投げる", () => {
+    expect(() =>
+      parseArticleBody([
+        { type: "reaction", number: 1, name: "国内プレイヤーさん", lines: [{ text: "x", emphasis: "blue" }] },
+      ]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+});
+
+describe("blockText", () => {
+  it("heading/paragraph/quoteはtextをそのまま返す", () => {
+    expect(blockText({ type: "paragraph", text: "本文" })).toBe("本文");
+  });
+
+  it("reactionは名前＋各行を改行連結して返す(安全フィルタ・検索の対象にレス本文も含めるため)", () => {
+    const block = {
+      type: "reaction" as const,
+      number: 1,
+      name: "国内プレイヤーさん",
+      lines: [{ text: "1行目" }, { text: "2行目" }],
+    };
+    expect(blockText(block)).toBe("国内プレイヤーさん\n1行目\n2行目");
   });
 });
 

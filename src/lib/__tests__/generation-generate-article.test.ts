@@ -6,7 +6,7 @@ import {
   type GenerationCandidate,
 } from "@/lib/generation/generate-article";
 import { MockLLMClient, type LLMClient, type LLMMessage } from "@/lib/generation/llm-client";
-import { parseArticleBody } from "@/lib/article-body";
+import { blockText, parseArticleBody } from "@/lib/article-body";
 
 const llm = new MockLLMClient();
 
@@ -26,7 +26,7 @@ describe("generateArticleForCandidate（成功パス）", () => {
   it("見出し・段落を持つ構造化本文が最低300文字以上で生成され、出典が付与される", async () => {
     const result = await generateArticleForCandidate(candidate(), llm);
 
-    const totalLength = result.body.reduce((sum, b) => sum + b.text.length, 0);
+    const totalLength = result.body.reduce((sum, b) => sum + blockText(b).length, 0);
     expect(totalLength).toBeGreaterThanOrEqual(MIN_BODY_LENGTH);
     expect(result.body.some((b) => b.type === "heading")).toBe(true);
     expect(result.sources.length).toBeGreaterThan(0);
@@ -74,5 +74,26 @@ describe("generateArticleForCandidate（失敗パス）", () => {
     // 同じ候補集合の中の別候補(正常なMockLLMClient)は影響を受けず生成継続できる
     const other = await generateArticleForCandidate(candidate({ id: "c2" }), llm);
     expect(other.body.length).toBeGreaterThan(0);
+  });
+});
+
+describe("generateArticleForCandidate（まとめ速報レス形式=5ch/reddit、逐語チェック対象外）", () => {
+  it("5ch由来はレス本文が元ソースと完全一致(逐語)でもGenerationErrorにならない(意図的な転載のため)", async () => {
+    const content =
+      "1: このジャングルナーフはマジでキツい。\nパワースパイクが遅れるとか勘弁してくれ。\n\n2: >>1\n同意、ジャングルメインは今回のパッチ悲惨すぎる。\n\n3: 一方でトップレーンからは歓迎の声も多いんだよな。";
+    const result = await generateArticleForCandidate(
+      candidate({
+        sourceType: "5ch",
+        sourceUrl: "https://leagueoflegends.5ch.net/test/read.cgi/game/1/",
+        content,
+      }),
+      llm,
+    );
+    // レス本文ブロックが逐語のまま含まれている(要約・言い換えされていない)
+    const reactionBlocks = result.body.filter((b) => b.type === "reaction");
+    expect(reactionBlocks.length).toBe(3);
+    expect(
+      reactionBlocks[0].type === "reaction" && reactionBlocks[0].lines.map((l) => l.text),
+    ).toEqual(["このジャングルナーフはマジでキツい。", "パワースパイクが遅れるとか勘弁してくれ。"]);
   });
 });

@@ -32,3 +32,40 @@ describe("ArticleBodyView", () => {
     expect(insideBlockquote).toBe(false);
   });
 });
+
+describe("ArticleBodyView（reactionブロック=まとめ速報レス形式）", () => {
+  const reactionBlocks: ArticleBodyBlock[] = [
+    {
+      type: "reaction",
+      number: 1,
+      name: "国内プレイヤーさん",
+      lines: [{ text: "普通の行" }, { text: "神プレイすぎる", emphasis: "red" }],
+    },
+    {
+      type: "reaction",
+      number: 2,
+      name: "国内プレイヤーさん",
+      lines: [{ text: ">>1", emphasis: "orange" }],
+      anchors: [1],
+    },
+  ];
+  const html = renderToStaticMarkup(<ArticleBodyView blocks={reactionBlocks} />);
+
+  it("「番号: 名前」を表示し、名前は緑系クラスで描画する", () => {
+    expect(html).toContain("1: ");
+    expect(html).toContain("国内プレイヤーさん");
+    expect(html).toContain("text-green-700");
+  });
+
+  it("重要行を赤クラスで、アンカー(>>N)行をオレンジクラスで強調する", () => {
+    expect(html).toContain("神プレイすぎる");
+    expect(html).toContain("text-red-600");
+    // ">>1" はHTMLエスケープされて "&gt;&gt;1" として出力される
+    expect(html).toContain("&gt;&gt;1");
+    expect(html).toContain("text-orange-600");
+  });
+
+  it("複数レスを個別のブロックとして描画する", () => {
+    expect(html.indexOf("1: ")).toBeLessThan(html.indexOf("2: "));
+  });
+});

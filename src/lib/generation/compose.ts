@@ -1,20 +1,52 @@
 /**
  * 記事本文の構成組み立て（F7）。LLMClient経由でリライト文を取得しつつ、
- * 「導入→反応/情報の要約・再構成→まとめ」という共通骨格に、ソース種別による構成分岐を適用する。
- * - 掲示板/Reddit（5ch/reddit）: 「複数の反応（コメント）を要約して並べる」構成
- * - Riot公式（riot）: 「事実の速報＋要点整理」構成
- * 引用(quote)ブロックは元文の一部のみ(text-utils.excerptForQuote)を使い、主従関係を保つ。
+ * ソース種別による構成分岐を適用する。
+ * - 掲示板/Reddit（5ch/reddit）: 収集したスレッドのレス群を番号付きレスとして逐語のまま並べる
+ *   「まとめ速報レス形式」（2026-07-25 ユーザー決定の記事フォーマット改修）。
+ * - Riot公式（riot）: 「事実の速報＋要点整理」構成（従来どおり、引用ブロックは主従関係を保つ）。
  */
-import type { ArticleBodyBlock } from "@/lib/article-body";
+import type { ArticleBodyBlock, ArticleBodyReactionBlock } from "@/lib/article-body";
 import type { SourceType } from "@/lib/collection/types";
 import type { LLMClient, GenerationTask } from "@/lib/generation/llm-client";
 import { splitIntoSentences, excerptForQuote } from "@/lib/generation/text-utils";
+import { parseThreadReses, extractAnchors, computeLineEmphasis } from "@/lib/generation/thread-format";
 
 export type GenerationCandidateInput = {
   sourceType: SourceType;
   title: string;
   content: string;
 };
+
+/** レス投稿者の匿名化ハンドル（実名・個人特定情報は出さない）。ソース種別ごとに固定。 */
+const REACTION_HANDLE: Record<"5ch" | "reddit", string> = {
+  "5ch": "国内プレイヤーさん",
+  reddit: "海外プレイヤーさん",
+};
+
+/**
+ * スレッドの content（逐語）を、まとめ速報のレス（reaction）ブロック配列に組み立てる。
+ * レス番号・本文行は逐語のまま保持し、重要行の強調・アンカーの妥当性(既出番号のみ)だけを付加する。
+ */
+function buildReactionBlocks(
+  candidate: GenerationCandidateInput,
+  sourceType: "5ch" | "reddit",
+): ArticleBodyReactionBlock[] {
+  const reses = parseThreadReses(candidate.content);
+  const name = REACTION_HANDLE[sourceType];
+  const knownNumbers = new Set(reses.map((r) => r.number));
+
+  return reses.map((res) => {
+    const emphasis = computeLineEmphasis(res.lines);
+    const anchors = extractAnchors(res.lines).filter((n) => n !== res.number && knownNumbers.has(n));
+    return {
+      type: "reaction",
+      number: res.number,
+      name,
+      lines: res.lines.map((text, i) => (emphasis[i] ? { text, emphasis: emphasis[i] } : { text })),
+      ...(anchors.length > 0 ? { anchors } : {}),
+    };
+  });
+}
 
 /** 引用ブロックの出典ラベル（ArticleSourceのlabelとは別に、本文中の引用元表記に使う）。 */
 const QUOTE_SOURCE_LABEL: Record<SourceType, string> = {
@@ -34,50 +66,30 @@ async function askLLM(llmClient: LLMClient, task: GenerationTask): Promise<strin
   return text.trim();
 }
 
-/**
- * 構成分岐のプロファイル。共通骨格（導入→要約ループ→context→まとめ）は composeBody に一本化し、
- * ソース種別による差分（先頭見出し・要約セクション見出し・要約タスク種別）だけをここに持つ。
- * summaryTask は判別ユニオン GenerationTask の各メンバーを直接返すことで型安全に切り替える。
- */
-type ComposeProfile = {
-  introHeading: string;
-  itemsHeading: string;
-  summaryTask: (sentence: string, index: number) => GenerationTask;
+/** Riot公式（riot）由来: 「速報＋要点整理」構成（従来どおり）。 */
+const FACT_PROFILE = {
+  introHeading: "速報",
+  itemsHeading: "要点整理",
+  summaryTask: (sentence: string, index: number): GenerationTask => ({ kind: "fact-summary", sentence, index }),
 };
 
-const COMPOSE_PROFILES = {
-  // 掲示板/Reddit（5ch/reddit）: 「複数の反応を要約して並べる」構成
-  reaction: {
-    introHeading: "話題",
-    itemsHeading: "寄せられた反応",
-    summaryTask: (sentence, index) => ({ kind: "reaction-summary", sentence, index }),
-  },
-  // Riot公式（riot）: 「事実の速報＋要点整理」構成
-  fact: {
-    introHeading: "速報",
-    itemsHeading: "要点整理",
-    summaryTask: (sentence, index) => ({ kind: "fact-summary", sentence, index }),
-  },
-} satisfies Record<"reaction" | "fact", ComposeProfile>;
-
-/** 共通骨格に構成プロファイルを適用して本文ブロックを組み立てる。 */
-async function composeBody(
+/** Riot公式向けの共通骨格（導入→要点整理ループ→context→まとめ）で本文ブロックを組み立てる。 */
+async function composeFactBody(
   candidate: GenerationCandidateInput,
   sentences: string[],
   llmClient: LLMClient,
-  profile: ComposeProfile,
 ): Promise<ArticleBodyBlock[]> {
   const { sourceType, title } = candidate;
   const blocks: ArticleBodyBlock[] = [];
   const citationLabel = QUOTE_SOURCE_LABEL[sourceType];
 
-  blocks.push({ type: "heading", text: profile.introHeading });
+  blocks.push({ type: "heading", text: FACT_PROFILE.introHeading });
   blocks.push({ type: "paragraph", text: await askLLM(llmClient, { kind: "intro", sourceType, title }) });
 
-  blocks.push({ type: "heading", text: profile.itemsHeading });
+  blocks.push({ type: "heading", text: FACT_PROFILE.itemsHeading });
   for (let i = 0; i < sentences.length; i++) {
     const sentence = sentences[i];
-    blocks.push({ type: "paragraph", text: await askLLM(llmClient, profile.summaryTask(sentence, i)) });
+    blocks.push({ type: "paragraph", text: await askLLM(llmClient, FACT_PROFILE.summaryTask(sentence, i)) });
     blocks.push({ type: "quote", text: excerptForQuote(sentence), source: citationLabel });
   }
 
@@ -90,14 +102,42 @@ async function composeBody(
 }
 
 /**
+ * 掲示板/Reddit（5ch/reddit）由来: 「まとめ速報レス形式」で本文ブロックを組み立てる。
+ * 導入・まとめは自サイト生成文（LLM）だが、中核はスレッドのレス群を逐語のまま並べた reaction ブロック。
+ */
+async function composeReactionBody(
+  candidate: GenerationCandidateInput,
+  sourceType: "5ch" | "reddit",
+  llmClient: LLMClient,
+): Promise<ArticleBodyBlock[]> {
+  const { title } = candidate;
+  const blocks: ArticleBodyBlock[] = [];
+
+  blocks.push({ type: "heading", text: "話題" });
+  blocks.push({ type: "paragraph", text: await askLLM(llmClient, { kind: "intro", sourceType, title }) });
+
+  blocks.push({ type: "heading", text: "寄せられたレス" });
+  blocks.push(...buildReactionBlocks(candidate, sourceType));
+
+  blocks.push({ type: "paragraph", text: await askLLM(llmClient, { kind: "context", sourceType, title }) });
+
+  blocks.push({ type: "heading", text: "まとめ" });
+  blocks.push({ type: "paragraph", text: await askLLM(llmClient, { kind: "closing", sourceType, title }) });
+
+  return blocks;
+}
+
+/**
  * 記事化候補から構造化された本文ブロック配列を組み立てる（F7）。
- * sourceType が "riot" なら速報＋要点整理、それ以外（5ch/reddit）なら反応まとめ構成にする。
+ * sourceType が "riot" なら速報＋要点整理、それ以外（5ch/reddit）ならまとめ速報レス形式にする。
  */
 export async function composeArticleBody(
   candidate: GenerationCandidateInput,
   llmClient: LLMClient,
 ): Promise<ArticleBodyBlock[]> {
-  const sentences = splitIntoSentences(candidate.content);
-  const profile = candidate.sourceType === "riot" ? COMPOSE_PROFILES.fact : COMPOSE_PROFILES.reaction;
-  return composeBody(candidate, sentences, llmClient, profile);
+  if (candidate.sourceType === "riot") {
+    const sentences = splitIntoSentences(candidate.content);
+    return composeFactBody(candidate, sentences, llmClient);
+  }
+  return composeReactionBody(candidate, candidate.sourceType, llmClient);
 }

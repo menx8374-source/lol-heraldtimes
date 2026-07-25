@@ -3,8 +3,14 @@
  * このスプリントの受け入れ基準（最低文字数・逐語一致率・引用の主従関係・出典付与）を
  * 満たすかを検証し、満たさない場合は GenerationError を投げる（DB連携側 pipeline.ts が
  * これを捕捉して「生成失敗」として記録し、他候補の生成を継続する）。
+ *
+ * ⚠ 記事フォーマット改修（2026-07-25・ユーザー決定）: 掲示板/SNS由来（5ch/reddit）は
+ * 「まとめ速報レス形式」（レス本文を逐語表示）に変更したため、逐語一致率チェック・引用主従比率
+ * チェックは reaction 形式の記事（sourceType !== "riot"）には適用しない（逐語が意図的なため）。
+ * Riot公式（riot）は従来どおり両チェックを適用する。安全フィルタ（F9: NGワード・個人中傷・
+ * 出典欠落・重複）は形式によらず必ず適用する（pipeline.ts の moderateArticleContent）。
  */
-import type { ArticleBodyBlock } from "@/lib/article-body";
+import { blockText, type ArticleBodyBlock } from "@/lib/article-body";
 import type { CategoryLabel } from "@/lib/categories";
 import type { SourceType } from "@/lib/collection/types";
 import type { LLMClient } from "@/lib/generation/llm-client";
@@ -12,6 +18,7 @@ import { composeArticleBody } from "@/lib/generation/compose";
 import { computeVerbatimMatchRatio, DEFAULT_VERBATIM_THRESHOLD } from "@/lib/generation/verbatim";
 import { hasAcceptableQuoteRatio } from "@/lib/generation/quote-ratio";
 import { generateHookTitle } from "@/lib/generation/title";
+import { threadBodyText } from "@/lib/generation/thread-format";
 
 /** 1記事あたりの本文最低文字数（見出し・段落・引用の合計、F7受け入れ基準）。 */
 export const MIN_BODY_LENGTH = 300;
@@ -64,30 +71,37 @@ export async function generateArticleForCandidate(
   }
 
   const body = await composeArticleBody(candidate, llmClient);
+  // reaction形式(まとめ速報のレス羅列)はレス本文の逐語表示が意図的なため、逐語一致率・引用主従比率の
+  // チェックは対象外にする(F9のNGワード等の安全フィルタは形式によらずpipeline.tsで必ず適用する)。
+  // 判定は sourceType ではなく実際に組み上がった body のブロック型から行う(compose側の分岐変更に追随)。
+  const isReactionFormat = body.some((b) => b.type === "reaction");
 
-  const totalLength = body.reduce((sum, b) => sum + b.text.length, 0);
+  const totalLength = body.reduce((sum, b) => sum + blockText(b).length, 0);
   if (totalLength < MIN_BODY_LENGTH) {
     throw new GenerationError(
       `生成本文が最低文字数(${MIN_BODY_LENGTH}字)に満たません(実際:${totalLength}字)`,
     );
   }
 
-  const generatedText = body.map((b) => b.text).join("");
-  const verbatimRatio = computeVerbatimMatchRatio(generatedText, candidate.content);
-  if (verbatimRatio > DEFAULT_VERBATIM_THRESHOLD) {
-    throw new GenerationError(
-      `元ソースとの逐語一致率が高すぎます(${Math.round(verbatimRatio * 100)}% > しきい値${Math.round(
-        DEFAULT_VERBATIM_THRESHOLD * 100,
-      )}%)`,
-    );
-  }
+  if (!isReactionFormat) {
+    const generatedText = body.map(blockText).join("");
+    const verbatimRatio = computeVerbatimMatchRatio(generatedText, candidate.content);
+    if (verbatimRatio > DEFAULT_VERBATIM_THRESHOLD) {
+      throw new GenerationError(
+        `元ソースとの逐語一致率が高すぎます(${Math.round(verbatimRatio * 100)}% > しきい値${Math.round(
+          DEFAULT_VERBATIM_THRESHOLD * 100,
+        )}%)`,
+      );
+    }
 
-  if (!hasAcceptableQuoteRatio(body)) {
-    throw new GenerationError("引用が記事全体に占める割合が過大です（主従関係を満たしません）");
+    if (!hasAcceptableQuoteRatio(body)) {
+      throw new GenerationError("引用が記事全体に占める割合が過大です（主従関係を満たしません）");
+    }
   }
 
   return {
-    title: generateHookTitle({ title: candidate.title, content: candidate.content }),
+    // タイトルのソースはレス番号「N: 」やアンカー行を除いた本文にする（タイトルへの「1: 」混入を防ぐ）。
+    title: generateHookTitle({ title: candidate.title, content: threadBodyText(candidate.content) }),
     category: CATEGORY_BY_SOURCE[candidate.sourceType],
     body,
     sources: [{ label: ARTICLE_SOURCE_LABEL[candidate.sourceType], url: candidate.sourceUrl }],
