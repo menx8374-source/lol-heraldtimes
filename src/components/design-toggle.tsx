@@ -3,10 +3,10 @@
 import { useSyncExternalStore } from "react";
 import { DESIGN_CLASS, DESIGN_STORAGE_KEY, decideInitialDesign, type DesignMode } from "@/lib/design-mode";
 
-/** セグメントの選択肢（左=既定の標準、右=新聞風）。 */
+/** セグメントの選択肢（左=既定の標準、右=ニュース記事風）。 */
 const DESIGN_OPTIONS: { value: DesignMode; label: string }[] = [
   { value: "classic", label: "標準" },
-  { value: "news", label: "新聞風" },
+  { value: "news", label: "ニュース記事風" },
 ];
 
 /**
@@ -50,8 +50,8 @@ function selectDesign(next: DesignMode): void {
 
 /**
  * サイトの表示デザイン切替（拡張E14 / 分かりやすさ改善）。
- * 「デザイン: 標準｜新聞風」のセグメント式にして、(1) サイトの見た目を切り替える機能であること、
- * (2) いま標準・新聞風のどちらのモードかを、選択中セグメントのハイライトで一目で分かるようにする。
+ * 「デザイン: 標準｜ニュース記事風」のセグメント式にして、(1) サイトの見た目を切り替える機能であること、
+ * (2) いま標準・ニュース記事風のどちらのモードかを、選択中セグメントのハイライトで一目で分かるようにする。
  * テーマ（ライト/ダーク、ThemeToggle）とは独立した軸。
  */
 export function DesignToggle() {
