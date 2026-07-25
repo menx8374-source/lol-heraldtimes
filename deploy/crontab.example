@@ -1,9 +1,17 @@
 # cron 設定例（本番・VPS）。`crontab -e` に貼り付けて使う。DEPLOY.md 手順7・8 に対応。
 # npm の絶対パスは環境により異なるため `which npm` で確認して置き換えること（例: /usr/bin/npm）。
 
-# 無人運営: 4時間ごとに統合パイプライン（収集→重複排除→生成→タイトル→安全フィルタ→公開
-#          ＋予約公開の昇格）を1回実行する。実行間隔は好みで調整（例: 2時間なら "0 */2 * * *"）。
-0 */4 * * * cd /var/www/lol-matome && /usr/bin/npm run pipeline >> /var/lib/lol-matome/pipeline.log 2>&1
+# 無人運営（本サイト初期おすすめ＝閲覧の多い時間帯に寄せる・夜厚め・1日8回）:
+#   統合パイプライン（収集→重複排除→生成→タイトル→安全フィルタ→公開＋予約公開の昇格）を実行する。
+#   1回あたりの公開上限は .env の PIPELINE_MAX_PUBLISH_PER_RUN（初期おすすめ=2）で決まり、
+#   8回×最大2本＝1日最大16本・実際は候補次第で概ね8〜14本・夜(18〜23時)に偏る配分になる。
+#   ペースを変えたいときはこの時刻や本数上限だけ調整する。
+# 朝8時・昼12時（通勤/ランチ・軽め）
+0 8,12 * * * cd /var/www/lol-matome && /usr/bin/npm run pipeline >> /var/lib/lol-matome/pipeline.log 2>&1
+# 夜18/20/21/22/23時（帰宅後ゴールデン・厚め）
+0 18,20,21,22,23 * * * cd /var/www/lol-matome && /usr/bin/npm run pipeline >> /var/lib/lol-matome/pipeline.log 2>&1
+# 深夜0時（軽め）
+0 0 * * * cd /var/www/lol-matome && /usr/bin/npm run pipeline >> /var/lib/lol-matome/pipeline.log 2>&1
 
 # バックアップ: 毎日 3:30 に SQLite を曜日別（%u=1..7）にコピーして7日分ローテーション。
 30 3 * * * mkdir -p /var/lib/lol-matome/backup && cp /var/lib/lol-matome/prod.db /var/lib/lol-matome/backup/prod-$(date +\%u).db

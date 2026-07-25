@@ -110,13 +110,20 @@ sudo certbot --nginx -d example.com -d www.example.com
 ## 7. 無人運営（cron でパイプライン定期実行）
 
 `npm run pipeline` が「収集→重複排除→生成→タイトル→安全フィルタ→公開」＋**予約公開の昇格**まで
-1回実行する。これを cron で回すと完全自動運営になる。
+1回実行する。これを cron で回すと完全自動運営になる。**本サイト初期おすすめは「閲覧の多い時間帯に寄せる・
+夜厚め・1日8回」**で、[deploy/crontab.example](deploy/crontab.example) にそのまま貼れる形で用意してある
+（`.env` の `PIPELINE_MAX_PUBLISH_PER_RUN=2` と合わせて概ね1日8〜14本・夜偏重の配分）。
 
 ```bash
-crontab -e
-# 例: 4時間ごとに実行（deploy/crontab.example 参照）
-0 */4 * * * cd /var/www/lol-matome && /usr/bin/npm run pipeline >> /var/lib/lol-matome/pipeline.log 2>&1
+crontab -e   # deploy/crontab.example の内容を貼り付ける（下記は初期おすすめ配分）
+# 朝8時・昼12時（軽め）
+0 8,12 * * *  cd /var/www/lol-matome && /usr/bin/npm run pipeline >> /var/lib/lol-matome/pipeline.log 2>&1
+# 夜18/20/21/22/23時（ゴールデン・厚め）
+0 18,20,21,22,23 * * *  cd /var/www/lol-matome && /usr/bin/npm run pipeline >> /var/lib/lol-matome/pipeline.log 2>&1
+# 深夜0時（軽め）
+0 0 * * *  cd /var/www/lol-matome && /usr/bin/npm run pipeline >> /var/lib/lol-matome/pipeline.log 2>&1
 ```
+※ ペースを変えたいときは、この時刻と `PIPELINE_MAX_PUBLISH_PER_RUN` を調整するだけでよい。
 
 ## 8. バックアップ（SQLite ファイル）
 
