@@ -129,6 +129,7 @@ export default async function ArticlePage({ params }: Props) {
                 <Link
                   key={tag}
                   href={`/tags/${tag}`}
+                  data-tag-chip
                   className="rounded-full border border-neutral-300 px-2 py-0.5 hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-800"
                 >
                   #{tag}
@@ -153,7 +154,7 @@ export default async function ArticlePage({ params }: Props) {
 
             <AdSlot position="article-bottom" />
 
-            <section className="mt-6 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+            <section data-article-sources className="mt-6 border-t border-neutral-200 pt-4 dark:border-neutral-800">
               <h2 className="text-sm font-bold text-neutral-600 dark:text-neutral-300">出典</h2>
               <ul className="mt-2 flex flex-col gap-1">
                 {article.sources.map((source) => (
@@ -185,7 +186,11 @@ export default async function ArticlePage({ params }: Props) {
             </section>
 
             <div className="mt-6">
-              <Link href="/" className="text-sm text-sky-700 hover:underline dark:text-sky-400">
+              <Link
+                href="/"
+                data-back-link
+                className="text-sm text-sky-700 hover:underline dark:text-sky-400"
+              >
                 &larr; トップへ戻る
               </Link>
             </div>

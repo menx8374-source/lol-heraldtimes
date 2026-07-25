@@ -3,6 +3,7 @@ import "./globals.css";
 import { SiteChrome } from "@/components/site-chrome";
 import { getSiteNotice } from "@/lib/notice";
 import { getAdSlotCode } from "@/lib/ads/config";
+import { NO_FLASH_DESIGN_SCRIPT } from "@/lib/no-flash-scripts";
 
 export const metadata: Metadata = {
   title: {
@@ -24,6 +25,9 @@ export const metadata: Metadata = {
 // 埋め込む値はユーザー入力を含まない固定の静的スクリプトのみ（DBデータ等は混ぜない）。
 const NO_FLASH_THEME_SCRIPT = `(function(){try{var t=localStorage.getItem('lol-matome:theme');if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme: dark)').matches)){document.documentElement.classList.add('dark')}}catch(e){}})();`;
 
+// デザイン軸（classic/news、拡張E14）の初期状態を描画前に決定するスクリプト。実体は
+// lib/no-flash-scripts.ts（DesignToggle とキー名/クラス名を共有し、テストで検証済み）。
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -38,6 +42,7 @@ export default function RootLayout({
     <html lang="ja" className="h-full antialiased">
       <head>
         <script dangerouslySetInnerHTML={{ __html: NO_FLASH_THEME_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: NO_FLASH_DESIGN_SCRIPT }} />
       </head>
       <body className="min-h-full flex flex-col bg-neutral-100 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
         <SiteChrome notice={notice} anchorAdCode={anchorAdCode}>

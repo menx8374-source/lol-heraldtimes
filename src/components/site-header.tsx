@@ -2,10 +2,11 @@ import Link from "next/link";
 import { CATEGORY_LABELS, categorySlugFor } from "@/lib/categories";
 import { SearchForm } from "@/components/search-form";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { DesignToggle } from "@/components/design-toggle";
 
 export function SiteHeader() {
   return (
-    <header className="w-full bg-neutral-900 text-white">
+    <header data-site-header className="w-full bg-neutral-900 text-white">
       <div className="mx-auto max-w-7xl px-4 py-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Link href="/" className="inline-flex flex-col">
@@ -17,10 +18,12 @@ export function SiteHeader() {
           <div className="flex items-center gap-3">
             <SearchForm />
             <ThemeToggle />
+            <DesignToggle />
           </div>
         </div>
         <nav
           aria-label="カテゴリ"
+          data-nav-primary
           className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm"
         >
           {CATEGORY_LABELS.map((label) => {
@@ -40,6 +43,7 @@ export function SiteHeader() {
         {/* 攻略・データ固定ページ（拡張E6）への導線。カテゴリnavとは分けて表示する。 */}
         <nav
           aria-label="攻略・データ"
+          data-nav-secondary
           className="mt-2 flex flex-wrap gap-x-4 gap-y-1 border-t border-neutral-800 pt-2 text-xs"
         >
           <Link href="/champions" className="text-neutral-400 hover:text-white hover:underline">

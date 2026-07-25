@@ -49,3 +49,215 @@
       sans-serif;
   }
 }
+
+/*
+ * 新デザイン（ニュースメディア調、拡張E14）: テーマ（light/dark、.dark）とは独立した
+ * デザイン軸（classic/news、.design-news）。<html> に design-news クラスが付いたときの
+ * 見た目のみをここで追加する（classic=クラス無し時の見た目は一切変更しない）。
+ *
+ * このブロックは意図的にアンレイヤー（レイヤー外）で書く。上の @layer base 注意書きの
+ * とおり、アンレイヤーCSSは Tailwind の utilities レイヤーより優先されるため、既存コンポーネントの
+ * Tailwind ユーティリティクラス（rounded-lg/border/bg-white/shadow-sm/text-sky-700 等）を
+ * ここで確実に上書きできる。<body> の背景/文字色/フォントも、layout.tsx の body className
+ * （bg-neutral-100 dark:bg-neutral-950 等、utilitiesレイヤー）をこの機構で上書きする。
+ *
+ * header/main/footer 要素をベースにスコープすることで、SiteChrome が <main> を描画しない
+ * 管理画面（/admin配下、isAdmin時はheader/main/footerを描画しない）には一切影響しない。
+ */
+.design-news {
+  --news-accent: #b3121f;
+  --news-ink: #141414;
+  --news-paper: #ffffff;
+  --news-rule: #d4d4d4;
+  --news-comment-bg: #fdecea;
+  /* header/footerは常時ダーク背景（bg-neutral-900）のため、テーマに関わらず固定の明るめアクセント。 */
+  --news-chrome-accent: #ff5a67;
+  --news-font:
+    游ゴシック体,
+    "游ゴシック Medium",
+    "Yu Gothic Medium",
+    YuGothic,
+    "ヒラギノ角ゴシック Pro",
+    "Hiragino Kaku Gothic Pro",
+    メイリオ,
+    Meiryo,
+    Osaka,
+    "ＭＳ Ｐゴシック",
+    "MS PGothic",
+    sans-serif;
+}
+.dark.design-news {
+  --news-accent: #ff5a67;
+  --news-ink: #f2f2f2;
+  --news-paper: #0a0a0a;
+  --news-rule: #404040;
+  --news-comment-bg: #3a1418;
+}
+
+/* body: 地色/文字色/フォント（font-familyは継承するため、body一箇所の指定で見出しにも及ぶ）。 */
+.design-news body {
+  background: var(--news-paper);
+  color: var(--news-ink);
+  font-family: var(--news-font);
+}
+
+/* 見出し（セクション見出し・記事タイトル）は太めウェイトでコントラストを付ける。 */
+.design-news main :is(h1, h2, h3) {
+  font-weight: 800;
+}
+
+/* リンク: main内は既定でアクセント色（見出しリンク等、後段でinheritに戻す箇所を除く）。 */
+.design-news main a {
+  color: var(--news-accent);
+}
+.design-news main a:hover {
+  text-decoration: underline;
+}
+/* 記事カード/PICKUPカードの見出しリンクは記事タイトルなので本文色のまま（アクセント色にしない）。 */
+.design-news [data-article-card] h2 a,
+.design-news [data-pickup-card] {
+  color: inherit;
+}
+
+/* ヘッダー/フッター（常時ダーク背景）。固定の明るめアクセントでナビ/リンクを彩る。 */
+.design-news header[data-site-header] {
+  border-bottom: 3px solid var(--news-chrome-accent);
+}
+.design-news header[data-site-header] nav a:hover {
+  color: var(--news-chrome-accent);
+}
+.design-news footer[data-site-footer] a {
+  color: var(--news-chrome-accent);
+}
+
+/* パンくずリスト・出典・記事下タグ・トップへ戻るリンク。 */
+.design-news [data-breadcrumbs] a,
+.design-news [data-article-sources] a,
+.design-news [data-back-link] {
+  color: var(--news-accent);
+}
+.design-news [data-tag-chip] {
+  border-color: var(--news-rule);
+  border-radius: 0.125rem;
+  color: var(--news-accent);
+  font-weight: 700;
+}
+
+/* カテゴリバッジ: 塗りチップ→小さめ太字クリムゾンのラベルに。 */
+.design-news [data-category-badge] {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--news-accent);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* 記事一覧カード: 角丸/影/枠をやめヘアライン罫線区切りに。サムネイルは角丸小。 */
+.design-news [data-article-list] {
+  gap: 0;
+}
+/* news: カード的な装飾(枠・角丸・影・地色)を外し、罫線区切り主体の紙面風にする共通リセット。
+   各要素固有の区切り罫線・余白は下の個別ルールで足す。 */
+.design-news :is([data-article-card], [data-pickup-card], [data-sidebar-widget]) {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.design-news [data-article-card] {
+  border-bottom: 1px solid var(--news-rule);
+  padding: 0.75rem 0;
+}
+.design-news [data-article-list] [data-article-card]:first-child {
+  padding-top: 0;
+}
+.design-news [data-article-list] [data-article-card]:last-child {
+  border-bottom: none;
+}
+.design-news [data-article-card] img,
+.design-news [data-article-card] [aria-hidden="true"] {
+  border-radius: 0.25rem;
+}
+
+/* PICKUPカード（トップページ）も同様にヘアライン区切りへ。 */
+.design-news [data-pickup-card] {
+  border-bottom: 2px solid var(--news-rule);
+}
+.design-news [data-pickup-card] img,
+.design-news [data-pickup-card] [aria-hidden="true"] {
+  border-radius: 0.25rem;
+}
+
+/* サイドバーwidget: 角丸カードをやめ、太い上罫＋見出しの新聞コラム風。 */
+.design-news [data-sidebar-widget] {
+  border-top: 4px solid var(--news-ink);
+  padding: 0.75rem 0 1rem;
+}
+.design-news [data-sidebar-widget] a {
+  color: var(--news-accent);
+}
+.design-news [data-rank-number] {
+  color: var(--news-accent);
+}
+.design-news [data-sidebar-widget] [role="tablist"] button[aria-selected="true"] {
+  background: var(--news-accent);
+  color: #ffffff;
+}
+
+/* まとめレス枠（ReactionGroupView）: 白地・細罫のnews配色に。 */
+.design-news [data-reaction-group] {
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  border-color: var(--news-rule);
+}
+.design-news [data-reaction-group] > div {
+  border-color: var(--news-rule);
+}
+
+/* 引用ブロック: アクセントの左罫線に。 */
+.design-news [data-article-quote] {
+  border-left-color: var(--news-accent);
+  background: transparent;
+  border-radius: 0;
+}
+
+/* コメント（CommentRow）: まとめレスとの差別化を保ちつつnews配色に馴染ませる。 */
+.design-news [data-comment-row] {
+  border-radius: 0;
+  box-shadow: none;
+  border-left-color: var(--news-accent);
+  background: var(--news-comment-bg);
+}
+.design-news [data-reply-toggle] {
+  color: var(--news-accent);
+}
+.design-news [data-comment-form] button[type="submit"] {
+  border-radius: 0.125rem;
+  border-color: var(--news-accent);
+  background: transparent;
+  color: var(--news-accent);
+}
+.design-news [data-comment-form] button[type="submit"]:hover:not(:disabled) {
+  background: var(--news-accent);
+  color: #ffffff;
+}
+
+/* リアクション/投票ボタン: クリムゾンアクセント・角丸控えめ。 */
+.design-news [data-reaction-buttons] button,
+.design-news [data-comment-vote-buttons] button {
+  border-radius: 0.25rem;
+}
+.design-news [data-reaction-buttons] button[aria-pressed="true"],
+.design-news [data-comment-vote-buttons] button[aria-pressed="true"] {
+  border-color: var(--news-accent);
+  background: var(--news-comment-bg);
+  color: var(--news-ink);
+}
+
+/* ページネーション。 */
+.design-news main nav[aria-label="ページネーション"] a {
+  border-radius: 0.125rem;
+  border-color: var(--news-rule);
+}

@@ -11,7 +11,10 @@ import type { ArticleSummary } from "@/lib/articles";
  */
 export function ArticleCard({ article }: { article: ArticleSummary }) {
   return (
-    <article className="flex gap-3 rounded-lg border border-neutral-200 bg-white p-3 shadow-sm sm:gap-5 sm:p-4 dark:border-neutral-700 dark:bg-neutral-900">
+    <article
+      data-article-card
+      className="flex gap-3 rounded-lg border border-neutral-200 bg-white p-3 shadow-sm sm:gap-5 sm:p-4 dark:border-neutral-700 dark:bg-neutral-900"
+    >
       <ArticleThumbnail
         category={article.category}
         thumbnailUrl={article.thumbnailUrl}

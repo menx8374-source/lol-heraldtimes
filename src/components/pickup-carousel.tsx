@@ -19,6 +19,7 @@ export function PickupCarousel({ articles }: { articles: ArticleSummary[] }) {
           <Link
             key={article.slug}
             href={`/articles/${article.slug}`}
+            data-pickup-card
             className="flex w-40 shrink-0 flex-col gap-2 rounded-lg border border-neutral-200 bg-white p-2 shadow-sm hover:shadow-md dark:border-neutral-700 dark:bg-neutral-900 sm:w-48"
           >
             <div className="relative">

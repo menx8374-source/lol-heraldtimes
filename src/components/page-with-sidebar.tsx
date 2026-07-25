@@ -32,7 +32,7 @@ export async function PageWithSidebar({
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6 lg:flex-row lg:items-start">
       <div className="min-w-0 flex-1">{children}</div>
-      <aside className="w-full shrink-0 lg:w-72">
+      <aside data-sidebar className="w-full shrink-0 lg:w-72">
         <PopularRanking
           initialArticles={popular.map((a) => ({ slug: a.slug, title: a.title }))}
         />

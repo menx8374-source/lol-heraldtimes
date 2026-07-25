@@ -6,7 +6,7 @@ export function TagCloud({ tags }: { tags: TagCount[] }) {
   const maxCount = tags[0]?.count ?? 0;
 
   return (
-    <section className="mt-4 rounded-lg border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
+    <section data-sidebar-widget className="mt-4 rounded-lg border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
       <h2 className="mb-3 text-sm font-bold text-neutral-700 dark:text-neutral-200">人気タグ</h2>
       {tags.length === 0 ? (
         <p className="text-sm text-neutral-500 dark:text-neutral-400">タグがありません</p>

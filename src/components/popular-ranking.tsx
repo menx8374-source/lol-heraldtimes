@@ -51,7 +51,7 @@ export function PopularRanking({ initialArticles }: { initialArticles: PopularRa
   }
 
   return (
-    <section className="rounded-lg border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
+    <section data-sidebar-widget className="rounded-lg border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
       <h2 className="mb-3 text-sm font-bold text-neutral-700 dark:text-neutral-200">人気記事ランキング</h2>
       <div className="mb-3 flex flex-wrap gap-1 text-xs" role="tablist" aria-label="ランキング期間">
         {TABS.map((t) => (
@@ -81,7 +81,10 @@ export function PopularRanking({ initialArticles }: { initialArticles: PopularRa
         <ol className="flex flex-col gap-3">
           {articles.map((article, index) => (
             <li key={article.slug} className="flex items-start gap-2">
-              <span className="mt-0.5 shrink-0 text-lg font-bold text-sky-700 dark:text-sky-400">
+              <span
+                data-rank-number
+                className="mt-0.5 shrink-0 text-lg font-bold text-sky-700 dark:text-sky-400"
+              >
                 {index + 1}
               </span>
               <Link

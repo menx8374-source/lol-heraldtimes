@@ -70,6 +70,7 @@ function ReplyForm({
   return (
     <form
       onSubmit={(e) => onSubmit(e, targetNumber)}
+      data-comment-form
       className="mt-2 flex flex-col gap-2 rounded border border-neutral-300 p-2 dark:border-neutral-700"
     >
       {/* ハニーポット隠しフィールド */}
@@ -179,7 +180,10 @@ function CommentRow({
   children?: React.ReactNode;
 }) {
   return (
-    <li className="rounded-lg border-l-4 border-sky-400 bg-sky-50 px-3 py-2 text-sm shadow-sm sm:text-base dark:border-sky-500 dark:bg-sky-950/40">
+    <li
+      data-comment-row
+      className="rounded-lg border-l-4 border-sky-400 bg-sky-50 px-3 py-2 text-sm shadow-sm sm:text-base dark:border-sky-500 dark:bg-sky-950/40"
+    >
       <CommentHeader name={comment.name} createdAt={comment.createdAt} />
       <div className="mt-1.5">
         <ResLines lines={commentBodyToLines(comment.body)} />
@@ -194,6 +198,7 @@ function CommentRow({
         <button
           type="button"
           onClick={onToggleReply}
+          data-reply-toggle
           className="text-xs text-sky-700 hover:underline dark:text-sky-400"
         >
           {isReplyOpen ? "返信をやめる" : "返信"}
@@ -292,7 +297,7 @@ export function CommentSection({ slug, initialComments }: { slug: string; initia
   };
 
   return (
-    <section className="mt-8 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+    <section data-comment-section className="mt-8 border-t border-neutral-200 pt-4 dark:border-neutral-800">
       <h2 className="mb-3 text-sm font-bold text-neutral-600 dark:text-neutral-300">
         コメント ({totalCount})
       </h2>
@@ -348,7 +353,11 @@ export function CommentSection({ slug, initialComments }: { slug: string; initia
         </ul>
       )}
 
-      <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-2 rounded border border-neutral-300 p-3 dark:border-neutral-700">
+      <form
+        onSubmit={handleSubmit}
+        data-comment-form
+        className="mt-4 flex flex-col gap-2 rounded border border-neutral-300 p-3 dark:border-neutral-700"
+      >
         {/* ハニーポット隠しフィールド: 画面表示・スクリーンリーダー双方から隠し、人間には入力させない。 */}
         <input
           type="text"

@@ -8,7 +8,7 @@ import Link from "next/link";
  */
 export function SiteFooter() {
   return (
-    <footer className="w-full bg-neutral-900 text-neutral-400 text-xs">
+    <footer data-site-footer className="w-full bg-neutral-900 text-neutral-400 text-xs">
       <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-6">
         <div className="flex flex-col gap-1">
           <p>

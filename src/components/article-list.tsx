@@ -24,7 +24,7 @@ export function ArticleList({
     return <EmptyState message={emptyMessage} />;
   }
   return (
-    <div className="flex flex-col gap-3">
+    <div data-article-list className="flex flex-col gap-3">
       {articles.map((article, index) => (
         <Fragment key={article.slug}>
           <ArticleCard article={article} />

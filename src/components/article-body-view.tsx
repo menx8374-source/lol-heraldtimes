@@ -125,7 +125,10 @@ function EmbedBlockView({ block }: { block: Extract<ArticleBodyBlock, { type: "e
  * 各レスの中身（番号:名前緑＋本文行＋赤/オレンジ強調＋">>N"アンカー）は従来どおり。 */
 function ReactionGroupView({ blocks }: { blocks: ArticleBodyReactionBlock[] }) {
   return (
-    <div className="flex flex-col divide-y divide-neutral-200 rounded border border-neutral-300 bg-white text-sm sm:text-base dark:divide-neutral-800 dark:border-neutral-700 dark:bg-neutral-900">
+    <div
+      data-reaction-group
+      className="flex flex-col divide-y divide-neutral-200 rounded border border-neutral-300 bg-white text-sm sm:text-base dark:divide-neutral-800 dark:border-neutral-700 dark:bg-neutral-900"
+    >
       {blocks.map((block, i) => (
         <div key={i} className="px-3 py-2">
           <ResHeader number={block.number} name={block.name} />
@@ -170,6 +173,7 @@ export function ArticleBodyView({ blocks }: { blocks: ArticleBodyBlock[] }) {
           return (
             <blockquote
               key={index}
+              data-article-quote
               className="border-l-4 border-neutral-400 bg-neutral-50 py-2 pl-3 text-sm italic text-neutral-700 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-300"
             >
               <span className="mb-1 inline-block rounded bg-neutral-200 px-1.5 py-0.5 text-[10px] font-bold not-italic text-neutral-500 dark:bg-neutral-700 dark:text-neutral-300">

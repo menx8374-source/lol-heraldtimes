@@ -82,7 +82,7 @@ export function ReactionButtons({
   }
 
   return (
-    <div className="flex flex-wrap gap-2">
+    <div data-reaction-buttons className="flex flex-wrap gap-2">
       {REACTION_EMOJIS.map((emoji) => {
         const active = selection === emoji;
         return (

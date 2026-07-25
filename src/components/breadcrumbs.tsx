@@ -16,7 +16,11 @@ export function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: toSafeJsonLd(jsonLd) }}
       />
-      <nav className="mb-3 text-xs text-neutral-500 dark:text-neutral-400" aria-label="パンくずリスト">
+      <nav
+        data-breadcrumbs
+        className="mb-3 text-xs text-neutral-500 dark:text-neutral-400"
+        aria-label="パンくずリスト"
+      >
         {items.map((item, index) => (
           <span key={item.path}>
             {index > 0 && <span className="mx-1">/</span>}

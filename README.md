@@ -72,6 +72,16 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
 - 運営お知らせバー（`SITE_NOTICE`、閉じるとlocalStorageで次回以降非表示）
 - トップページ上部の注目記事(PICKUP)カード列（閲覧数上位）
 
+## デザイン切替: 現行／ニュースメディア調（拡張E14）
+ダークモードと同じ要領（`<html>`へのクラス付け外し＋no-flashスクリプト＋localStorage）で、
+テーマ（light/dark）とは独立した第2の軸としてデザイン（classic/news）を切り替えられる。
+- ヘッダーのThemeToggle隣に「📰 ニュース」/「◇ 現行」トグル（`DesignToggle`）を常設。押すと
+  `<html>` の `design-news` クラスが付け外しされ、localStorage（キー `lol-matome:design`、
+  値 `classic`|`news`）に保存される。既定（初回・未保存）は classic（現行デザイン）。
+- news時は字体が游ゴシック系スタックになり、記事一覧・サイドバー・記事ページがヘアライン罫線・
+  クリムゾンアクセントの報道メディア風レイアウトになる。classic時の見た目は一切変わらない。
+- テーマ×デザインの4通り（light×classic / dark×classic / light×news / dark×news）すべてで成立する。
+
 ## コメント欄（拡張E2）
 ログイン機能は無い方針のため匿名で投稿できる（記名は任意、未入力は「名無しさん」）。
 - 個別記事ページ下部にコメント一覧＋投稿フォーム。まとめ速報のレス形式（番号:名前＝緑、`>>N`アンカー＝オレンジ）に表示を揃える。

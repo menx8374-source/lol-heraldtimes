@@ -15,7 +15,10 @@ export function ArticleMeta({
 }) {
   return (
     <>
-      <span className="rounded border border-neutral-300 bg-neutral-100 px-2 py-0.5 dark:border-neutral-600 dark:bg-neutral-800">
+      <span
+        data-category-badge
+        className="rounded border border-neutral-300 bg-neutral-100 px-2 py-0.5 dark:border-neutral-600 dark:bg-neutral-800"
+      >
         {category}
       </span>
       <time

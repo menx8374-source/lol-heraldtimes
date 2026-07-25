@@ -98,7 +98,7 @@ export function CommentVoteButtons({
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div data-comment-vote-buttons className="flex items-center gap-2">
       <button
         type="button"
         onClick={() => handleVote("good")}
