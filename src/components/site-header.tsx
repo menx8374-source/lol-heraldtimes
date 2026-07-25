@@ -26,6 +26,10 @@ export function SiteHeader() {
           data-nav-primary
           className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-sm"
         >
+          {/* 「トップ」= ロゴ（LoLまとめ速報）と同じく全記事一覧のトップページ（/）へ遷移する。 */}
+          <Link href="/" className="text-neutral-300 hover:text-white hover:underline">
+            トップ
+          </Link>
           {CATEGORY_LABELS.map((label) => {
             const slug = categorySlugFor(label);
             if (!slug) return null;
