@@ -8,8 +8,10 @@ import {
   createComment,
   listPublishedCommentsBySlug,
   listRecentComments,
+  voteOnComment,
 } from "@/lib/comments-db";
 import { POST } from "@/app/api/articles/[slug]/comments/route";
+import { POST as votePOST } from "@/app/api/articles/[slug]/comments/[number]/vote/route";
 
 async function resetDb() {
   await prisma.articleComment.deleteMany();
@@ -127,6 +129,175 @@ describe("createComment（コメント投稿, 拡張E2）", () => {
       .map((r) => (r as Extract<typeof r, { outcome: "published" }>).comment.number)
       .sort((a, b) => a - b);
     expect(numbers).toEqual([1, 2, 3, 4, 5]);
+  });
+});
+
+describe("createComment（返信スレッド, 拡張E8）", () => {
+  it("parentNumberを指定すると返信として保存され、listPublishedCommentsBySlugでネストして返る", async () => {
+    const article = await createArticle();
+    const parent = await createComment(article.id, { body: "親コメント" });
+    expect(parent.outcome).toBe("published");
+    const parentNumber = parent.outcome === "published" ? parent.comment.number : -1;
+
+    const reply = await createComment(article.id, { name: "返信者", body: "返信です", parentNumber });
+    expect(reply).toMatchObject({ outcome: "published", parentNumber, comment: { number: 2, name: "返信者" } });
+
+    const list = await listPublishedCommentsBySlug(article.slug);
+    expect(list).toHaveLength(1);
+    expect(list[0].number).toBe(parentNumber);
+    expect(list[0].replies).toHaveLength(1);
+    expect(list[0].replies[0]).toMatchObject({ number: 2, name: "返信者", body: "返信です" });
+  });
+
+  it("返信への返信は大元の親にぶら下げられる（1階層のみ）", async () => {
+    const article = await createArticle();
+    const parent = await createComment(article.id, { body: "親コメント" });
+    const parentNumber = parent.outcome === "published" ? parent.comment.number : -1;
+    const reply = await createComment(article.id, { body: "1段目の返信", parentNumber });
+    const replyNumber = reply.outcome === "published" ? reply.comment.number : -1;
+
+    const replyToReply = await createComment(article.id, { body: "2段目のつもりの返信", parentNumber: replyNumber });
+    expect(replyToReply).toMatchObject({ outcome: "published", parentNumber });
+
+    const list = await listPublishedCommentsBySlug(article.slug);
+    expect(list).toHaveLength(1);
+    expect(list[0].replies.map((r) => r.body)).toEqual(["1段目の返信", "2段目のつもりの返信"]);
+  });
+
+  it("NGワードを含む返信はheldになり、公開一覧のネストにも出ない", async () => {
+    const article = await createArticle();
+    const parent = await createComment(article.id, { body: "親コメント" });
+    const parentNumber = parent.outcome === "published" ? parent.comment.number : -1;
+
+    const result = await createComment(article.id, { body: "このチャンピオンはカスだと思う", parentNumber });
+    expect(result).toEqual({ outcome: "held" });
+
+    const list = await listPublishedCommentsBySlug(article.slug);
+    expect(list[0].replies).toHaveLength(0);
+
+    const updated = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
+    expect(updated.commentCount).toBe(1); // 親コメントの分のみ加算
+  });
+
+  it("存在しない/held番号への返信はinvalid_parentで拒否される", async () => {
+    const article = await createArticle();
+    const missing = await createComment(article.id, { body: "返信のつもり", parentNumber: 999 });
+    expect(missing).toEqual({ outcome: "rejected", reason: "invalid_parent" });
+
+    const heldParent = await createComment(article.id, { body: "このチャンピオンはカスだと思う" });
+    expect(heldParent).toEqual({ outcome: "held" });
+    const heldRow = await prisma.articleComment.findFirstOrThrow({ where: { articleId: article.id } });
+    const toHeld = await createComment(article.id, { body: "held宛の返信", parentNumber: heldRow.number });
+    expect(toHeld).toEqual({ outcome: "rejected", reason: "invalid_parent" });
+  });
+
+  it("公開された返信の投稿もArticle.commentCountに加算される", async () => {
+    const article = await createArticle();
+    const parent = await createComment(article.id, { body: "親コメント" });
+    const parentNumber = parent.outcome === "published" ? parent.comment.number : -1;
+    await createComment(article.id, { body: "返信1", parentNumber });
+    await createComment(article.id, { body: "返信2", parentNumber });
+
+    const updated = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
+    expect(updated.commentCount).toBe(3);
+  });
+});
+
+describe("voteOnComment（賛否投票, 拡張E8）", () => {
+  it("publishedコメントへの投票でgoodCount/badCountが1加算される", async () => {
+    const article = await createArticle();
+    const created = await createComment(article.id, { body: "投票対象" });
+    const number = created.outcome === "published" ? created.comment.number : -1;
+
+    const good1 = await voteOnComment(article.slug, number, "good");
+    expect(good1).toEqual({ ok: true, goodCount: 1, badCount: 0 });
+    const good2 = await voteOnComment(article.slug, number, "good");
+    expect(good2).toEqual({ ok: true, goodCount: 2, badCount: 0 });
+    const bad1 = await voteOnComment(article.slug, number, "bad");
+    expect(bad1).toEqual({ ok: true, goodCount: 2, badCount: 1 });
+  });
+
+  it("存在しない番号への投票はok:falseで加算しない", async () => {
+    const article = await createArticle();
+    const result = await voteOnComment(article.slug, 999, "good");
+    expect(result).toEqual({ ok: false });
+  });
+
+  it("heldコメントへの投票はok:falseで加算しない", async () => {
+    const article = await createArticle();
+    await createComment(article.id, { body: "このチャンピオンはカスだと思う" });
+    const heldRow = await prisma.articleComment.findFirstOrThrow({ where: { articleId: article.id } });
+
+    const result = await voteOnComment(article.slug, heldRow.number, "good");
+    expect(result).toEqual({ ok: false });
+    const unchanged = await prisma.articleComment.findUniqueOrThrow({ where: { id: heldRow.id } });
+    expect(unchanged.goodCount).toBe(0);
+  });
+
+  it("非公開(held)記事のコメントへの投票はok:falseで加算しない", async () => {
+    const article = await createArticle({ slug: "held-vote-target", status: "held" });
+    const comment = await prisma.articleComment.create({
+      data: { articleId: article.id, number: 1, name: "名無しさん", body: "本文", status: "published" },
+    });
+
+    const result = await voteOnComment(article.slug, comment.number, "good");
+    expect(result).toEqual({ ok: false });
+  });
+});
+
+function makeVoteRequest(body: unknown): Request {
+  return new Request("http://localhost/api/articles/x/comments/1/vote", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+function makeVoteParams(slug: string, number: string) {
+  return { params: Promise.resolve({ slug, number }) };
+}
+
+describe("POST /api/articles/[slug]/comments/[number]/vote（Route Handler, 拡張E8）", () => {
+  it("有効な種別でカウントを1加算し、加算後のカウントを返す", async () => {
+    await createArticle();
+    const created = await createComment((await prisma.article.findFirstOrThrow({ where: { slug: "comment-target" } })).id, {
+      body: "投票対象",
+    });
+    const number = created.outcome === "published" ? created.comment.number : -1;
+
+    const res = await votePOST(makeVoteRequest({ type: "good" }), makeVoteParams("comment-target", String(number)));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data).toEqual({ goodCount: 1, badCount: 0 });
+  });
+
+  it("不正な種別は400を返す", async () => {
+    await createArticle();
+    const res = await votePOST(makeVoteRequest({ type: "up" }), makeVoteParams("comment-target", "1"));
+    expect(res.status).toBe(400);
+  });
+
+  it("数値でない番号は400を返す", async () => {
+    await createArticle();
+    const res = await votePOST(makeVoteRequest({ type: "good" }), makeVoteParams("comment-target", "abc"));
+    expect(res.status).toBe(400);
+  });
+
+  it("不正なJSONボディは400を返す", async () => {
+    await createArticle();
+    const req = new Request("http://localhost/api/articles/x/comments/1/vote", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{invalid",
+    });
+    const res = await votePOST(req, makeVoteParams("comment-target", "1"));
+    expect(res.status).toBe(400);
+  });
+
+  it("存在しないコメント番号は404を返す", async () => {
+    await createArticle();
+    const res = await votePOST(makeVoteRequest({ type: "good" }), makeVoteParams("comment-target", "999"));
+    expect(res.status).toBe(404);
   });
 });
 

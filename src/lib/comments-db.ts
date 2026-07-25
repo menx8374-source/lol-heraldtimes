@@ -5,6 +5,7 @@
  * （クライアントコンポーネントからimportするとPrismaがクライアントバンドルに含まれてしまう）。
  */
 import { prisma } from "@/lib/prisma";
+import { PUBLISHED_ONLY } from "@/lib/articles";
 import {
   validateCommentInput,
   moderateCommentContent,
@@ -12,7 +13,9 @@ import {
   isHoneypotFilled,
   isRapidDuplicate,
   buildCommentExcerpt,
+  type CommentBase,
   type CommentView,
+  type CommentVoteType,
   type CreateCommentResult,
 } from "@/lib/comments";
 
@@ -22,15 +25,19 @@ type CommentRow = {
   body: string;
   createdAt: Date;
   anchors: unknown;
+  goodCount: number;
+  badCount: number;
 };
 
-function toCommentView(row: CommentRow): CommentView {
+function toCommentBase(row: CommentRow): CommentBase {
   return {
     number: row.number,
     name: row.name,
     body: row.body,
     createdAt: row.createdAt,
     anchors: Array.isArray(row.anchors) ? (row.anchors as number[]) : [],
+    goodCount: row.goodCount,
+    badCount: row.badCount,
   };
 }
 
@@ -43,16 +50,18 @@ function isUniqueViolation(err: unknown): boolean {
 const NUMBERING_MAX_RETRIES = 4;
 
 /**
- * コメントを投稿する（信頼境界: 閲覧者入力）。
- * 手順: ハニーポット判定 → 入力検証 → 連投スパム判定 → 安全フィルタ → 採番・永続化（原子的）
- *      → 公開時のみ Article.commentCount を加算。
- * 採番はその記事の現在の最大 number + 1。同時投稿で `@@unique([articleId, number])` に衝突した場合は
- * トランザクションごと再試行する（既定分離レベルでは max 読み取りが競合しうるため、一意制約＋リトライで
- * 正当なコメントが 500 で落ちないようにする）。
+ * コメント（トップレベル）または返信を投稿する（信頼境界: 閲覧者入力）。
+ * 手順: ハニーポット判定 → 入力検証 → 返信先解決(parentNumber指定時) → 連投スパム判定
+ *      → 安全フィルタ → 採番・永続化（原子的） → 公開時のみ Article.commentCount を加算。
+ * 採番はその記事の現在の最大 number + 1（トップレベル・返信で共通の連番）。同時投稿で
+ * `@@unique([articleId, number])` に衝突した場合はトランザクションごと再試行する（既定分離レベル
+ * では max 読み取りが競合しうるため、一意制約＋リトライで正当なコメントが 500 で落ちないようにする）。
+ * 返信スレッドは1階層のみ（拡張E8）: `parentNumber` が指す対象が既に返信（parentIdあり）の場合、
+ * その返信のさらに親（トップレベルコメント）にぶら下げる。
  */
 export async function createComment(
   articleId: string,
-  input: { name?: string; body: string; honeypot?: string },
+  input: { name?: string; body: string; honeypot?: string; parentNumber?: number },
 ): Promise<CreateCommentResult> {
   if (isHoneypotFilled(input.honeypot)) {
     return { outcome: "rejected", reason: "spam" };
@@ -63,6 +72,21 @@ export async function createComment(
     return { outcome: "rejected", reason: "validation", error: validated.error };
   }
   const { name, body } = validated.value;
+
+  let parentId: string | undefined;
+  let effectiveParentNumber: number | undefined;
+  if (input.parentNumber !== undefined) {
+    const target = await prisma.articleComment.findUnique({
+      where: { articleId_number: { articleId, number: input.parentNumber } },
+      select: { id: true, number: true, status: true, parentId: true, parent: { select: { number: true } } },
+    });
+    if (!target || target.status !== "published") {
+      return { outcome: "rejected", reason: "invalid_parent" };
+    }
+    // 1階層のみ: 返信先自体が返信なら、その大元の親にぶら下げる（表示上もそちらの直下に入る）。
+    parentId = target.parentId ?? target.id;
+    effectiveParentNumber = target.parent?.number ?? target.number;
+  }
 
   const last = await prisma.articleComment.findFirst({
     where: { articleId },
@@ -90,6 +114,7 @@ export async function createComment(
           number,
           name,
           body,
+          parentId,
           anchors: anchors.length > 0 ? anchors : undefined,
           status: moderation.status,
           heldReason: moderation.status === "held" ? moderation.reason : undefined,
@@ -105,7 +130,11 @@ export async function createComment(
         data: { commentCount: { increment: 1 } },
       });
 
-      return { outcome: "published", comment: toCommentView(created) } as CreateCommentResult;
+      return {
+        outcome: "published",
+        comment: toCommentBase(created),
+        parentNumber: effectiveParentNumber,
+      } as CreateCommentResult;
     });
 
   for (let attempt = 0; attempt < NUMBERING_MAX_RETRIES; attempt++) {
@@ -123,10 +152,14 @@ export async function createComment(
 /** 1記事の個別ページで一度に表示する公開コメントの上限（コメントが増えても無界フェッチにしない）。 */
 const MAX_COMMENTS_PER_ARTICLE = 200;
 
-/** 記事slugから公開コメントの一覧を番号順に取得する。存在しない/保留中の記事は空配列を返す。 */
+/**
+ * 記事slugから公開コメント（トップレベル＋その公開返信）を番号順に取得する。
+ * 存在しない/保留中の記事は空配列を返す。1〜2クエリ（記事取得＋コメント一括取得）にまとめ、
+ * 返信をトップレベルコメントごとにグルーピングしてN+1を避ける（拡張E8）。
+ */
 export async function listPublishedCommentsBySlug(slug: string): Promise<CommentView[]> {
   const article = await prisma.article.findFirst({
-    where: { slug, status: "published" },
+    where: { slug, ...PUBLISHED_ONLY },
     select: { id: true },
   });
   if (!article) return [];
@@ -135,8 +168,60 @@ export async function listPublishedCommentsBySlug(slug: string): Promise<Comment
     where: { articleId: article.id, status: "published" },
     orderBy: { number: "asc" },
     take: MAX_COMMENTS_PER_ARTICLE,
+    select: {
+      id: true,
+      parentId: true,
+      number: true,
+      name: true,
+      body: true,
+      createdAt: true,
+      anchors: true,
+      goodCount: true,
+      badCount: true,
+    },
   });
-  return rows.map(toCommentView);
+
+  const topLevel: CommentView[] = [];
+  const byId = new Map<string, CommentView>();
+  for (const row of rows) {
+    if (!row.parentId) {
+      const view: CommentView = { ...toCommentBase(row), replies: [] };
+      byId.set(row.id, view);
+      topLevel.push(view);
+    }
+  }
+  for (const row of rows) {
+    if (row.parentId) {
+      // 親が同じ一括取得結果に含まれない場合（理論上は起こらないが、DB不整合に対する防御）は無視する。
+      byId.get(row.parentId)?.replies.push(toCommentBase(row));
+    }
+  }
+  return topLevel;
+}
+
+/**
+ * コメント・返信への賛否投票（拡張E8）。ログイン無し方針のためユーザー単位の多重防止はせず、
+ * 存在しない/保留中コメント・非公開記事への投票は加算しない（信頼境界: 対象IDはクライアント入力）。
+ */
+export async function voteOnComment(
+  slug: string,
+  number: number,
+  type: CommentVoteType,
+): Promise<{ ok: true; goodCount: number; badCount: number } | { ok: false }> {
+  // 記事の公開判定はコメント取得のリレーションフィルタに畳み込み、往復を1回減らす。
+  // article: PUBLISHED_ONLY により非公開記事のコメントはヒットしない。
+  const comment = await prisma.articleComment.findFirst({
+    where: { number, status: "published", article: { slug, ...PUBLISHED_ONLY } },
+    select: { id: true },
+  });
+  if (!comment) return { ok: false };
+
+  const updated = await prisma.articleComment.update({
+    where: { id: comment.id },
+    data: type === "good" ? { goodCount: { increment: 1 } } : { badCount: { increment: 1 } },
+    select: { goodCount: true, badCount: true },
+  });
+  return { ok: true, goodCount: updated.goodCount, badCount: updated.badCount };
 }
 
 export type RecentCommentView = {

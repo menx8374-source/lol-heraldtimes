@@ -1,8 +1,10 @@
 /**
- * 匿名コメント投稿エンドポイント（拡張E2）。POST { name?, body, website? } を受け取り、
- * 入力検証→連投スパム判定→安全フィルタ（NGワード/個人中傷）の順に判定する。信頼境界
+ * 匿名コメント・返信投稿エンドポイント（拡張E2・拡張E8で返信対応）。
+ * POST { name?, body, website?, parentNumber? } を受け取り、入力検証→（返信先解決）→
+ * 連投スパム判定→安全フィルタ（NGワード/個人中傷）の順に判定する。信頼境界
  * （閲覧者からの入力）のため、失敗はすべて捕捉してエラーレスポンスにし、例外を投げっぱなしにしない。
  * 保留(held)判定の詳細理由はユーザーに見せない（穏当なメッセージのみ返す）。
+ * `parentNumber` は返信先コメントの記事内番号（拡張E8）。省略時はトップレベルコメントになる。
  */
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -16,6 +18,7 @@ const HELD_MESSAGE =
   "不適切な内容が含まれる可能性があるため、このコメントは公開できませんでした。内容をご確認のうえ再度お試しください。";
 const SPAM_MESSAGE =
   "投稿の間隔が短すぎるか、直前の投稿と内容が重複しています。しばらく時間をおいて再度お試しください。";
+const INVALID_PARENT_MESSAGE = "返信先のコメントが見つかりませんでした。ページを再読み込みしてお試しください。";
 
 export async function POST(request: Request, { params }: Params) {
   const { slug } = await params;
@@ -32,6 +35,8 @@ export async function POST(request: Request, { params }: Params) {
   const text = typeof b.body === "string" ? b.body : "";
   // ハニーポット隠しフィールド。人間の利用者は入力しない想定で、埋まっていればbotとみなす。
   const honeypot = typeof b.website === "string" ? b.website : undefined;
+  // 返信先の記事内番号（拡張E8）。数値以外・省略はトップレベルコメント扱い。
+  const parentNumber = typeof b.parentNumber === "number" && Number.isInteger(b.parentNumber) ? b.parentNumber : undefined;
 
   // 保留(held)中の記事は公開閲覧できないため、コメントも受け付けない（PUBLISHED_ONLY で絞る）。
   const article = await prisma.article.findFirst({
@@ -43,13 +48,19 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   try {
-    const result = await createComment(article.id, { name, body: text, honeypot });
+    const result = await createComment(article.id, { name, body: text, honeypot, parentNumber });
 
     if (result.outcome === "published") {
-      return NextResponse.json({ status: "published", comment: result.comment }, { status: 201 });
+      return NextResponse.json(
+        { status: "published", comment: result.comment, parentNumber: result.parentNumber },
+        { status: 201 },
+      );
     }
     if (result.outcome === "held") {
       return NextResponse.json({ status: "held", message: HELD_MESSAGE }, { status: 422 });
+    }
+    if (result.reason === "invalid_parent") {
+      return NextResponse.json({ status: "rejected", message: INVALID_PARENT_MESSAGE }, { status: 400 });
     }
     const message =
       result.reason === "spam" ? SPAM_MESSAGE : commentValidationMessage(result.error);

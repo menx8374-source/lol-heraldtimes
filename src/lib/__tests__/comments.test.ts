@@ -8,6 +8,7 @@ import {
   isHoneypotFilled,
   isRapidDuplicate,
   buildCommentExcerpt,
+  isValidCommentVoteType,
   DEFAULT_COMMENT_NAME,
   COMMENT_BODY_MAX_LENGTH,
   COMMENT_NAME_MAX_LENGTH,
@@ -153,5 +154,18 @@ describe("buildCommentExcerpt（新着コメントウィジェット用の抜粋
     const result = buildCommentExcerpt(long);
     expect(result.endsWith("…")).toBe(true);
     expect(result.length).toBe(41); // 40文字 + "…"
+  });
+});
+
+describe("isValidCommentVoteType（賛否投票の種別判定, 拡張E8）", () => {
+  it("good/badはtrue", () => {
+    expect(isValidCommentVoteType("good")).toBe(true);
+    expect(isValidCommentVoteType("bad")).toBe(true);
+  });
+
+  it("それ以外はfalse", () => {
+    expect(isValidCommentVoteType("up")).toBe(false);
+    expect(isValidCommentVoteType("")).toBe(false);
+    expect(isValidCommentVoteType("GOOD")).toBe(false);
   });
 });

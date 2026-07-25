@@ -11,8 +11,11 @@ import { extractCommentAnchors } from "../src/lib/comments";
 
 const prisma = new PrismaClient();
 
-/** サンプルコメント（拡張E2）。オリジナルの創作テキスト（実在の書き込みの複製ではない）。 */
-type SeedComment = { name: string; body: string };
+/** サンプルコメント（拡張E2）。オリジナルの創作テキスト（実在の書き込みの複製ではない）。
+ * `replies`（拡張E8）: このコメントへの返信サンプル。1階層のみ・すべてオリジナル創作テキスト。
+ * `good`/`bad`（拡張E8）: 👍/👎の初期件数サンプル。未指定は0件。 */
+type SeedReply = { name: string; body: string; good?: number; bad?: number };
+type SeedComment = { name: string; body: string; good?: number; bad?: number; replies?: SeedReply[] };
 
 type SeedArticle = {
   slug: string;
@@ -102,11 +105,19 @@ const articles: SeedArticle[] = [
       { label: "Reddit", url: "https://www.reddit.com/r/leagueoflegends/" },
     ],
     comments: [
-      { name: "名無しさん", body: "ジャングル経験値down、正直いい調整だと思う。序盤からレベル差つきすぎだった。" },
-      { name: "名無しさん", body: ">>1\nそれはそうだけど、ガンクの旨味が減って余計にファーミング特化になりそうなのが心配。" },
-      { name: "ジャングル勢", body: "個人的には序盤ガンクの成功率が上がる方向の調整の方が嬉しかったな。" },
-      { name: "名無しさん", body: ">>3\nわかる、経験値を下げるより「ガンク成功時のリターン」を上げる方向の方が試合が動きやすい気がする。" },
-      { name: "名無しさん", body: "次のパッチでどう調整されるか楽しみにしてる。" },
+      { name: "名無しさん", body: "ジャングル経験値down、正直いい調整だと思う。序盤からレベル差つきすぎだった。", good: 8, bad: 1 },
+      { name: "名無しさん", body: ">>1\nそれはそうだけど、ガンクの旨味が減って余計にファーミング特化になりそうなのが心配。", good: 3, bad: 2 },
+      { name: "ジャングル勢", body: "個人的には序盤ガンクの成功率が上がる方向の調整の方が嬉しかったな。", good: 5 },
+      { name: "名無しさん", body: ">>3\nわかる、経験値を下げるより「ガンク成功時のリターン」を上げる方向の方が試合が動きやすい気がする。", good: 4 },
+      {
+        name: "名無しさん",
+        body: "次のパッチでどう調整されるか楽しみにしてる。",
+        good: 2,
+        // 返信スレッドのサンプル（拡張E8）: このコメントへの返信を1件付ける（すべてオリジナル創作テキスト）。
+        replies: [
+          { name: "ジャングル勢", body: "同意、次はサポート寄りの調整にも期待したいところ。", good: 1 },
+        ],
+      },
     ],
   },
   {
@@ -747,6 +758,8 @@ async function main() {
 
   for (const a of articles) {
     const comments = a.comments ?? [];
+    // コメント数（拡張E2）はトップレベル＋返信（拡張E8）の合計と一致させる。
+    const totalCommentCount = comments.reduce((sum, c) => sum + 1 + (c.replies?.length ?? 0), 0);
     const created = await prisma.article.create({
       data: {
         slug: a.slug,
@@ -756,8 +769,7 @@ async function main() {
         thumbnailUrl: a.thumbnailUrl,
         publishedAt: a.publishedAt,
         viewCount: a.viewCount,
-        // コメント数（拡張E2）は下で投入する実際のサンプルコメント件数と一致させる。
-        commentCount: comments.length,
+        commentCount: totalCommentCount,
         sources: { create: a.sources },
         tags: {
           create: a.tags.map((name) => ({
@@ -773,19 +785,43 @@ async function main() {
       },
     });
 
-    // サンプルコメント（拡張E2）: すべて安全フィルタ通過前提の穏当な創作テキストのため
+    // サンプルコメント・返信（拡張E2・拡張E8）: すべて安全フィルタ通過前提の穏当な創作テキストのため
     // status="published" で直接投入する（本番の投稿経路は src/lib/comments-db.ts の createComment）。
-    for (const [index, c] of comments.entries()) {
-      await prisma.articleComment.create({
+    // トップレベル・返信で記事内の表示連番(number)を共有し、返信を投稿順（トップレベル直後）に採番する。
+    const anchorsFor = (body: string) => {
+      const anchors = extractCommentAnchors(body);
+      return anchors.length > 0 ? anchors : undefined;
+    };
+    let nextNumber = 1;
+    for (const c of comments) {
+      const topComment = await prisma.articleComment.create({
         data: {
           articleId: created.id,
-          number: index + 1,
+          number: nextNumber++,
           name: c.name,
           body: c.body,
-          anchors: extractCommentAnchors(c.body).length > 0 ? extractCommentAnchors(c.body) : undefined,
+          anchors: anchorsFor(c.body),
           status: "published",
+          goodCount: c.good ?? 0,
+          badCount: c.bad ?? 0,
         },
       });
+
+      for (const r of c.replies ?? []) {
+        await prisma.articleComment.create({
+          data: {
+            articleId: created.id,
+            number: nextNumber++,
+            parentId: topComment.id,
+            name: r.name,
+            body: r.body,
+            anchors: anchorsFor(r.body),
+            status: "published",
+            goodCount: r.good ?? 0,
+            badCount: r.bad ?? 0,
+          },
+        });
+      }
     }
   }
 

@@ -54,6 +54,13 @@ export function commentValidationMessage(error: CommentValidationError): string 
   }
 }
 
+export type CommentVoteType = "good" | "bad";
+
+/** 値が投票種別("good"/"bad")のいずれかであるかを判定する型ガード（拡張E8）。 */
+export function isValidCommentVoteType(value: string): value is CommentVoteType {
+  return value === "good" || value === "bad";
+}
+
 export type CommentModerationResult =
   | { status: "published" }
   | { status: "held"; reason: "ng_word" | "personal_attack" };
@@ -114,12 +121,23 @@ export function isRapidDuplicate(
   return now.getTime() - last.createdAt.getTime() < windowMs;
 }
 
-export type CommentView = {
+/** コメント1件（返信含む）が共通で持つ表示用フィールド（拡張E8: 賛否件数を含む）。 */
+export type CommentBase = {
   number: number;
   name: string;
   body: string;
   createdAt: Date;
   anchors: number[];
+  goodCount: number;
+  badCount: number;
+};
+
+/** 返信（拡張E8）。1階層スレッドのため、返信自身はさらなる返信を持たない。 */
+export type CommentReplyView = CommentBase;
+
+/** トップレベルコメント。公開済みの返信を発生順（number昇順）に持つ（拡張E8）。 */
+export type CommentView = CommentBase & {
+  replies: CommentReplyView[];
 };
 
 const RECENT_COMMENT_EXCERPT_LENGTH = 40;
@@ -132,7 +150,8 @@ export function buildCommentExcerpt(body: string): string {
 }
 
 export type CreateCommentResult =
-  | { outcome: "published"; comment: CommentView }
+  | { outcome: "published"; comment: CommentBase; parentNumber?: number }
   | { outcome: "held" }
   | { outcome: "rejected"; reason: "validation"; error: CommentValidationError }
-  | { outcome: "rejected"; reason: "spam" };
+  | { outcome: "rejected"; reason: "spam" }
+  | { outcome: "rejected"; reason: "invalid_parent" };

@@ -141,11 +141,13 @@ model ArticleReaction {
 /// 既存の安全フィルタ（NGワード・個人中傷/晒し。lib/moderation）で判定し、通過したものだけ
 /// status="published" として公開・Article.commentCount に加算する。不通過は status="held" として
 /// 記録だけ残し、公開サイトには一切表示しない（保留コメントの一覧UIはE7の対象）。
+/// 返信スレッド・賛否リアクション（拡張E8）: parentId を持つ行は返信で、1階層のみ
+/// （返信への返信も大元の親にぶら下げる。lib/comments-db.ts の createComment が解決する）。
 model ArticleComment {
   id        String   @id @default(cuid())
   articleId String
   article   Article  @relation(fields: [articleId], references: [id], onDelete: Cascade)
-  /// 記事内の表示連番（1始まり）。同一記事内で一意。
+  /// 記事内の表示連番（1始まり）。トップレベル・返信を通じて同一記事内で一意。
   number    Int
   /// 匿名ハンドル名。未入力時は既定値（lib/comments.ts の DEFAULT_COMMENT_NAME）。
   name      String
@@ -158,10 +160,21 @@ model ArticleComment {
   status    String   @default("published")
   /// 保留理由コード: "ng_word" | "personal_attack"。status="held" のときのみ設定される。
   heldReason String?
+  /// 返信先の親コメントID（拡張E8）。トップレベルコメントは null。1階層のみのため、
+  /// 返信の返信も常にトップレベルコメントを指す。
+  parentId  String?
+  parent    ArticleComment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   ArticleComment[] @relation("CommentReplies")
+  /// 👍 Good の件数（拡張E8）。ログイン無し方針のためユーザー単位の多重防止はせず、
+  /// UI側の連打抑止（楽観更新・二重送信防止）のみで足りる仕様。
+  goodCount Int      @default(0)
+  /// 👎 Bad の件数（拡張E8）。goodCount と同様の方針。
+  badCount  Int      @default(0)
 
   @@unique([articleId, number])
   @@index([articleId, status])
   @@index([status, createdAt])
+  @@index([articleId, parentId])
 }
 
 /// 記事の閲覧イベント（拡張E4: 期間別ランキングF3拡張）。累計 Article.viewCount とは別に、
