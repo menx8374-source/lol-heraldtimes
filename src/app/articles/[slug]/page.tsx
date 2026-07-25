@@ -15,6 +15,8 @@ import { ArticleMeta } from "@/components/article-meta";
 import { ArticleList } from "@/components/article-list";
 import { PageWithSidebar } from "@/components/page-with-sidebar";
 import { AdSlot } from "@/components/ad-slot";
+import { ShareButtons } from "@/components/share-buttons";
+import { ReactionButtons } from "@/components/reaction-buttons";
 
 type Props = {
   params: Promise<{ slug: string }>;
@@ -92,7 +94,7 @@ export default async function ArticlePage({ params }: Props) {
         dangerouslySetInnerHTML={{ __html: toSafeJsonLd(structuredData) }}
       />
       <PageWithSidebar>
-        <nav className="mb-3 text-xs text-neutral-500">
+        <nav className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">
           <Link href="/" className="hover:underline">
             トップ
           </Link>
@@ -116,8 +118,12 @@ export default async function ArticlePage({ params }: Props) {
 
         <h1 className="text-xl font-bold leading-snug sm:text-2xl">{article.title}</h1>
 
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
           <ArticleMeta category={article.category} publishedAt={article.publishedAt} />
+          <span className="flex items-center gap-1">
+            <span aria-hidden="true">💬</span>
+            {article.commentCount}
+          </span>
           {article.unconfirmed && (
             <span className="rounded-full bg-red-600 px-2 py-0.5 font-bold text-white">
               未確認情報
@@ -127,20 +133,20 @@ export default async function ArticlePage({ params }: Props) {
             <Link
               key={tag}
               href={`/tags/${tag}`}
-              className="rounded-full border border-neutral-300 px-2 py-0.5 hover:bg-neutral-100"
+              className="rounded-full border border-neutral-300 px-2 py-0.5 hover:bg-neutral-100 dark:border-neutral-600 dark:hover:bg-neutral-800"
             >
               #{tag}
             </Link>
           ))}
         </div>
 
-        <p className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <p className="mt-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
           {isReactionFormatArticle
             ? "本記事は掲示板・SNSの反応を引用・転載してまとめたものです。AIにより自動編集されており、内容は変動し得ます。"
             : "この記事は AI により自動生成された記事です。内容は変動・変更される場合があります。"}
         </p>
         {article.unconfirmed && (
-          <p className="mt-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800">
+          <p className="mt-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
             【未確認】この記事は未確定・噂レベルの情報を含みます。内容の真偽は確認されていません。
           </p>
         )}
@@ -149,19 +155,24 @@ export default async function ArticlePage({ params }: Props) {
           <ArticleBodyView blocks={article.body} />
         </div>
 
+        <div className="mt-6 flex flex-col gap-4 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+          <ReactionButtons slug={article.slug} initialCounts={article.reactions} />
+          <ShareButtons url={articleUrl} title={article.title} />
+        </div>
+
         <AdSlot position="article-bottom" />
 
-        <section className="mt-6 border-t border-neutral-200 pt-4">
-          <h2 className="text-sm font-bold text-neutral-600">出典</h2>
+        <section className="mt-6 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+          <h2 className="text-sm font-bold text-neutral-600 dark:text-neutral-300">出典</h2>
           <ul className="mt-2 flex flex-col gap-1">
             {article.sources.map((source) => (
               <li key={source.url} className="text-sm">
-                <span className="mr-1 text-neutral-500">[{source.label}]</span>
+                <span className="mr-1 text-neutral-500 dark:text-neutral-400">[{source.label}]</span>
                 <a
                   href={source.url}
                   target="_blank"
                   rel="noopener noreferrer nofollow"
-                  className="break-all text-sky-700 hover:underline"
+                  className="break-all text-sky-700 hover:underline dark:text-sky-400"
                 >
                   {source.url}
                 </a>
@@ -170,13 +181,13 @@ export default async function ArticlePage({ params }: Props) {
           </ul>
         </section>
 
-        <section className="mt-8 border-t border-neutral-200 pt-4">
-          <h2 className="mb-3 text-sm font-bold text-neutral-600">関連記事</h2>
+        <section className="mt-8 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+          <h2 className="mb-3 text-sm font-bold text-neutral-600 dark:text-neutral-300">関連記事</h2>
           <ArticleList articles={related} emptyMessage="関連記事はありません" />
         </section>
 
         <div className="mt-6">
-          <Link href="/" className="text-sm text-sky-700 hover:underline">
+          <Link href="/" className="text-sm text-sky-700 hover:underline dark:text-sky-400">
             &larr; トップへ戻る
           </Link>
         </div>

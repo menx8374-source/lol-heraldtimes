@@ -21,18 +21,18 @@ export function AdSlot({ position }: { position: AdSlotPosition }) {
 
   return (
     <div
-      className="my-4 rounded border border-dashed border-neutral-300 bg-neutral-50 px-3 py-2 text-center"
+      className="my-4 rounded border border-dashed border-neutral-300 bg-neutral-50 px-3 py-2 text-center dark:border-neutral-700 dark:bg-neutral-900"
       data-ad-slot={position}
       aria-label={POSITION_LABELS[position]}
     >
-      <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-neutral-400">
+      <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-neutral-400 dark:text-neutral-500">
         広告 / PR
       </p>
       {code ? (
         // code は運営者が env に設定した広告タグ文字列のみ（getAdSlotCode 参照）。
         <div dangerouslySetInnerHTML={{ __html: code }} />
       ) : (
-        <p className="py-4 text-xs text-neutral-400">広告枠（未設定）</p>
+        <p className="py-4 text-xs text-neutral-400 dark:text-neutral-500">広告枠（未設定）</p>
       )}
     </div>
   );

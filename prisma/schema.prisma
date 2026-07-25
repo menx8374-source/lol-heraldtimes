@@ -34,6 +34,9 @@ model Article {
   /// 未確定・噂レベルの情報と判定された場合に true（F9）。true でも公開はされるが、
   /// 記事に「未確認」ラベルを表示する対象になる。
   unconfirmed   Boolean  @default(false)
+  /// コメント数（拡張E1）。現時点ではコメント投稿機能自体は無く、シード値/将来のE2実装が加算する
+  /// 表示専用のカウンタとしてカードに表示する。
+  commentCount  Int      @default(0)
   publishedAt   DateTime
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -41,6 +44,7 @@ model Article {
   tags    ArticleTag[]
   sources ArticleSource[]
   collectedItems CollectedItem[]
+  reactions ArticleReaction[]
 
   @@index([publishedAt])
   @@index([category])
@@ -107,6 +111,20 @@ model CollectedItem {
 
   @@index([sourceType])
   @@index([status])
+}
+
+/// 絵文字リアクション（拡張E1）。記事1件×絵文字1種につき1行で件数を保持する
+/// （ログイン無し方針のため、ユーザー単位の多重投稿防止は行わず、UI側の連打抑止のみで足りる仕様）。
+model ArticleReaction {
+  id        String  @id @default(cuid())
+  articleId String
+  article   Article @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  /// 対象絵文字（lib/reactions.ts の REACTION_EMOJIS のいずれか）
+  emoji     String
+  count     Int     @default(0)
+
+  @@unique([articleId, emoji])
+  @@index([articleId])
 }
 
 /// ソースごとの収集実行ログ（F5: 実行間隔の判定・1ソース失敗の記録に使う）。

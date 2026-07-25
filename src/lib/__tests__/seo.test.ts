@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildArticleDescription, toSafeJsonLd } from "@/lib/seo";
+import { buildArticleDescription, buildArticleExcerpt, toSafeJsonLd } from "@/lib/seo";
 import type { ArticleBodyBlock } from "@/lib/article-body";
 
 describe("buildArticleDescription", () => {
@@ -28,6 +28,21 @@ describe("buildArticleDescription", () => {
   it("連続する空白・改行を1つの半角スペースに正規化する", () => {
     const blocks: ArticleBodyBlock[] = [{ type: "paragraph", text: "行1\n\n行2   行3" }];
     expect(buildArticleDescription(blocks)).toBe("行1 行2 行3");
+  });
+});
+
+describe("buildArticleExcerpt（記事カードの本文抜粋, 拡張E1）", () => {
+  it("buildArticleDescriptionより短い上限（80字）で切り詰める", () => {
+    const longText = "あ".repeat(200);
+    const blocks: ArticleBodyBlock[] = [{ type: "paragraph", text: longText }];
+    const result = buildArticleExcerpt(blocks);
+    expect(result.length).toBe(81); // 80文字 + "…"
+    expect(result.endsWith("…")).toBe(true);
+  });
+
+  it("短い本文はそのまま返す（切り詰めない）", () => {
+    const blocks: ArticleBodyBlock[] = [{ type: "paragraph", text: "短い本文の段落です。" }];
+    expect(buildArticleExcerpt(blocks)).toBe("短い本文の段落です。");
   });
 });
 

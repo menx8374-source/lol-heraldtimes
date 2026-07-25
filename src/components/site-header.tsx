@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { CATEGORY_LABELS, categorySlugFor } from "@/lib/categories";
 import { SearchForm } from "@/components/search-form";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export function SiteHeader() {
   return (
@@ -13,7 +14,10 @@ export function SiteHeader() {
               海外・5chの反応 / パッチ情報 / eスポーツをまとめて速報
             </span>
           </Link>
-          <SearchForm />
+          <div className="flex items-center gap-3">
+            <SearchForm />
+            <ThemeToggle />
+          </div>
         </div>
         <nav
           aria-label="カテゴリ"

@@ -12,16 +12,16 @@ const LINE_EMPHASIS_CLASS: Record<"red" | "orange", string> = {
  * 「番号: 名前」(名前は緑)＋本文行(逐語・複数行)＋重要行の赤/オレンジ強調＋">>N"アンカー。 */
 function ReactionResView({ block }: { block: ArticleBodyReactionBlock }) {
   return (
-    <div className="rounded border border-neutral-300 bg-white px-3 py-2 text-sm sm:text-base">
+    <div className="rounded border border-neutral-300 bg-white px-3 py-2 text-sm sm:text-base dark:border-neutral-700 dark:bg-neutral-900">
       <div className="mb-1 font-bold">
-        <span className="text-neutral-700">{block.number}: </span>
-        <span className="text-green-700">{block.name}</span>
+        <span className="text-neutral-700 dark:text-neutral-300">{block.number}: </span>
+        <span className="text-green-700 dark:text-green-400">{block.name}</span>
       </div>
       <div className="flex flex-col gap-0.5">
         {block.lines.map((line, i) => (
           <p
             key={i}
-            className={line.emphasis ? LINE_EMPHASIS_CLASS[line.emphasis] : "text-neutral-800"}
+            className={line.emphasis ? LINE_EMPHASIS_CLASS[line.emphasis] : "text-neutral-800 dark:text-neutral-200"}
           >
             {line.text}
           </p>
@@ -59,14 +59,14 @@ export function ArticleBodyView({ blocks }: { blocks: ArticleBodyBlock[] }) {
           return (
             <blockquote
               key={index}
-              className="border-l-4 border-neutral-400 bg-neutral-50 py-2 pl-3 text-sm italic text-neutral-700"
+              className="border-l-4 border-neutral-400 bg-neutral-50 py-2 pl-3 text-sm italic text-neutral-700 dark:border-neutral-600 dark:bg-neutral-900 dark:text-neutral-300"
             >
-              <span className="mb-1 inline-block rounded bg-neutral-200 px-1.5 py-0.5 text-[10px] font-bold not-italic text-neutral-500">
+              <span className="mb-1 inline-block rounded bg-neutral-200 px-1.5 py-0.5 text-[10px] font-bold not-italic text-neutral-500 dark:bg-neutral-700 dark:text-neutral-300">
                 引用
               </span>
               <p>{block.text}</p>
               {block.source && (
-                <footer className="mt-1 text-xs not-italic text-neutral-500">
+                <footer className="mt-1 text-xs not-italic text-neutral-500 dark:text-neutral-400">
                   — {block.source}
                 </footer>
               )}

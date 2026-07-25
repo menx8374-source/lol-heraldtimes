@@ -19,6 +19,10 @@ type SeedArticle = {
   viewCount: number;
   body: ArticleBodyBlock[];
   sources: { label: string; url: string }[];
+  /** コメント数（拡張E1）。見栄え用のサンプル値。未指定は0。 */
+  commentCount?: number;
+  /** 絵文字リアクションのサンプル件数（拡張E1）。未指定はリアクション行なし（=0件表示）。 */
+  reactions?: { emoji: string; count: number }[];
 };
 
 function body(...blocks: ArticleBodyBlock[]): ArticleBodyBlock[] {
@@ -50,6 +54,12 @@ const articles: SeedArticle[] = [
     tags: ["パッチノート", "ジャングル"],
     publishedAt: daysAgo(0, 1),
     viewCount: 4210,
+    commentCount: 58,
+    reactions: [
+      { emoji: "😡", count: 24 },
+      { emoji: "😮", count: 11 },
+      { emoji: "👍", count: 6 },
+    ],
     body: body(
       { type: "heading", text: "パッチ14.6の変更点" },
       {
@@ -84,6 +94,11 @@ const articles: SeedArticle[] = [
     tags: ["ヤスオ", "神プレイ"],
     publishedAt: daysAgo(0, 4),
     viewCount: 3890,
+    commentCount: 41,
+    reactions: [
+      { emoji: "😂", count: 33 },
+      { emoji: "👍", count: 19 },
+    ],
     body: body(
       { type: "heading", text: "反応まとめ" },
       {
@@ -168,6 +183,11 @@ const articles: SeedArticle[] = [
     tags: ["世界大会", "eスポーツ"],
     publishedAt: daysAgo(1, 2),
     viewCount: 5210,
+    commentCount: 27,
+    reactions: [
+      { emoji: "😮", count: 22 },
+      { emoji: "👍", count: 14 },
+    ],
     body: body(
       { type: "heading", text: "組み合わせ発表" },
       {
@@ -189,6 +209,7 @@ const articles: SeedArticle[] = [
     tags: ["Tierリスト", "メタ"],
     publishedAt: daysAgo(1, 6),
     viewCount: 2980,
+    commentCount: 19,
     body: body(
       { type: "heading", text: "反応まとめ" },
       {
@@ -271,6 +292,12 @@ const articles: SeedArticle[] = [
     tags: ["新チャンピオン"],
     publishedAt: daysAgo(2, 1),
     viewCount: 6120,
+    commentCount: 63,
+    reactions: [
+      { emoji: "😮", count: 40 },
+      { emoji: "👍", count: 12 },
+      { emoji: "😂", count: 3 },
+    ],
     body: body(
       { type: "heading", text: "ティザー映像の内容" },
       {
@@ -292,6 +319,7 @@ const articles: SeedArticle[] = [
     tags: ["サポート", "アイテム"],
     publishedAt: daysAgo(2, 5),
     viewCount: 1870,
+    commentCount: 15,
     body: body(
       { type: "heading", text: "反応まとめ" },
       {
@@ -374,6 +402,7 @@ const articles: SeedArticle[] = [
     tags: ["eスポーツ", "新人選手"],
     publishedAt: daysAgo(3, 3),
     viewCount: 3340,
+    commentCount: 22,
     body: body(
       { type: "heading", text: "試合結果" },
       {
@@ -395,6 +424,7 @@ const articles: SeedArticle[] = [
     tags: ["ジャングル", "神プレイ"],
     publishedAt: daysAgo(4, 2),
     viewCount: 2140,
+    commentCount: 12,
     body: body(
       { type: "heading", text: "反応まとめ" },
       {
@@ -477,6 +507,7 @@ const articles: SeedArticle[] = [
     tags: ["パッチノート", "ADC", "ビルド"],
     publishedAt: daysAgo(5, 4),
     viewCount: 1560,
+    commentCount: 8,
     body: body(
       { type: "heading", text: "アイテム調整の影響" },
       {
@@ -498,6 +529,7 @@ const articles: SeedArticle[] = [
     tags: ["イベント"],
     publishedAt: daysAgo(6, 1),
     viewCount: 2670,
+    commentCount: 17,
     body: body(
       { type: "heading", text: "イベント概要" },
       {
@@ -519,6 +551,7 @@ const articles: SeedArticle[] = [
     tags: ["トップレーン"],
     publishedAt: daysAgo(7, 3),
     viewCount: 1320,
+    commentCount: 9,
     body: body(
       { type: "heading", text: "反応まとめ" },
       {
@@ -601,6 +634,7 @@ const articles: SeedArticle[] = [
     tags: ["eスポーツ", "大会"],
     publishedAt: daysAgo(8, 5),
     viewCount: 1980,
+    commentCount: 11,
     body: body(
       { type: "heading", text: "大会直前の状況" },
       {
@@ -620,6 +654,7 @@ const articles: SeedArticle[] = [
 async function main() {
   console.log(`シード投入開始: ${articles.length}件`);
 
+  await prisma.articleReaction.deleteMany();
   await prisma.articleTag.deleteMany();
   await prisma.articleSource.deleteMany();
   await prisma.article.deleteMany();
@@ -634,6 +669,7 @@ async function main() {
         body: a.body,
         publishedAt: a.publishedAt,
         viewCount: a.viewCount,
+        commentCount: a.commentCount ?? 0,
         sources: { create: a.sources },
         tags: {
           create: a.tags.map((name) => ({
@@ -645,6 +681,7 @@ async function main() {
             },
           })),
         },
+        reactions: a.reactions ? { create: a.reactions } : undefined,
       },
     });
   }

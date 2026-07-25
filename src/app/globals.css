@@ -1,8 +1,25 @@
 @import "tailwindcss";
 
+/*
+ * ダークモード（拡張E1）: Tailwind v4 は既定で prefers-color-scheme のみを見るため、
+ * <html class="dark"> によるユーザー切替（ThemeToggle）を dark: バリアントに反映させるには
+ * このカスタムバリアント定義が必要（v4のクラスベースdark mode設定方法）。
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #f3f4f6;
   --foreground: #171717;
+}
+
+/*
+ * ダークモード時のCSS変数上書き。.dark クラスは <html> に付与される（layout.tsx参照）。
+ * --background/--foreground を直接参照する箇所（下記 body 等）がダークモードでも
+ * 正しい色になるようにする。
+ */
+.dark {
+  --background: #0a0a0a;
+  --foreground: #f5f5f5;
 }
 
 @theme inline {
@@ -10,16 +27,25 @@
   --color-foreground: var(--foreground);
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family:
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    "Hiragino Kaku Gothic ProN",
-    "Hiragino Sans",
-    Meiryo,
-    Arial,
-    sans-serif;
+/*
+ * body の背景/文字色は @layer base に置くこと。アンレイヤー（レイヤー外）のCSSは
+ * CSS Cascade Layers の仕様上、レイヤー付きCSS（Tailwindのutilitiesレイヤー含む）より
+ * 常に優先されてしまうため、<body> に付けた dark:bg-neutral-950 等のTailwind
+ * ユーティリティクラスがここで常に上書きされ、ダークモード時に本文が明色のまま
+ * 残ってしまう不具合があった（拡張E1 再実装で修正）。
+ */
+@layer base {
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family:
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      "Hiragino Kaku Gothic ProN",
+      "Hiragino Sans",
+      Meiryo,
+      Arial,
+      sans-serif;
+  }
 }

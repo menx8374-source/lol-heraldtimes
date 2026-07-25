@@ -2,12 +2,22 @@ import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { parseArticleBody, type ArticleBodyBlock } from "@/lib/article-body";
 import { selectRelatedArticles } from "@/lib/related-articles";
+import { buildArticleExcerpt } from "@/lib/seo";
+import { mergeReactionCounts, type ReactionCounts } from "@/lib/reactions";
+import {
+  DEFAULT_PAGE_SIZE,
+  clampPage,
+  computeTotalPages,
+  paginationOffset,
+  type PaginationResult,
+} from "@/lib/pagination";
 import { Prisma } from "@prisma/client";
 
 const articleWithRelations = Prisma.validator<Prisma.ArticleDefaultArgs>()({
   include: {
     sources: true,
     tags: { include: { tag: true } },
+    reactions: true,
   },
 });
 
@@ -20,6 +30,10 @@ export type ArticleSummary = {
   thumbnailUrl: string | null;
   publishedAt: Date;
   viewCount: number;
+  /** タイトル下に表示する本文抜粋（拡張E1。先頭〜80字程度。本文が不正な場合は空文字）。 */
+  excerpt: string;
+  /** コメント数（拡張E1）。コメント投稿機能自体は無く、表示専用のカウンタ。 */
+  commentCount: number;
 };
 
 export type ArticleDetail = ArticleSummary & {
@@ -28,6 +42,8 @@ export type ArticleDetail = ArticleSummary & {
   sources: { label: string; url: string }[];
   /** 未確定・噂レベルの情報と判定された記事に付与される「未確認」ラベル対象フラグ（F9）。 */
   unconfirmed: boolean;
+  /** 絵文字リアクションの件数（拡張E1）。既定の全絵文字を必ず含む（未押下は0）。 */
+  reactions: ReactionCounts;
 };
 
 /**
@@ -37,7 +53,10 @@ export type ArticleDetail = ArticleSummary & {
  */
 export const PUBLISHED_ONLY = { status: "published" } as const;
 
-/** 一覧カードに必要なスカラー列だけを取得する select（本文・リレーションは取らない）。 */
+/**
+ * 一覧カードに必要なスカラー列を取得する select。excerpt 生成のため本文(body)も含める
+ * （一覧規模はページネーションで有界化しているため、本文込み取得のコストは許容できる）。
+ */
 export const summarySelect = {
   slug: true,
   title: true,
@@ -45,15 +64,46 @@ export const summarySelect = {
   thumbnailUrl: true,
   publishedAt: true,
   viewCount: true,
+  commentCount: true,
+  body: true,
 } satisfies Prisma.ArticleSelect;
+
+type SummaryRow = {
+  slug: string;
+  title: string;
+  category: string;
+  thumbnailUrl: string | null;
+  publishedAt: Date;
+  viewCount: number;
+  commentCount: number;
+  body: unknown;
+};
+
+/** 本文(Json)から抜粋テキストを作る。不正な本文データは空文字にフォールバックし一覧表示自体は止めない。 */
+function excerptFromBody(body: unknown): string {
+  try {
+    return buildArticleExcerpt(parseArticleBody(body));
+  } catch {
+    return "";
+  }
+}
 
 /**
  * summarySelect の列を含む任意の行（追加でリレーション等を持っていてよい）から
  * ArticleSummary に射影する共有ヘルパ。ArticleSummary の列定義を一箇所に集約する。
  */
-export function toSummary<T extends ArticleSummary>(row: T): ArticleSummary {
-  const { slug, title, category, thumbnailUrl, publishedAt, viewCount } = row;
-  return { slug, title, category, thumbnailUrl, publishedAt, viewCount };
+export function toSummary<T extends SummaryRow>(row: T): ArticleSummary {
+  const { slug, title, category, thumbnailUrl, publishedAt, viewCount, commentCount, body } = row;
+  return {
+    slug,
+    title,
+    category,
+    thumbnailUrl,
+    publishedAt,
+    viewCount,
+    commentCount,
+    excerpt: excerptFromBody(body),
+  };
 }
 
 function toDetail(article: ArticleWithRelations): ArticleDetail {
@@ -63,19 +113,20 @@ function toDetail(article: ArticleWithRelations): ArticleDetail {
     tags: article.tags.map((t) => t.tag.name),
     sources: article.sources.map((s) => ({ label: s.label, url: s.url })),
     unconfirmed: article.unconfirmed,
+    reactions: mergeReactionCounts(article.reactions),
   };
 }
 
 /**
- * トップページ用: 公開済み記事のみを新しい順で取得する。
- * 並べ替えは publishedAt インデックスで DB 側に押し下げ、カード表示に不要な本文・リレーションは取得しない。
+ * トップページ用: 公開済み記事のみを新しい順でページ単位に取得する（拡張E1: ページネーション）。
+ * 並べ替えは publishedAt インデックスで DB 側に押し下げる。要求ページが範囲外の場合は
+ * 最終ページにクランプする（0件時は1ページ目・空配列を返す）。
  */
-export async function listArticles(): Promise<ArticleSummary[]> {
-  return prisma.article.findMany({
-    where: PUBLISHED_ONLY,
-    select: summarySelect,
-    orderBy: { publishedAt: "desc" },
-  });
+export async function listArticles(
+  page = 1,
+  pageSize: number = DEFAULT_PAGE_SIZE,
+): Promise<PaginationResult<ArticleSummary>> {
+  return paginatedFindMany(PUBLISHED_ONLY, page, pageSize);
 }
 
 /**
@@ -94,28 +145,57 @@ export const getArticleBySlug = cache(
   },
 );
 
-/**
- * カテゴリ一覧ページ用: 指定カテゴリの公開済み記事だけを新しい順で取得する（F2）。
- * 該当記事が0件の場合は空配列を返す（呼び出し側で空状態を表示、エラーにはしない）。
- */
-export async function listArticlesByCategory(category: string): Promise<ArticleSummary[]> {
-  return prisma.article.findMany({
-    where: { category, ...PUBLISHED_ONLY },
+/** listArticles/listArticlesByCategory/listArticlesByTag に共通の「絞り込み条件→ページ結果」処理。 */
+async function paginatedFindMany(
+  where: Prisma.ArticleWhereInput,
+  page: number,
+  pageSize: number,
+): Promise<PaginationResult<ArticleSummary>> {
+  const totalCount = await prisma.article.count({ where });
+  const totalPages = computeTotalPages(totalCount, pageSize);
+  const clampedPage = clampPage(page, totalPages);
+  const rows = await prisma.article.findMany({
+    where,
     select: summarySelect,
     orderBy: { publishedAt: "desc" },
+    skip: paginationOffset(clampedPage, pageSize),
+    take: pageSize,
   });
+  return {
+    items: rows.map(toSummary),
+    page: clampedPage,
+    pageSize,
+    totalCount,
+    totalPages,
+  };
 }
 
 /**
- * タグ一覧ページ用: 指定タグを持つ公開済み記事だけを新しい順で取得する（F2）。
+ * カテゴリ一覧ページ用: 指定カテゴリの公開済み記事だけを新しい順でページ単位に取得する（F2 + 拡張E1）。
+ * 該当記事が0件の場合は空配列を返す（呼び出し側で空状態を表示、エラーにはしない）。
+ */
+export async function listArticlesByCategory(
+  category: string,
+  page = 1,
+  pageSize: number = DEFAULT_PAGE_SIZE,
+): Promise<PaginationResult<ArticleSummary>> {
+  return paginatedFindMany({ category, ...PUBLISHED_ONLY }, page, pageSize);
+}
+
+/**
+ * タグ一覧ページ用: 指定タグを持つ公開済み記事だけを新しい順でページ単位に取得する（F2 + 拡張E1）。
  * 未知のタグ名でも例外にはせず空配列を返す。
  */
-export async function listArticlesByTag(tagName: string): Promise<ArticleSummary[]> {
-  return prisma.article.findMany({
-    where: { tags: { some: { tag: { name: tagName } } }, ...PUBLISHED_ONLY },
-    select: summarySelect,
-    orderBy: { publishedAt: "desc" },
-  });
+export async function listArticlesByTag(
+  tagName: string,
+  page = 1,
+  pageSize: number = DEFAULT_PAGE_SIZE,
+): Promise<PaginationResult<ArticleSummary>> {
+  return paginatedFindMany(
+    { tags: { some: { tag: { name: tagName } } }, ...PUBLISHED_ONLY },
+    page,
+    pageSize,
+  );
 }
 
 /**
@@ -130,12 +210,13 @@ export async function listArticlesForSitemap(): Promise<{ slug: string; updatedA
 }
 
 export async function listPopularArticles(limit = 5): Promise<ArticleSummary[]> {
-  return prisma.article.findMany({
+  const rows = await prisma.article.findMany({
     where: PUBLISHED_ONLY,
     select: summarySelect,
     orderBy: { viewCount: "desc" },
     take: limit,
   });
+  return rows.map(toSummary);
 }
 
 /**
@@ -185,5 +266,17 @@ export async function listRelatedArticles(
     limit,
   );
 
-  return selected.map(toSummary);
+  // selected は候補生成時に toSummary 済み（excerpt/commentCount 算出済み）の ArticleSummary に
+  // tags を足したものなので、ここでは ArticleSummary の列だけを明示的に組み直して tags を落とす
+  // （toSummary の再適用は body を持たないため excerpt が空文字に上書きされてしまうので行わない）。
+  return selected.map((s) => ({
+    slug: s.slug,
+    title: s.title,
+    category: s.category,
+    thumbnailUrl: s.thumbnailUrl,
+    publishedAt: s.publishedAt,
+    viewCount: s.viewCount,
+    commentCount: s.commentCount,
+    excerpt: s.excerpt,
+  }));
 }

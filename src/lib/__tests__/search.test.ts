@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { bodyBlocksToText, matchesQuery } from "@/lib/search";
+import { describe, expect, it, beforeEach } from "vitest";
+import { bodyBlocksToText, matchesQuery, searchArticles } from "@/lib/search";
+import { prisma } from "@/lib/prisma";
 import type { ArticleBodyBlock } from "@/lib/article-body";
 
 describe("bodyBlocksToText", () => {
@@ -36,5 +37,47 @@ describe("matchesQuery", () => {
 
   it("空白のみのクエリは false（未検索と区別するため呼び出し側でも空扱いにする）", () => {
     expect(matchesQuery("タイトル", "本文", "   ")).toBe(false);
+  });
+});
+
+describe("searchArticles ページネーション（拡張E1、結合テスト）", () => {
+  async function resetDb() {
+    await prisma.articleReaction.deleteMany();
+    await prisma.articleTag.deleteMany();
+    await prisma.articleSource.deleteMany();
+    await prisma.article.deleteMany();
+    await prisma.tag.deleteMany();
+  }
+
+  beforeEach(async () => {
+    await resetDb();
+    for (let i = 0; i < 25; i++) {
+      await prisma.article.create({
+        data: {
+          slug: `search-pg-${i}`,
+          title: `ヤスオ神プレイ集${i}`,
+          category: "5chの反応",
+          body: [{ type: "paragraph", text: "本文" }],
+          publishedAt: new Date(Date.now() - i * 1000),
+          status: "published",
+        },
+      });
+    }
+  });
+
+  it("一致件数をページ単位で区切って返す", async () => {
+    const page1 = await searchArticles("ヤスオ", 1, 20);
+    expect(page1.totalCount).toBe(25);
+    expect(page1.totalPages).toBe(2);
+    expect(page1.items).toHaveLength(20);
+
+    const page2 = await searchArticles("ヤスオ", 2, 20);
+    expect(page2.items).toHaveLength(5);
+  });
+
+  it("空クエリは1ページ目・空配列を返す", async () => {
+    const result = await searchArticles("", 1, 20);
+    expect(result.items).toEqual([]);
+    expect(result.totalPages).toBe(1);
   });
 });

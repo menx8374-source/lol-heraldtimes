@@ -13,7 +13,7 @@ export default function PrivacyPage() {
 
       <section className="mt-6">
         <h2 className="text-base font-bold">アクセス解析について</h2>
-        <p className="mt-2 text-sm leading-relaxed text-neutral-700">
+        <p className="mt-2 text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
           本サイトは、サービス改善のためアクセス解析ツール（Cookie 等の技術を利用する場合が
           あります）を利用することがあります。取得され得る情報は、ブラウザの種類・閲覧ページ・
           滞在時間・参照元等、個人を特定しない範囲の情報です。
@@ -22,7 +22,7 @@ export default function PrivacyPage() {
 
       <section className="mt-6">
         <h2 className="text-base font-bold">広告について</h2>
-        <p className="mt-2 text-sm leading-relaxed text-neutral-700">
+        <p className="mt-2 text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
           本サイトは第三者配信の広告サービス（Google AdSense 等）を利用する場合があります。
           これらの広告配信事業者は、Cookie 等を使用してユーザーの興味関心に応じた広告
           （パーソナライズ広告）を表示することがあります。Cookie の使用を希望されない場合は、
@@ -33,10 +33,10 @@ export default function PrivacyPage() {
 
       <section className="mt-6">
         <h2 className="text-base font-bold">個人情報の取り扱い</h2>
-        <p className="mt-2 text-sm leading-relaxed text-neutral-700">
+        <p className="mt-2 text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
           本サイトはコメント投稿・会員登録等の機能を提供しておらず、氏名・メールアドレス等の
           個人情報を能動的に収集していません。
-          <Link href="/contact" className="text-sky-700 hover:underline">
+          <Link href="/contact" className="text-sky-700 hover:underline dark:text-sky-400">
             お問い合わせ・掲載削除依頼
           </Link>
           の際にご提供いただいた情報は、そのお問い合わせへの対応目的の範囲内でのみ利用します。
@@ -45,7 +45,7 @@ export default function PrivacyPage() {
 
       <section className="mt-6">
         <h2 className="text-base font-bold">本ポリシーの変更</h2>
-        <p className="mt-2 text-sm leading-relaxed text-neutral-700">
+        <p className="mt-2 text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
           本ポリシーの内容は、法令の改正やサービス内容の変更に伴い、予告なく変更される場合が
           あります。変更後の内容は本ページに掲載した時点で効力を生じるものとします。
         </p>
@@ -53,7 +53,7 @@ export default function PrivacyPage() {
 
       <section className="mt-6">
         <h2 className="text-base font-bold">本ページの位置づけ</h2>
-        <p className="mt-2 text-sm leading-relaxed text-neutral-700">
+        <p className="mt-2 text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
           本ページの記載は一般的な案内であり、法律上の助言を目的とするものではありません。
         </p>
       </section>

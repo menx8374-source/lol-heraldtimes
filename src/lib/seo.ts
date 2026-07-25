@@ -5,18 +5,27 @@
 import { blockText, type ArticleBodyBlock } from "@/lib/article-body";
 
 const DESCRIPTION_MAX_LENGTH = 120;
+/** 記事カードの本文抜粋（拡張E1）はメタディスクリプションより短く、先頭〜80字程度にする。 */
+const EXCERPT_MAX_LENGTH = 80;
 
 /**
- * 記事本文ブロックからメタディスクリプション用の要約を作る。
- * 最初の段落（無ければ最初のブロック）のテキストを空白正規化し、上限長で省略する。
+ * 記事本文ブロックから要約テキストを作る。最初の段落（無ければ最初のブロック）の
+ * テキストを空白正規化し、`maxLength` で省略する。メタディスクリプション（120字）と
+ * 記事カードの本文抜粋（80字）の両方でこの共通ロジックを使う。
  */
-export function buildArticleDescription(blocks: ArticleBodyBlock[]): string {
+export function buildArticleDescription(
+  blocks: ArticleBodyBlock[],
+  maxLength: number = DESCRIPTION_MAX_LENGTH,
+): string {
   const firstParagraph = blocks.find((b) => b.type === "paragraph");
   const text = (firstParagraph ? blockText(firstParagraph) : blocks[0] ? blockText(blocks[0]) : "");
   const normalized = text.replace(/\s+/g, " ").trim();
-  return normalized.length <= DESCRIPTION_MAX_LENGTH
-    ? normalized
-    : `${normalized.slice(0, DESCRIPTION_MAX_LENGTH)}…`;
+  return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength)}…`;
+}
+
+/** 記事カード用の短い本文抜粋（拡張E1）。`buildArticleDescription` を短い上限長で流用する。 */
+export function buildArticleExcerpt(blocks: ArticleBodyBlock[]): string {
+  return buildArticleDescription(blocks, EXCERPT_MAX_LENGTH);
 }
 
 /**

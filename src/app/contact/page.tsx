@@ -17,7 +17,7 @@ export default function ContactPage() {
 
       <section className="mt-6">
         <h2 className="text-base font-bold">掲載内容の削除依頼（オプトアウト）</h2>
-        <p className="mt-2 text-sm leading-relaxed text-neutral-700">
+        <p className="mt-2 text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
           本サイトが引用・要約している掲示板（5ch 等）・SNS（Reddit 等）投稿の投稿者様、または
           当該内容の権利者様で、掲載内容の削除・修正を希望される場合は、下記の連絡先まで
           <strong>対象記事のURL・削除を希望する箇所・ご連絡先</strong>
@@ -25,10 +25,10 @@ export default function ContactPage() {
         </p>
       </section>
 
-      <section className="mt-4 rounded border border-neutral-300 bg-neutral-50 px-4 py-3">
-        <h2 className="text-sm font-bold text-neutral-600">連絡先</h2>
+      <section className="mt-4 rounded border border-neutral-300 bg-neutral-50 px-4 py-3 dark:border-neutral-700 dark:bg-neutral-900">
+        <h2 className="text-sm font-bold text-neutral-600 dark:text-neutral-400">連絡先</h2>
         <p className="mt-1 text-sm">
-          <a href={`mailto:${contactEmail}`} className="text-sky-700 hover:underline">
+          <a href={`mailto:${contactEmail}`} className="text-sky-700 hover:underline dark:text-sky-400">
             {contactEmail}
           </a>
         </p>
@@ -36,26 +36,26 @@ export default function ContactPage() {
 
       <section className="mt-6">
         <h2 className="text-base font-bold">その他のお問い合わせ</h2>
-        <p className="mt-2 text-sm leading-relaxed text-neutral-700">
+        <p className="mt-2 text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
           記事内容の誤りのご指摘・その他のお問い合わせも、上記と同じ連絡先で受け付けています。
         </p>
       </section>
 
       <section className="mt-6">
         <h2 className="text-base font-bold">対応にかかる時間について</h2>
-        <p className="mt-2 text-sm leading-relaxed text-neutral-700">
+        <p className="mt-2 text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
           内容の確認のため、ご連絡から対応完了まで一定の時間をいただく場合があります。あらかじめ
           ご了承ください。
         </p>
       </section>
 
-      <p className="mt-8 text-xs text-neutral-500">
+      <p className="mt-8 text-xs text-neutral-500 dark:text-neutral-400">
         あわせて
-        <Link href="/disclaimer" className="text-sky-700 hover:underline">
+        <Link href="/disclaimer" className="text-sky-700 hover:underline dark:text-sky-400">
           免責事項
         </Link>
         ・
-        <Link href="/privacy" className="text-sky-700 hover:underline">
+        <Link href="/privacy" className="text-sky-700 hover:underline dark:text-sky-400">
           プライバシーポリシー
         </Link>
         もご確認ください。
