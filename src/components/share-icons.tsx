@@ -120,6 +120,9 @@ export function ShareIconLink({
       rel="noopener noreferrer"
       aria-label={target.ariaLabel}
       title={target.ariaLabel}
+      /* 各SNSのブランド色（バッジ背景＋白アイコン等）を保つためのフック。ニュース記事風デザインの
+         リンク色（クリムゾン）を当てず、Tailwindのブランド色クラスを優先させる（globals.css参照）。 */
+      data-share-icon
       className={
         className ??
         `flex h-9 w-9 items-center justify-center rounded-full shadow-sm transition hover:opacity-80 ${target.badgeClassName}`

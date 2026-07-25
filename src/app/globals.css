@@ -106,11 +106,12 @@
   font-weight: 800;
 }
 
-/* リンク: main内は既定でアクセント色（見出しリンク等、後段でinheritに戻す箇所を除く）。 */
-.design-news main a {
+/* リンク: main内は既定でアクセント色（見出しリンク等、後段でinheritに戻す箇所を除く）。
+   ただしSNSシェアアイコン（data-share-icon）は各社ブランド色を保つためアクセント色を当てない。 */
+.design-news main a:not([data-share-icon]) {
   color: var(--news-accent);
 }
-.design-news main a:hover {
+.design-news main a:not([data-share-icon]):hover {
   text-decoration: underline;
 }
 /* 記事カード/PICKUPカードの見出しリンクは記事タイトルなので本文色のまま（アクセント色にしない）。 */
