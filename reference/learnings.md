@@ -62,9 +62,12 @@ status: active
 - 分類: impl
 - 記録日: 2026-07-25
 
-### Next.js等フレームワークの推移的依存にHigh脆弱性が出たら overrides でパッチ版に固定
-- 症状: 新規 Next.js プロジェクトで `npm audit` が postcss / sharp に High を報告。`npm audit fix --force` は Next 本体を大幅ダウングレード（破壊的）しようとする。
-- 原因: 脆弱性はフレームワーク自身の推移的依存にあり、フレームワークがパッチ版を取り込むまで各アプリに出続ける。naive な audit fix はメジャーダウングレードを提案する。
-- 次への適用: 破壊的ダウングレードは避け、`package.json` の `overrides`（npm）で当該依存をパッチ済みバージョン（同メジャー内）に引き上げてから `npm install` → ビルド・テスト・再監査で無影響を確認する。フレームワーク現行APIと互換のマイナー/パッチ版なら安全に0件化できる。
+### 推移的依存のHigh脆弱性は「本番影響の有無」で対応を分ける。overrides は互換性を検証してから
+- 症状: (a) 新規 Next.js プロジェクトで `npm audit` が postcss / sharp（本番ランタイム依存）に High を報告。`npm audit fix --force` は Next 本体を大幅ダウングレード（破壊的）しようとする。(b) 開発中に新しいアドバイザリが公開され、eslint ツールチェーン（brace-expansion→minimatch→eslint-plugin群、いずれも devDependencies）に High が多数出る。
+- 原因: 脆弱性はフレームワーク/ツールの推移的依存にあり、パッチ取り込みまで各アプリに出続ける。naive な audit fix はメジャーダウングレード/破壊的アップグレードを提案する。
+- 次への適用:
+  1. **まず本番影響を切り分ける**: 脆弱性が `dependencies`（本番バンドルに載る）か `devDependencies`（eslint/ビルド時のみ）かを見る。**devDependency のみ（eslint 等）なら本番の攻撃面はゼロ**なので、緊急でブロッカー扱いにせず、破壊的変更を伴う修正は見送って明示的に記録する（正攻法は該当ツールのメジャー更新で、スコープを分けて対応）。
+  2. 本番ランタイム依存なら、破壊的ダウングレードを避け `package.json` の `overrides`（npm）でパッチ版に引き上げ、**`npm install` → ビルド・テスト・lint・再監査で無影響を必ず確認**してから確定する。
+  3. **overrides で全インスタンスを1バージョンに強制する際は、非互換な複数メジャーが同居する依存に注意**。例: `brace-expansion` を `^5` に強制すると、`minimatch@3`（eslint が使用）の期待と食い違い `@eslint/config-array` が例外を投げて lint が壊れた。監査は0件になっても lint/build が壊れるなら override は取り消す（監査の緑より本体ツールの動作を優先）。
 - 分類: ops
 - 記録日: 2026-07-25
