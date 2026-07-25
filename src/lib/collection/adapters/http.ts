@@ -30,7 +30,7 @@ export function dedupeBySourceUrl(items: RawCollectionItem[]): RawCollectionItem
   return result;
 }
 
-export type FetchJsonOptions = {
+export type FetchSafeOptions = {
   /** ログ接頭辞（例 "riot-datadragon" / "reddit"）。 */
   logLabel?: string;
   /** ログに出す非秘密の識別情報（URL・サブレディット名等）。シークレットを渡さないこと。 */
@@ -39,13 +39,15 @@ export type FetchJsonOptions = {
 };
 
 /**
- * 外部APIのJSONをタイムアウト付きで安全に取得する。`init` はメソッド・ヘッダ・ボディをそのまま
- * 渡せる（GET/POST両対応）。失敗（HTTPエラー・不正JSON・ネット断・タイムアウト）は `null` を返す。
+ * タイムアウト付きで外部を取得し、レスポンス本文を `extract` で取り出す共通実装。
+ * 失敗（HTTPエラー・ネット断・タイムアウト・本文抽出失敗）は例外を投げず `null` を返す。
+ * JSON/テキストの違いは `extract`（res.json()/res.text()）だけなので、骨格はここに一元化する。
  */
-export async function fetchJsonSafe<T>(
+async function fetchSafe<T>(
   url: string,
-  init: RequestInit = {},
-  opts: FetchJsonOptions = {},
+  init: RequestInit,
+  opts: FetchSafeOptions,
+  extract: (res: Response) => Promise<T>,
 ): Promise<T | null> {
   const { logLabel = "collection", context, timeoutMs = COLLECTION_FETCH_TIMEOUT_MS } = opts;
   const suffix = context ? ` (${context})` : "";
@@ -55,9 +57,33 @@ export async function fetchJsonSafe<T>(
       console.error(`[${logLabel}] HTTPエラー: status=${res.status}${suffix}`);
       return null;
     }
-    return (await res.json()) as T;
+    return await extract(res);
   } catch (err) {
     console.error(`[${logLabel}] 取得に失敗しました${suffix}`, err instanceof Error ? err.message : err);
     return null;
   }
+}
+
+/**
+ * 外部APIのJSONをタイムアウト付きで安全に取得する。`init` はメソッド・ヘッダ・ボディをそのまま
+ * 渡せる（GET/POST両対応）。失敗（HTTPエラー・不正JSON・ネット断・タイムアウト）は `null` を返す。
+ */
+export function fetchJsonSafe<T>(
+  url: string,
+  init: RequestInit = {},
+  opts: FetchSafeOptions = {},
+): Promise<T | null> {
+  return fetchSafe<T>(url, init, opts, (res) => res.json() as Promise<T>);
+}
+
+/**
+ * 外部エンドポイントのプレーンテキスト（JSONではないレスポンス。例: 5chのsubject.txt/dat）を
+ * タイムアウト付きで安全に取得する。`fetchJsonSafe` と同型で、失敗時は `null` を返す。
+ */
+export function fetchTextSafe(
+  url: string,
+  init: RequestInit = {},
+  opts: FetchSafeOptions = {},
+): Promise<string | null> {
+  return fetchSafe<string>(url, init, opts, (res) => res.text());
 }

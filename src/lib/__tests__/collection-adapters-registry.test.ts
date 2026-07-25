@@ -3,6 +3,7 @@ import { getAdapter, getAllAdapters } from "@/lib/collection/adapters";
 import { RiotDataDragonAdapter } from "@/lib/collection/adapters/riot-datadragon";
 import { RedditAdapter } from "@/lib/collection/adapters/reddit";
 import { ClipAdapter } from "@/lib/collection/adapters/clip";
+import { FiveChAdapter } from "@/lib/collection/adapters/fivech";
 import { MockSourceAdapter } from "@/lib/collection/adapters/mock";
 
 describe("getAdapter (live)", () => {
@@ -24,16 +25,18 @@ describe("getAdapter (live)", () => {
     expect(adapter.sourceType).toBe("clip");
   });
 
-  it("5chは未実装のため分かりやすいエラーを投げる", () => {
-    expect(() => getAdapter("5ch", "live")).toThrow(/未実装/);
+  it("5chは実装済みのlive(FiveChAdapter)を返す(拡張E18)", () => {
+    const adapter = getAdapter("5ch", "live");
+    expect(adapter).toBeInstanceOf(FiveChAdapter);
+    expect(adapter.sourceType).toBe("5ch");
   });
 });
 
 describe("getAllAdapters (live)", () => {
-  it("live実装があるriot・reddit・clipを含み、未実装(5ch)はスキップする(全体を止めない)", () => {
+  it("live実装が揃った全4ソース(riot・reddit・clip・5ch)を含む(拡張E18でフェーズ2完了)", () => {
     const adapters = getAllAdapters("live");
-    expect(adapters).toHaveLength(3);
-    expect(adapters.map((a) => a.sourceType).sort()).toEqual(["clip", "reddit", "riot"]);
+    expect(adapters).toHaveLength(4);
+    expect(adapters.map((a) => a.sourceType).sort()).toEqual(["5ch", "clip", "reddit", "riot"]);
   });
 });
 
