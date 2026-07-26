@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { composeArticleBody, extractPatchChangesDeterministic } from "@/lib/generation/compose";
 import { MockLLMClient, type LLMClient, type LLMMessage } from "@/lib/generation/llm-client";
 import { hasStructuredHeadings, blockText } from "@/lib/article-body";
@@ -26,8 +26,24 @@ class ThrowingLLMClient implements LLMClient {
   }
 }
 
+/**
+ * env `PATCH_ARTICLE_MODE` を一時的に指定して関数を実行する(拡張E41 F-E41-2)。
+ * "summary"を指定するテストは、後でLLMまとめに戻すとき用に残した従来のE40 3段フォールバックの
+ * 回帰確認用。実行後は元の値(未設定含む)に復元する。
+ */
+async function withPatchMode<T>(mode: "fact" | "summary", fn: () => Promise<T>): Promise<T> {
+  const prev = process.env.PATCH_ARTICLE_MODE;
+  process.env.PATCH_ARTICLE_MODE = mode;
+  try {
+    return await fn();
+  } finally {
+    if (prev === undefined) delete process.env.PATCH_ARTICLE_MODE;
+    else process.env.PATCH_ARTICLE_MODE = prev;
+  }
+}
+
 describe("composeArticleBody", () => {
-  it("Riot公式(riot)由来は「速報」→「要点整理」→「まとめ」の見出し構成になる", async () => {
+  it("Riot公式(riot)由来は既定(PATCH_ARTICLE_MODE未設定)で事実速報(見出し「パッチ<番号>が公開」＋事実段落＋出典)になる（拡張E41 F-E41-2）", async () => {
     const body = await composeArticleBody(
       {
         sourceType: "riot",
@@ -35,6 +51,27 @@ describe("composeArticleBody", () => {
         content: "本パッチではジャングルモンスターの経験値量が全体的に引き下げられ、序盤のレベル差がつきにくくなる調整が入った。",
       },
       llm,
+    );
+    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headings).toEqual(["パッチ14.6が公開"]);
+    expect(hasStructuredHeadings(body)).toBe(true);
+    // 事実速報はLLM非依存の定型文のみで、引用(quote)ブロックは使わない
+    expect(body.some((b) => b.type === "quote")).toBe(false);
+    const bodyText = body.map(blockText).join("");
+    expect(bodyText).not.toContain("自動要約では");
+    expect(bodyText).toContain("14.6");
+  });
+
+  it("PATCH_ARTICLE_MODE=summaryのとき、riot由来(短い汎用content)は従来どおり「速報」→「要点整理」→「まとめ」の見出し構成になる(回帰なし)", async () => {
+    const body = await withPatchMode("summary", () =>
+      composeArticleBody(
+        {
+          sourceType: "riot",
+          title: "パッチ14.6ノート公開",
+          content: "本パッチではジャングルモンスターの経験値量が全体的に引き下げられ、序盤のレベル差がつきにくくなる調整が入った。",
+        },
+        llm,
+      ),
     );
     const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
     expect(headings).toEqual(["速報", "要点整理", "まとめ"]);
@@ -94,10 +131,12 @@ describe("composeArticleBody", () => {
     expect(reactionBlocks.every((b) => b.type === "reaction" && b.name === "海外プレイヤーさん")).toBe(true);
   });
 
-  it("引用ブロックには出典ラベル(source)が付与される(riot由来)", async () => {
-    const body = await composeArticleBody(
-      { sourceType: "riot", title: "テスト発表", content: "これはテスト用の公式発表内容です。詳細は追って告知される。" },
-      llm,
+  it("PATCH_ARTICLE_MODE=summaryのとき、引用ブロックには出典ラベル(source)が付与される(riot由来、回帰なし)", async () => {
+    const body = await withPatchMode("summary", () =>
+      composeArticleBody(
+        { sourceType: "riot", title: "テスト発表", content: "これはテスト用の公式発表内容です。詳細は追って告知される。" },
+        llm,
+      ),
     );
     const quotes = body.filter((b) => b.type === "quote");
     expect(quotes.length).toBeGreaterThan(0);
@@ -496,6 +535,71 @@ describe("composeArticleBody（NG文の削除、拡張E36 F-E36-3。伏字化(�
   });
 });
 
+describe("composeArticleBody（表示レスの返信先(アンカー先)の引用、拡張E41 F-E41-1）", () => {
+  it("表示レスが>>Nを含み、Nがcontentに存在するとき、Nも文脈として追加されレス番号順(N→表示レス)で並ぶ", async () => {
+    const content =
+      "58: 拮抗してるゲームだった。\n59: 何でもない話。\n60: これも何でもない話。\n61: >>58 拮抗してるゲームが面白かった。";
+    const stub = new StubLLMClient(JSON.stringify({ keep: [3], emphasize: [] })); // index3 = レス61のみ選定
+    const body = await composeArticleBody({ sourceType: "5ch", title: "アンカー文脈テスト", content }, stub);
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(2);
+    expect(reactions.map((b) => (b.type === "reaction" ? b.number : -1))).toEqual([58, 61]);
+    // 追加された文脈レス(58)は全行・強調なし
+    const context = reactions[0];
+    expect(context.type === "reaction" && context.lines.map((l) => l.text)).toEqual(["拮抗してるゲームだった。"]);
+    expect(context.type === "reaction" && context.emphasis).toBeUndefined();
+    expect(context.type === "reaction" && context.emphasisColor).toBeUndefined();
+  });
+
+  it("参照先(>>N)が存在しない番号なら追加されない(従来どおり)", async () => {
+    const content = "58: 拮抗してるゲームだった。\n61: >>999 存在しない番号への返信。";
+    const stub = new StubLLMClient(JSON.stringify({ keep: [1], emphasize: [] })); // index1 = レス61のみ選定
+    const body = await composeArticleBody({ sourceType: "5ch", title: "アンカー不在テスト", content }, stub);
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(1);
+    expect(reactions[0].type === "reaction" && reactions[0].number).toBe(61);
+  });
+
+  it("アンカー先追加は1階層のみ(追加した文脈レスがさらに参照する先は辿らない)", async () => {
+    const content =
+      "50: 更に前の本文。\n58: >>50 それな。拮抗してるゲームだった。\n59: 何でもない話。\n61: >>58 拮抗してるゲームが面白かった。";
+    const stub = new StubLLMClient(JSON.stringify({ keep: [3], emphasize: [] })); // index3 = レス61のみ選定
+    const body = await composeArticleBody({ sourceType: "5ch", title: "1階層のみテスト", content }, stub);
+    const reactions = body.filter((b) => b.type === "reaction");
+    // 61の参照先58は追加されるが、58がさらに参照する50までは辿らない
+    expect(reactions.map((b) => (b.type === "reaction" ? b.number : -1))).toEqual([58, 61]);
+  });
+
+  it("keepで行を絞った場合、絞った行のアンカーのみ対象になる(アンカー行を除外すれば追加されない)", async () => {
+    const content = "58: 参照される側の本文。\n61: 普通のコメント。\n>>58 それな。";
+    // 行0(アンカー無し)のみ採用: アンカーが対象行に含まれないため58は追加されない
+    const stubExcluding = new StubLLMClient(JSON.stringify({ keep: [{ index: 1, lines: [0] }], emphasize: [] }));
+    const bodyExcluding = await composeArticleBody(
+      { sourceType: "5ch", title: "行絞り込みテスト(除外)", content },
+      stubExcluding,
+    );
+    const reactionsExcluding = bodyExcluding.filter((b) => b.type === "reaction");
+    expect(reactionsExcluding).toHaveLength(1);
+    expect(reactionsExcluding[0].type === "reaction" && reactionsExcluding[0].number).toBe(61);
+
+    // 行1(アンカー行)を採用: アンカーが対象行に含まれるため58が追加される
+    const stubIncluding = new StubLLMClient(JSON.stringify({ keep: [{ index: 1, lines: [1] }], emphasize: [] }));
+    const bodyIncluding = await composeArticleBody(
+      { sourceType: "5ch", title: "行絞り込みテスト(包含)", content },
+      stubIncluding,
+    );
+    const reactionsIncluding = bodyIncluding.filter((b) => b.type === "reaction");
+    expect(reactionsIncluding.map((b) => (b.type === "reaction" ? b.number : -1))).toEqual([58, 61]);
+  });
+
+  it("mock(全レス選定)では追加対象の参照先も既に選ばれているため件数は変化しない(回帰なし)", async () => {
+    const content = "1: >>2 それな。\n2: 元の発言。";
+    const body = await composeArticleBody({ sourceType: "5ch", title: "mock回帰テスト", content }, new MockLLMClient());
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(2);
+  });
+});
+
 describe("composeArticleBody（長レスのレス内文抽出、拡張E28 F-E28-2）", () => {
   // レス2(index=1)は3行構成の長レス。0行目・2行目は話題に沿った行、1行目は雑談行という想定。
   const multiLineContent =
@@ -577,15 +681,23 @@ describe("composeArticleBody（長レスのレス内文抽出、拡張E28 F-E28-
     ]);
   });
 
-  it("抽出後の行にNG除外・行強調・アンカーが整合的に効く（抽出前の行indexに依存しない）", async () => {
+  it("抽出後の行にNG除外・行強調・アンカーが整合的に効く（抽出前の行indexに依存しない）。拡張E41 F-E41-1で参照先(>>1)のレス1も文脈として追加される", async () => {
     // レス2(index=1): 0行目に「>>1」アンカー、1行目にNGワード「カス」、2行目に強調キーワード「草」。
     // keepでlines=[0,2]を指定し、NGワードを含む1行目を除外する。
     const content = "1: 最初のレス。\n2: >>1 その通り。\nこれはカスだと思う。\nこれは草生えるわ。\n3: 三番目。";
     const stub = new StubLLMClient(JSON.stringify({ keep: [{ index: 1, lines: [0, 2] }], emphasize: [1] }));
     const body = await composeArticleBody({ sourceType: "5ch", title: "整合性テスト", content }, stub);
     const reactions = body.filter((b) => b.type === "reaction");
-    expect(reactions).toHaveLength(1);
-    const res = reactions[0];
+    // レス2が>>1を参照しているため、参照先のレス1が文脈として追加され、レス番号順(1→2)で並ぶ(拡張E41 F-E41-1)。
+    expect(reactions).toHaveLength(2);
+    const context = reactions[0];
+    expect(context.type === "reaction" && context.number).toBe(1);
+    // 追加された文脈レスは全行・強調なし
+    expect(context.type === "reaction" && context.lines.map((l) => l.text)).toEqual(["最初のレス。"]);
+    expect(context.type === "reaction" && context.emphasis).toBeUndefined();
+
+    const res = reactions[1];
+    expect(res.type === "reaction" && res.number).toBe(2);
     expect(res.type === "reaction" && res.lines.map((l) => l.text)).toEqual([">>1 その通り。", "これは草生えるわ。"]);
     // NGワード「カス」を含む行はLLM選定(lines指定)の時点で除外されているので、そもそもNGワードは出てこない
     expect(res.type === "reaction" && res.lines.every((l) => findNgWord(l.text) === null)).toBe(true);
@@ -599,6 +711,18 @@ describe("composeArticleBody（長レスのレス内文抽出、拡張E28 F-E28-
 });
 
 describe("composeArticleBody（riot公式パッチノートのまとめ記事生成、拡張E34 F-E34-2）", () => {
+  // 拡張E41 F-E41-2でriotの既定は事実速報(fact)になったため、本describe(従来のsummary挙動)は
+  // PATCH_ARTICLE_MODE=summaryに固定して実行する(後でLLMまとめに戻す用にコード・テストを残す)。
+  let prevPatchMode: string | undefined;
+  beforeAll(() => {
+    prevPatchMode = process.env.PATCH_ARTICLE_MODE;
+    process.env.PATCH_ARTICLE_MODE = "summary";
+  });
+  afterAll(() => {
+    if (prevPatchMode === undefined) delete process.env.PATCH_ARTICLE_MODE;
+    else process.env.PATCH_ARTICLE_MODE = prevPatchMode;
+  });
+
   // PATCH_NOTES_MIN_LENGTH(300字)以上の「実パッチノート本文らしいcontent」(汎用の短いcontentとは別物)。
   const patchNotesContent = "実際のパッチノート本文らしいテキスト。".repeat(30);
 
@@ -1024,6 +1148,18 @@ describe("extractPatchChangesDeterministic（変更点の決定的・逐語抽�
 });
 
 describe("composeArticleBody（riotパッチ記事の3段フォールバック: LLM要約→決定的抽出→クリーン定型、拡張E40 F-E40-2）", () => {
+  // 拡張E41 F-E41-2でriotの既定は事実速報(fact)になったため、本describe(従来のsummary挙動)は
+  // PATCH_ARTICLE_MODE=summaryに固定して実行する(後でLLMまとめに戻す用にコード・テストを残す)。
+  let prevPatchMode: string | undefined;
+  beforeAll(() => {
+    prevPatchMode = process.env.PATCH_ARTICLE_MODE;
+    process.env.PATCH_ARTICLE_MODE = "summary";
+  });
+  afterAll(() => {
+    if (prevPatchMode === undefined) delete process.env.PATCH_ARTICLE_MODE;
+    else process.env.PATCH_ARTICLE_MODE = prevPatchMode;
+  });
+
   /** 実パッチノートらしいノイズ(intro/クレジット/TFT導線, ⇒を含まない)を大量に含みつつ、
    * チャンピオン別の「⇒」変更行を複数含む、実運用相当のfixture(PATCH_NOTES_MIN_LENGTH以上)。 */
   function buildRealisticPatchFixture(): string {

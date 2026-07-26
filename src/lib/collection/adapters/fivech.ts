@@ -167,12 +167,17 @@ export function parseDatReses(datText: string): DatRes[] {
  * - 本文が空のレスは候補から除外する。
  * - レス1（スレ主題/OP）は文脈として常に含める。
  * - 残り枠は被参照カウント（他レス本文の `>>number` から参照された回数）降順、同数はレス番号昇順で埋める。
+ * - 拡張E41 F-E41-1: 選抜したレスが `>>N` で直接参照する先Nが `valid` に存在すれば、まだ選ばれて
+ *   いなくても `maxReses` 内でbest-effortに含める（収集ダンプ自体に返信先が無いとcompose側でも
+ *   復元できないため）。上限に達している場合は、被参照カウントが最も低い非OP・非アンカー先のレスを
+ *   1つ落として枠を空ける（決定論的）。落とせる枠が無ければその参照先は諦める（上限厳守）。
  * - 返り値は元のレス番号のまま**昇順**に整列する（`parseThreadReses` の下流互換のため元番号を維持）。
  * 逐語は不変（選定のみ・本文は書き換えない）。範囲外/欠番アンカーを含んでいても壊れない。
  */
 export function selectHighlightReses(reses: DatRes[], maxReses: number): DatRes[] {
   const valid = reses.filter((r) => r.bodyLines.length > 0);
   if (valid.length === 0) return [];
+  const byNumber = new Map(valid.map((r) => [r.number, r] as const));
 
   const anchorCounts = new Map<number, number>();
   for (const r of valid) {
@@ -196,6 +201,34 @@ export function selectHighlightReses(reses: DatRes[], maxReses: number): DatRes[
     if (selected.length >= limit) break;
     selected.push(r);
   }
+
+  // 選抜レスが直接参照する先(>>N)も、まだ選ばれていなければ含める(拡張E41 F-E41-1)。
+  const selectedNumbers = new Set(selected.map((r) => r.number));
+  const anchorTargets = [...new Set(selected.flatMap((r) => extractAnchors(r.bodyLines)))].filter(
+    (n) => byNumber.has(n) && !selectedNumbers.has(n),
+  );
+
+  for (const target of anchorTargets) {
+    if (selected.length < limit) {
+      selected.push(byNumber.get(target)!);
+      selectedNumbers.add(target);
+      continue;
+    }
+    // 上限到達時は、被参照カウントが最も低い非OP・非アンカー先のレスを1つ落として枠を空ける。
+    const evictable = selected
+      .map((r, idx) => ({ r, idx }))
+      .filter(({ r }) => r.number !== 1 && !anchorTargets.includes(r.number))
+      .sort((a, b) => {
+        const diff = (anchorCounts.get(a.r.number) ?? 0) - (anchorCounts.get(b.r.number) ?? 0);
+        return diff !== 0 ? diff : b.r.number - a.r.number;
+      });
+    const toEvict = evictable[0];
+    if (!toEvict) continue; // 落とせる枠が無ければこの参照先は諦める(上限厳守)
+    selectedNumbers.delete(toEvict.r.number);
+    selected.splice(toEvict.idx, 1, byNumber.get(target)!);
+    selectedNumbers.add(target);
+  }
+
   return selected.slice(0, limit).sort((a, b) => a.number - b.number);
 }
 

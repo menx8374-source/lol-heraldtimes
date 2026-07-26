@@ -12,6 +12,7 @@ import {
   parseDatReses,
   parseSubjectText,
   selectHighlightReses,
+  type DatRes,
   type SubjectEntry,
 } from "@/lib/collection/adapters/fivech";
 import { parseThreadReses, extractAnchors } from "@/lib/generation/thread-format";
@@ -262,6 +263,46 @@ describe("純関数: parseDatReses / selectHighlightReses (A1: 盛り上がっ�
     expect(content).toBe("1: 質問です\n\n2: 何でもない話1\n\n4: 本当に良い意見だと思う");
     const reses = parseThreadReses(content);
     expect(reses.map((r) => r.number)).toEqual([1, 2, 4]);
+  });
+});
+
+describe("selectHighlightReses（選抜レスの返信先の自己完結化、拡張E41 F-E41-1）", () => {
+  it("選抜レスが直接>>Nで参照する先Nがvalidに存在すれば、上限到達時でも被参照カウント最小のレスを1件落として枠を空け、maxReses内に含める", () => {
+    const reses: DatRes[] = [
+      { number: 1, bodyLines: ["質問です"] }, // OP
+      { number: 2, bodyLines: [">>5 わかる、それは大事"] }, // 被参照カウント2(6,7から)。5を参照する
+      { number: 3, bodyLines: ["ただの雑談B"] }, // 被参照カウント1(8から)
+      { number: 5, bodyLines: ["元ネタの指摘レス"] }, // 被参照カウント1(2から)。res2の参照先(本来の主役)
+      { number: 6, bodyLines: [">>2 そうだね"] },
+      { number: 7, bodyLines: [">>2 そうだね"] },
+      { number: 8, bodyLines: [">>3 それな"] },
+    ];
+    // 上限3(OP+2枠): 純粋な被参照カウント順では[1,2,3]が選ばれ、res2が参照する5が漏れてしまう。
+    const selected = selectHighlightReses(reses, 3);
+    // res3(被参照1、非アンカー先)が落とされ、代わりにres2の参照先res5が含まれる。上限は超えない。
+    expect(selected.map((r) => r.number)).toEqual([1, 2, 5]);
+    expect(selected.length).toBeLessThanOrEqual(3);
+    // 逐語(本文)は書き換わっていない
+    expect(selected.find((r) => r.number === 5)?.bodyLines).toEqual(["元ネタの指摘レス"]);
+  });
+
+  it("枠に余裕があれば、被参照カウント順の選抜結果はそのままに参照先をそのまま追加する", () => {
+    const reses: DatRes[] = [
+      { number: 1, bodyLines: ["質問です"] },
+      { number: 2, bodyLines: [">>5 わかる"] },
+      { number: 5, bodyLines: ["元ネタ"] },
+    ];
+    const selected = selectHighlightReses(reses, 10);
+    expect(selected.map((r) => r.number)).toEqual([1, 2, 5]);
+  });
+
+  it("参照先が存在しない番号(欠番)なら追加されない(従来どおり壊れない)", () => {
+    const reses: DatRes[] = [
+      { number: 1, bodyLines: ["質問です"] },
+      { number: 2, bodyLines: [">>999 存在しない番号への返信"] },
+    ];
+    const selected = selectHighlightReses(reses, 2);
+    expect(selected.map((r) => r.number)).toEqual([1, 2]);
   });
 });
 

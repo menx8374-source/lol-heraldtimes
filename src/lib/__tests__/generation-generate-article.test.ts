@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   generateArticleForCandidate,
   GenerationError,
@@ -9,6 +9,22 @@ import { MockLLMClient, type LLMClient, type LLMMessage } from "@/lib/generation
 import { blockText, parseArticleBody } from "@/lib/article-body";
 import { pickDeterministicChampionSplashUrl } from "@/lib/generation/champion-thumbnail";
 import { LLM_TITLE_SYSTEM_PROMPT } from "@/lib/generation/title";
+
+/**
+ * env `PATCH_ARTICLE_MODE` を一時的に指定して関数を実行する(拡張E41 F-E41-2)。
+ * "summary"は、後でLLMまとめに戻すとき用に残した従来のE40 3段フォールバックの回帰確認用。
+ * 実行後は元の値(未設定含む)に復元する。
+ */
+async function withPatchMode<T>(mode: "fact" | "summary", fn: () => Promise<T>): Promise<T> {
+  const prev = process.env.PATCH_ARTICLE_MODE;
+  process.env.PATCH_ARTICLE_MODE = mode;
+  try {
+    return await fn();
+  } finally {
+    if (prev === undefined) delete process.env.PATCH_ARTICLE_MODE;
+    else process.env.PATCH_ARTICLE_MODE = prev;
+  }
+}
 
 const llm = new MockLLMClient();
 
@@ -46,6 +62,35 @@ describe("generateArticleForCandidate（成功パス）", () => {
     expect(reddit.category).toBe("海外の反応");
   });
 });
+
+describe("generateArticleForCandidate（riotパッチ記事の構成モード切替、拡張E41 F-E41-2）", () => {
+  it("既定(PATCH_ARTICLE_MODE未設定)ではriotは事実速報になり、受け入れ基準(最低300字・出典付与)を満たす", async () => {
+    const result = await generateArticleForCandidate(candidate({ sourceType: "riot" }), llm);
+    const headings = result.body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headings).toEqual([`パッチ${extractPatchNumberFromTitle(candidate().title)}が公開`]);
+    const totalLength = result.body.reduce((sum, b) => sum + blockText(b).length, 0);
+    expect(totalLength).toBeGreaterThanOrEqual(MIN_BODY_LENGTH);
+    expect(result.sources[0].url).toBe(candidate().sourceUrl);
+  });
+
+  it("PATCH_ARTICLE_MODE=summaryにすると同じ候補でも従来の速報＋要点整理(composeFactBody)に切り替わる", async () => {
+    const factResult = await generateArticleForCandidate(candidate({ sourceType: "riot" }), llm);
+    const summaryResult = await withPatchMode("summary", () =>
+      generateArticleForCandidate(candidate({ sourceType: "riot" }), llm),
+    );
+    const factHeadings = factResult.body.filter((b) => b.type === "heading").map((b) => b.text);
+    const summaryHeadings = summaryResult.body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(factHeadings).not.toEqual(summaryHeadings);
+    expect(summaryHeadings).toEqual(["速報", "要点整理", "まとめ"]);
+  });
+});
+
+/** テスト用: candidate.titleから"数字.数字"のパッチ番号を取り出す(compose.tsのextractPatchNumberLabelと同じ抽出対象を確認する簡易ヘルパー)。 */
+function extractPatchNumberFromTitle(title: string): string {
+  const m = title.match(/\d+\.\d+/);
+  if (!m) throw new Error("テスト用candidateのtitleにパッチ番号が含まれていません");
+  return m[0];
+}
 
 describe("generateArticleForCandidate（clip由来=埋め込み紹介形式、拡張E17）", () => {
   function clipCandidate(overrides: Partial<GenerationCandidate> = {}): GenerationCandidate {
@@ -297,6 +342,18 @@ describe("generateArticleForCandidate（反応記事の決定論チャンピオ�
 });
 
 describe("generateArticleForCandidate（riot公式パッチノートのまとめ記事、拡張E34 F-E34-2）", () => {
+  // 拡張E41 F-E41-2でriotの既定は事実速報(fact)になったため、本describe(従来のsummary挙動)は
+  // PATCH_ARTICLE_MODE=summaryに固定して実行する(後でLLMまとめに戻す用にコード・テストを残す)。
+  let prevPatchMode: string | undefined;
+  beforeAll(() => {
+    prevPatchMode = process.env.PATCH_ARTICLE_MODE;
+    process.env.PATCH_ARTICLE_MODE = "summary";
+  });
+  afterAll(() => {
+    if (prevPatchMode === undefined) delete process.env.PATCH_ARTICLE_MODE;
+    else process.env.PATCH_ARTICLE_MODE = prevPatchMode;
+  });
+
   const patchNotesContent = "実際のパッチノート本文らしいテキスト。".repeat(30);
   const validSummaryJson = JSON.stringify({
     buffed: [
@@ -402,6 +459,18 @@ describe("generateArticleForCandidate（タイトル決定、拡張E40 F-E40-1: 
 });
 
 describe("generateArticleForCandidate（riotパッチ記事の決定的抽出フォールバック、拡張E40 F-E40-2）", () => {
+  // 拡張E41 F-E41-2でriotの既定は事実速報(fact)になったため、本describe(従来のsummary挙動)は
+  // PATCH_ARTICLE_MODE=summaryに固定して実行する(後でLLMまとめに戻す用にコード・テストを残す)。
+  let prevPatchMode: string | undefined;
+  beforeAll(() => {
+    prevPatchMode = process.env.PATCH_ARTICLE_MODE;
+    process.env.PATCH_ARTICLE_MODE = "summary";
+  });
+  afterAll(() => {
+    if (prevPatchMode === undefined) delete process.env.PATCH_ARTICLE_MODE;
+    else process.env.PATCH_ARTICLE_MODE = prevPatchMode;
+  });
+
   /** 実パッチノートらしいノイズを大量に含みつつ、チャンピオン別の「⇒」変更行を複数含むfixture。
    * generation-compose.test.ts の同名関数と同じ設計方針(ノイズを大きくして逐語一致率を抑える)。 */
   function buildRealisticPatchFixture(): string {
@@ -467,28 +536,38 @@ describe("generateArticleForCandidate（失敗パス）", () => {
     );
   });
 
-  it("内容が空で本文が最低文字数に満たない候補はGenerationErrorになる", async () => {
-    await expect(generateArticleForCandidate(candidate({ content: "" }), llm)).rejects.toBeInstanceOf(
-      GenerationError,
-    );
+  // 拡張E41 F-E41-2: 既定(fact)のriot記事は本文の長短に関わらず一定量の事実速報テキストを
+  // 生成するため、riotでは最低文字数チェックを再現できなくなった。従来のsummaryモード
+  // (composeFactBody、contentに依存する本文量)で最低文字数チェックの回帰を確認する。
+  it("PATCH_ARTICLE_MODE=summaryのとき、内容が空で本文が最低文字数に満たない候補はGenerationErrorになる(回帰なし)", async () => {
+    await withPatchMode("summary", async () => {
+      await expect(generateArticleForCandidate(candidate({ content: "" }), llm)).rejects.toBeInstanceOf(
+        GenerationError,
+      );
+    });
   });
 
-  it("生成文が元ソースの逐語コピーに近い場合はGenerationErrorになり、正常な候補の生成は妨げない", async () => {
-    // 常に元本文をそのまま返す「悪い」LLMクライアント(逐語コピー再現用スタブ)
-    class VerbatimCopyLLMClient implements LLMClient {
-      constructor(private readonly sourceContent: string) {}
-      async generate(_messages: LLMMessage[]): Promise<string> {
-        return this.sourceContent.repeat(5); // 300字以上にするため繰り返すが、内容は完全コピー
+  // 拡張E41 F-E41-2: fact既定のriot記事はLLMを呼ばない(composePatchFactFlashBody)ため、逐語コピーを
+  // 返す「悪いLLM」を再現できない。従来のsummaryモード(composeFactBody、LLM出力をそのまま使う)で
+  // 逐語コピー検知の回帰を確認する。
+  it("PATCH_ARTICLE_MODE=summaryのとき、生成文が元ソースの逐語コピーに近い場合はGenerationErrorになり、正常な候補の生成は妨げない(回帰なし)", async () => {
+    await withPatchMode("summary", async () => {
+      // 常に元本文をそのまま返す「悪い」LLMクライアント(逐語コピー再現用スタブ)
+      class VerbatimCopyLLMClient implements LLMClient {
+        constructor(private readonly sourceContent: string) {}
+        async generate(_messages: LLMMessage[]): Promise<string> {
+          return this.sourceContent.repeat(5); // 300字以上にするため繰り返すが、内容は完全コピー
+        }
       }
-    }
-    const c = candidate();
-    const badLlm = new VerbatimCopyLLMClient(c.content);
+      const c = candidate();
+      const badLlm = new VerbatimCopyLLMClient(c.content);
 
-    await expect(generateArticleForCandidate(c, badLlm)).rejects.toBeInstanceOf(GenerationError);
+      await expect(generateArticleForCandidate(c, badLlm)).rejects.toBeInstanceOf(GenerationError);
 
-    // 同じ候補集合の中の別候補(正常なMockLLMClient)は影響を受けず生成継続できる
-    const other = await generateArticleForCandidate(candidate({ id: "c2" }), llm);
-    expect(other.body.length).toBeGreaterThan(0);
+      // 同じ候補集合の中の別候補(正常なMockLLMClient)は影響を受けず生成継続できる
+      const other = await generateArticleForCandidate(candidate({ id: "c2" }), llm);
+      expect(other.body.length).toBeGreaterThan(0);
+    });
   });
 });
 

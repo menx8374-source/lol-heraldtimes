@@ -258,6 +258,10 @@ function removeNgSentences(text: string): string {
  * （moderateArticleContent の ng_word 保留を避けて公開する意図は維持しつつ、逐語＋伏字なしにする）。
  * 拡張E33: 反応ブロックが2件以上あるのにどのレスにも強調が付かない場合は、決定論フォールバック
  * （applyMinColorFallback）で最低限の色付き強調を補い、全黒字の記事が出ないようにする。
+ * 拡張E41 F-E41-1: 選ばれた表示レスが実際に表示する行（keepLines指定があればその行、なければ全行）に
+ * `>>N` アンカーを含み、参照先Nが reses に存在し未選択なら、文脈としてそのレスも表示に追加する
+ * （全行・強調なし。追加した文脈レスがさらに参照する先は辿らない＝1階層のみ）。追加後は元スレ順
+ * （index昇順）に整列してから組む。
  */
 async function buildReactionBlocks(
   candidate: GenerationCandidateInput,
@@ -267,11 +271,28 @@ async function buildReactionBlocks(
   const reses = parseThreadReses(candidate.content);
   const name = REACTION_HANDLE[sourceType];
   const knownNumbers = new Set(reses.map((r) => r.number));
+  const numberToIndex = new Map(reses.map((r, i) => [r.number, i]));
 
   const selection = await selectReactionReses(llmClient, candidate.title, reses);
-  const selectedIndices = selection
+  const baseIndices = selection
     ? reses.map((_, i) => i).filter((i) => selection.keepLines.has(i))
     : reses.map((_, i) => i);
+
+  // 表示レスが実際に表示する行から>>Nアンカーを集め、参照先Nが存在し未選択なら文脈として追加する
+  // （1階層のみ＝baseIndicesの行だけを見る。追加した文脈レス自体の参照先は辿らない）。
+  const baseIndexSet = new Set(baseIndices);
+  const contextIndices = new Set<number>();
+  for (const i of baseIndices) {
+    const res = reses[i];
+    const lineIndices = selection?.keepLines.get(i) ?? null;
+    const displayedLines = lineIndices ? lineIndices.map((li) => res.lines[li]) : res.lines;
+    for (const anchorNumber of extractAnchors(displayedLines)) {
+      const anchorIndex = numberToIndex.get(anchorNumber);
+      if (anchorIndex === undefined || baseIndexSet.has(anchorIndex)) continue;
+      contextIndices.add(anchorIndex);
+    }
+  }
+  const selectedIndices = [...baseIndices, ...contextIndices].sort((a, b) => a - b);
 
   const blocks = selectedIndices
     .map((i): ArticleBodyReactionBlock | null => {
@@ -470,6 +491,46 @@ function extractPatchNumberLabel(candidate: GenerationCandidateInput): string | 
   const fromUrl = candidate.sourceUrl?.match(/patch-(\d+)-(\d+)-notes/);
   if (fromUrl) return `${fromUrl[1]}.${fromUrl[2]}`;
   return null;
+}
+
+/**
+ * riot（パッチ）記事を「事実速報」として組み立てる（拡張E41 F-E41-2、既定モード）。
+ * LLMを使わず（factモードはLLM非依存・呼び出し増なし）、見出し「パッチ<番号>が公開」＋一般的な
+ * 事実段落＋出典URLのみで構成する。謝罪文言（「自動要約では抽出できなかった」等）は入れず、
+ * 具体的な数値・チャンピオン名も書かない（本文の長短に関わらず一般的な事実のみ＝捏造禁止）。
+ */
+function composePatchFactFlashBody(candidate: GenerationCandidateInput): ArticleBodyBlock[] {
+  const patchNumber = extractPatchNumberLabel(candidate);
+  const label = patchNumber ? `パッチ${patchNumber}` : "新しいパッチ";
+  const sourceUrl = candidate.sourceUrl?.trim();
+  return [
+    { type: "heading", text: `${label}が公開` },
+    {
+      type: "paragraph",
+      text:
+        `リーグ・オブ・レジェンドの${label}が公開されました。チャンピオンやアイテムのバランス調整が` +
+        "行われています。詳しい変更内容は公式パッチノートをご確認ください。",
+    },
+    {
+      type: "paragraph",
+      text:
+        "パッチノートでは、チャンピオンやアイテムの数値調整のほか、必要に応じてバグ修正や新機能・" +
+        "イベントの告知が行われることもあります。対戦に影響のある変更を見逃さないよう、プレイ前に" +
+        "公式サイトの発表内容へ一度目を通しておくとよいでしょう。",
+    },
+    {
+      type: "paragraph",
+      text:
+        "パッチの適用によって環境（メタ）が変化することもあるため、ランク戦などの対戦に挑む前に、" +
+        "今回のアップデート内容を把握しておくことをおすすめします。",
+    },
+    {
+      type: "paragraph",
+      text: sourceUrl
+        ? `出典: ${sourceUrl}`
+        : "出典: Riot Games 公式サイトのパッチノートページをご確認ください。",
+    },
+  ];
 }
 
 /**
@@ -716,16 +777,32 @@ async function composeClipBody(
 }
 
 /**
+ * env `PATCH_ARTICLE_MODE` によるriot（パッチ）記事の構成モード切替（拡張E41 F-E41-2）。
+ * "summary" のみ従来のE40 3段（LLM要約→決定的抽出→クリーン定型）を使い、それ以外（未設定含む）は
+ * 既定の "fact"（事実速報、LLM不使用）にする。後でLLMまとめに戻す可能性があるため、summaryモードの
+ * コード・テストは削除せず残す。
+ */
+function patchArticleMode(): "fact" | "summary" {
+  return process.env.PATCH_ARTICLE_MODE === "summary" ? "summary" : "fact";
+}
+
+/**
  * 記事化候補から構造化された本文ブロック配列を組み立てる（F7）。
- * sourceType が "riot" なら速報＋要点整理（contentが実パッチノート本文ならLLM要約のまとめ記事、
- * 拡張E34 F-E34-2）、"clip" なら埋め込み紹介形式、それ以外（5ch/reddit）ならまとめ速報レス形式にする。
+ * sourceType が "riot" なら、既定(env `PATCH_ARTICLE_MODE`未設定/"fact")では本文の長短に関わらず
+ * 事実速報（拡張E41 F-E41-2）。"summary" なら従来のE40の3段（LLM要約のまとめ記事→決定的抽出→
+ * クリーン定型フォールバック、contentが短い汎用文なら速報＋要点整理）。"clip" なら埋め込み紹介形式、
+ * それ以外（5ch/reddit）ならまとめ速報レス形式にする。
  */
 export async function composeArticleBody(
   candidate: GenerationCandidateInput,
   llmClient: LLMClient,
 ): Promise<ArticleBodyBlock[]> {
   if (candidate.sourceType === "riot") {
-    // content が実パッチノート本文（汎用の短いcontentではない）とみなせるときのみLLM要約を試みる。
+    if (patchArticleMode() === "fact") {
+      return composePatchFactFlashBody(candidate);
+    }
+    // "summary"モード: 従来どおり、content が実パッチノート本文（汎用の短いcontentではない）と
+    // みなせるときのみLLM要約を試みる。
     if (candidate.content.length >= PATCH_NOTES_MIN_LENGTH) {
       const patchSummaryBody = await composePatchSummaryBody(candidate, llmClient);
       if (patchSummaryBody) return patchSummaryBody;

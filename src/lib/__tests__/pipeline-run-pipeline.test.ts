@@ -259,6 +259,8 @@ describe("runFullPipeline（統合パイプライン）", () => {
   });
 
   it("生成に失敗した候補は破棄されず、次回のキュー再構築で再処理対象(queued)に戻る", async () => {
+    // 拡張E41 F-E41-2: riot(既定fact)は本文の長短に関わらず事実速報が生成され失敗しなくなったため、
+    // 生成失敗の再現はreactionブロックが1件も組み立てられない(空content)5ch候補で行う。
     const adapters = [
       new FakeAdapter("riot", [
         item({
@@ -266,10 +268,12 @@ describe("runFullPipeline（統合パイプライン）", () => {
           title: "パッチ15.4ノート公開",
           content: "アイテム全般のコストバランスが見直された。",
         }),
+      ]),
+      new FakeAdapter("5ch", [
         item({
-          sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/empty-champion-note/",
-          title: "チャンピオン調整", // 短いタイトル+空内容で生成本文が最低文字数(300字)未満になる
-          content: "", // 空内容 → 生成失敗(最低文字数未達)を意図的に起こす
+          sourceUrl: "https://leagueoflegends.5ch.net/test/read.cgi/game/empty-reaction/",
+          title: "【LoL】空スレ", // 空内容でreactionブロックが1件も組み立てられず生成失敗を意図的に起こす
+          content: "", // 空内容 → 生成失敗(reactionブロック0件)を意図的に起こす
         }),
       ]),
     ];
@@ -281,7 +285,7 @@ describe("runFullPipeline（統合パイプライン）", () => {
     expect(report.publishedCount).toBe(1); // 失敗した1件を除き、他候補の処理は完走している
 
     const failedItem = await prisma.collectedItem.findFirst({
-      where: { sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/empty-champion-note/" },
+      where: { sourceUrl: "https://leagueoflegends.5ch.net/test/read.cgi/game/empty-reaction/" },
     });
     expect(failedItem?.status).toBe("generation_failed");
     expect(failedItem?.articleId).toBeNull(); // 恒久的に消えない(破棄されない)
