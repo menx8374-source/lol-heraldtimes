@@ -36,6 +36,17 @@ describe("findNgWord / stripNgWords（NGワード検出, F9）", () => {
   it("maskNgWordsはNGワードを含まない文をそのまま返す", () => {
     expect(maskNgWords("今回のパッチはとても良い調整だった")).toBe("今回のパッチはとても良い調整だった");
   });
+
+  it("障害・精神疾患を侮蔑に使う差別語を検出・伏字化する（拡張E29: 運用フィードバックで追加）", () => {
+    // 運用で素通りしていた実例。「知的障害」等が検出され伏字化される。
+    expect(findNgWord("あのさ知的障害なら話しかけないでくれね？")).toBe("知的障害");
+    const masked = maskNgWords("あのさ知的障害なら話しかけないでくれね？");
+    expect(masked).toBe("あのさ****なら話しかけないでくれね？");
+    expect(findNgWord(masked)).toBeNull();
+    for (const w of ["発達障害", "精神障害", "障害者", "ガイジ", "がいじ"]) {
+      expect(findNgWord(`こいつ${w}かよ`)).toBe(w);
+    }
+  });
 });
 
 describe("detectPersonalAttack（特定個人への中傷／晒し検出, F9）", () => {
