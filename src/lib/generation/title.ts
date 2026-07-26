@@ -281,13 +281,20 @@ export function generateHookTitle(input: TitleGenInput): string {
   let core = buildCoreText(contextPool, maxCoreLen);
   if (core.length === 0) return fixedText;
 
-  let title = `${prefix}${subject}、${core}${hook}`;
+  // core（本文抜粋）が subject（主語）と同じ語で始まる場合、独立した主語部分を組み込むと
+  // 「主語、主語は…」のように重複してしまう（拡張E20 F-E20-1）。この場合は core 自体に
+  // 主語が含まれているため、独立した主語部分を省いて組み立てる。判定は都度の core に対して
+  // 行う（ガードループで core が主語より短く縮んだ場合は、独立主語を復活させて主語を残す）。
+  const buildTitle = (c: string) =>
+    c.startsWith(subject) ? `${prefix}${c}${hook}` : `${prefix}${subject}、${c}${hook}`;
+
+  let title = buildTitle(core);
 
   // 丸め誤差(半角/全角混在)でMAXを僅かに超えるケースのみ、core を短縮して収める(「…」は付けない)。
   let guard = 0;
   while (zenkakuLength(title) > MAX_TITLE_LENGTH && core.length > 0 && guard < 100) {
     core = core.slice(0, -1);
-    title = `${prefix}${subject}、${core}${hook}`;
+    title = buildTitle(core);
     guard++;
   }
   if (core.length === 0) return fixedText;

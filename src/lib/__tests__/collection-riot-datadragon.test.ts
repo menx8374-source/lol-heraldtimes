@@ -1,12 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   RiotDataDragonAdapter,
-  buildChampionItem,
-  buildChampionPageUrl,
-  buildChampionSplashUrl,
   buildPatchItem,
   buildPatchNoteUrl,
-  selectRotatedChampionIds,
 } from "@/lib/collection/adapters/riot-datadragon";
 
 const VERSIONS_URL = "https://ddragon.leagueoflegends.com/api/versions.json";
@@ -18,12 +14,6 @@ function jsonResponse(body: unknown, status = 200): Response {
     json: async () => body,
   } as unknown as Response;
 }
-
-const CHAMPION_DATA = {
-  Aatrox: { id: "Aatrox", name: "エイトロックス", title: "ダーキンの剣士", blurb: "ダーキンに乗っ取られた剣士。", tags: ["Fighter", "Tank"] },
-  Ahri: { id: "Ahri", name: "アーリ", title: "九尾の狐", blurb: "九つの尾を持つ半人半狐の存在。", tags: ["Mage", "Assassin"] },
-  Akali: { id: "Akali", name: "アカリ", title: "背反の刃", blurb: "組織を抜けた暗殺者。", tags: ["Assassin"] },
-};
 
 describe("純関数: buildPatchNoteUrl / buildPatchItem", () => {
   it("バージョンからmajor.minor単位で一意・安定なパッチノートURLを構築する", () => {
@@ -41,55 +31,9 @@ describe("純関数: buildPatchNoteUrl / buildPatchItem", () => {
     expect(item.fetchedAt).toBe(now);
   });
 
-  it("新パッチ検知アイテムには画像を設定しない(拡張E19: チャンピオン紹介のみスプラッシュ画像を持つ)", () => {
+  it("新パッチ検知アイテムには画像を設定しない", () => {
     const item = buildPatchItem("14.6.1", new Date());
     expect(item.imageUrl).toBeFalsy();
-  });
-});
-
-describe("純関数: buildChampionPageUrl / buildChampionItem", () => {
-  it("チャンピオンIDごとに一意・安定な公式ページURLを構築する", () => {
-    expect(buildChampionPageUrl("Aatrox")).toBe("https://www.leagueoflegends.com/ja-jp/champions/aatrox/");
-  });
-
-  it("チャンピオン事実紹介アイテムはキーワード「チャンピオン」を含み公式blurbベースのcontent", () => {
-    const now = new Date("2026-07-25T00:00:00+09:00");
-    const item = buildChampionItem(CHAMPION_DATA.Ahri, now);
-    expect(item.title).toContain("チャンピオン");
-    expect(item.title).toContain("アーリ");
-    expect(item.content).toContain("九つの尾を持つ半人半狐の存在。");
-    expect(item.sourceUrl).toBe(buildChampionPageUrl("Ahri"));
-  });
-
-  it("チャンピオン事実紹介アイテムはchampionIdベースのスプラッシュ画像URLをimageUrlに持つ(拡張E19 F-E19-3)", () => {
-    expect(buildChampionSplashUrl("Aatrox")).toBe(
-      "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Aatrox_0.jpg",
-    );
-    const item = buildChampionItem(CHAMPION_DATA.Ahri, new Date());
-    expect(item.imageUrl).toBe("https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ahri_0.jpg");
-  });
-});
-
-describe("純関数: selectRotatedChampionIds", () => {
-  const ids = ["Aatrox", "Ahri", "Akali", "Bard", "Braum"];
-
-  it("窓の幅ぶんのIDを返す(全件以下なら重複なし)", () => {
-    const result = selectRotatedChampionIds(ids, new Date("2026-01-01T00:00:00Z"), 3);
-    expect(result).toHaveLength(3);
-    expect(new Set(result).size).toBe(3);
-  });
-
-  it("実行日が異なれば選ばれるチャンピオンが変わる(初回以降0件で止まらない)", () => {
-    const day1 = selectRotatedChampionIds(ids, new Date("2026-01-01T00:00:00Z"), 2);
-    const day2 = selectRotatedChampionIds(ids, new Date("2026-01-02T00:00:00Z"), 2);
-    const day3 = selectRotatedChampionIds(ids, new Date("2026-01-03T00:00:00Z"), 2);
-    expect(day1).not.toEqual(day2);
-    expect(day2).not.toEqual(day3);
-  });
-
-  it("空配列や0以下の窓幅では空を返す", () => {
-    expect(selectRotatedChampionIds([], new Date(), 5)).toEqual([]);
-    expect(selectRotatedChampionIds(ids, new Date(), 0)).toEqual([]);
   });
 });
 
@@ -98,44 +42,23 @@ describe("RiotDataDragonAdapter.fetchItems", () => {
     vi.unstubAllGlobals();
   });
 
-  it("versions/championを取得し、新パッチ検知1件＋ローテーション窓ぶんのチャンピオン事実紹介を返す", async () => {
+  it("versionsのみを取得し、新パッチ検知1件のみを返す(拡張E20 F-E20-2: チャンピオン紹介は廃止)", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url === VERSIONS_URL) return jsonResponse(["14.6.1", "14.5.1"]);
-      if (url.includes("/champion.json")) return jsonResponse({ data: CHAMPION_DATA });
       throw new Error(`unexpected url: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const adapter = new RiotDataDragonAdapter({
-      now: () => new Date("2026-07-25T00:00:00Z"),
-      championWindowSize: 2,
-    });
+    const adapter = new RiotDataDragonAdapter({ now: () => new Date("2026-07-25T00:00:00Z") });
     const items = await adapter.fetchItems();
 
-    expect(items).toHaveLength(3); // patch 1件 + champion 2件
+    expect(items).toHaveLength(1);
     expect(items[0].title).toContain("パッチ");
     expect(items[0].sourceUrl).toBe("https://www.leagueoflegends.com/ja-jp/news/game-updates/patch-14-6-notes/");
-    expect(items[1].title).toContain("チャンピオン");
-    expect(items[2].title).toContain("チャンピオン");
 
-    // champion.json のURLに locale(既定 ja_JP) と最新versionが反映されている
+    // champion.json へのfetchは発生しない
     const championCall = fetchMock.mock.calls.find(([url]) => (url as string).includes("/champion.json"));
-    expect(championCall?.[0]).toBe("https://ddragon.leagueoflegends.com/cdn/14.6.1/data/ja_JP/champion.json");
-  });
-
-  it("任意のlocaleを反映する", async () => {
-    const fetchMock = vi.fn(async (url: string) => {
-      if (url === VERSIONS_URL) return jsonResponse(["14.6.1"]);
-      if (url.includes("/champion.json")) return jsonResponse({ data: CHAMPION_DATA });
-      throw new Error(`unexpected url: ${url}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const adapter = new RiotDataDragonAdapter({ locale: "en_US", now: () => new Date("2026-07-25T00:00:00Z") });
-    await adapter.fetchItems();
-
-    const championCall = fetchMock.mock.calls.find(([url]) => (url as string).includes("/champion.json"));
-    expect(championCall?.[0]).toBe("https://ddragon.leagueoflegends.com/cdn/14.6.1/data/en_US/champion.json");
+    expect(championCall).toBeUndefined();
   });
 
   it("versions取得がHTTPエラーの場合は空配列を返す(例外を投げない)", async () => {
@@ -171,18 +94,5 @@ describe("RiotDataDragonAdapter.fetchItems", () => {
     );
     const adapter = new RiotDataDragonAdapter();
     await expect(adapter.fetchItems()).resolves.toEqual([]);
-  });
-
-  it("championのみ取得失敗した場合は新パッチ検知アイテムだけを返す(他ソース/他アイテムを止めない)", async () => {
-    const fetchMock = vi.fn(async (url: string) => {
-      if (url === VERSIONS_URL) return jsonResponse(["14.6.1"]);
-      return jsonResponse(null, 500);
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const adapter = new RiotDataDragonAdapter({ now: () => new Date("2026-07-25T00:00:00Z") });
-    const items = await adapter.fetchItems();
-    expect(items).toHaveLength(1);
-    expect(items[0].title).toContain("パッチ");
   });
 });

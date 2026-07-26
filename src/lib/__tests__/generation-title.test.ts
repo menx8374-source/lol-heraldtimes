@@ -175,6 +175,16 @@ describe("generateHookTitle", () => {
     }
   });
 
+  it("主語＝本文冒頭のとき、タイトルに主語が二重に出現しない(拡張E20 F-E20-1)", () => {
+    const sample: TitleGenInput = {
+      title: "【チャンピオン紹介】リサンドラ（氷の魔女）",
+      content: "リサンドラはMageタイプのチャンピオン。（以下略）",
+    };
+    const title = generateHookTitle(sample);
+    const occurrences = title.split("リサンドラ").length - 1;
+    expect(occurrences).toBeLessThan(2);
+  });
+
   it("本文中のNGワード(差別的・攻撃的な語)は生成タイトルに含まれない（安全フィルタ）", () => {
     const unsafeSample: TitleGenInput = {
       title: "ゼドが強すぎるとアホみたいに叩かれる",

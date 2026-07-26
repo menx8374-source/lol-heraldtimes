@@ -45,7 +45,6 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
 | `COLLECTION_MODE` | 任意 | `mock`（既定）／`live`。`live` は全4ソース(riot=拡張E15, reddit=拡張E16, clip=拡張E17, 5ch=拡張E18)が本接続で収集する（フェーズ2完了） |
 | `COLLECTION_REDDIT_MAX_ITEMS` / `COLLECTION_5CH_MAX_ITEMS` / `COLLECTION_RIOT_MAX_ITEMS` / `COLLECTION_CLIP_MAX_ITEMS` | 任意 | ソースごとの1回の収集実行あたりの取得件数上限（既定: reddit/5ch=10, riot=20, clip=10） |
 | `COLLECTION_REDDIT_MIN_INTERVAL_MS` / `COLLECTION_5CH_MIN_INTERVAL_MS` / `COLLECTION_RIOT_MIN_INTERVAL_MS` / `COLLECTION_CLIP_MIN_INTERVAL_MS` | 任意 | ソースごとの最小実行間隔(ミリ秒)。既定: reddit/5ch=600000(10分), riot/clip=1800000(30分) |
-| `RIOT_DDRAGON_LOCALE` | 任意 | riot live収集(拡張E15、Riot Data Dragon)のlocale。既定 `ja_JP`（Data Dragonはキー不要の公開CDN） |
 | `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` | reddit live収集(拡張E16)を使うなら必須 | Reddit アプリ（https://www.reddit.com/prefs/apps ）のクレデンシャル。Application-only OAuth2(client_credentials)でトークン取得に使う。**秘密情報のため必ず `.env` のみに設定しコミットしない**。未設定時はReddit収集のみ空配列＋ログでスキップ（他ソースは継続） |
 | `REDDIT_USER_AGENT` | reddit live収集(拡張E16)を使うなら必須 | Reddit規約で必須の説明的User-Agent文字列（秘密ではない。例 `lol-matome/1.0 by <運用者>`） |
 | `YOUTUBE_API_KEY` | clip収集(拡張E17)のYouTube部分を使うなら必須 | YouTube Data API v3のAPIキー（Google Cloud Console発行）。**秘密情報のため必ず `.env` のみに設定しコミットしない**。未設定時はYouTube分のみ空配列＋ログでスキップ |
