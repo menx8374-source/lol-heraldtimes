@@ -34,3 +34,12 @@ export function findNgWord(text: string): string | null {
 export function stripNgWords(text: string): string {
   return NG_WORDS.reduce((acc, word) => acc.split(word).join(""), text);
 }
+
+/**
+ * text 中のNGワードをすべて同じ文字数のアスタリスクに置換する（拡張E27）。
+ * 削除する stripNgWords とは異なり、逐語転載の文字数・文脈を保ったまま伏字化するための関数。
+ * NGワード以外の文字列は一切変更しない。
+ */
+export function maskNgWords(text: string): string {
+  return NG_WORDS.reduce((acc, word) => acc.split(word).join("*".repeat(word.length)), text);
+}

@@ -12,6 +12,7 @@ import type { LLMClient, GenerationTask } from "@/lib/generation/llm-client";
 import { splitIntoSentences, excerptForQuote, gistOf } from "@/lib/generation/text-utils";
 import { parseThreadReses, extractAnchors, computeLineEmphasis, type ThreadRes } from "@/lib/generation/thread-format";
 import { isAllowedEmbedUrl, embedProviderForUrl } from "@/lib/embed";
+import { maskNgWords } from "@/lib/moderation/ng-words";
 
 export type GenerationCandidateInput = {
   sourceType: SourceType;
@@ -129,6 +130,8 @@ async function selectReactionReses(
  * keepインデックスのレスだけを元スレ順で組み、emphasizeインデックスのレスにブロック単位の
  * 強調フラグを立てる。選定できない場合（mockモード・APIエラー・parse失敗・keep空等）は
  * 従来どおり全レス・強調なしで組む（本体を止めない）。
+ * 拡張E27: 本文行にNGワードが含まれる場合は maskNgWords で同数のアスタリスクに伏字化する
+ * （逐語は保つがNG語だけ伏字にし、moderateArticleContent の ng_word 保留を避けて公開する）。
  */
 async function buildReactionBlocks(
   candidate: GenerationCandidateInput,
@@ -153,7 +156,11 @@ async function buildReactionBlocks(
       type: "reaction",
       number: res.number,
       name,
-      lines: res.lines.map((text, li) => (emphasis[li] ? { text, emphasis: emphasis[li] } : { text })),
+      lines: res.lines.map((rawText, li) => {
+        // 逐語転載を保ちつつNGワードのみ伏字化する（拡張E27）。他の文字列は一切書き換えない。
+        const text = maskNgWords(rawText);
+        return emphasis[li] ? { text, emphasis: emphasis[li] } : { text };
+      }),
       ...(anchors.length > 0 ? { anchors } : {}),
       ...(isEmphasized ? { emphasis: true } : {}),
     };

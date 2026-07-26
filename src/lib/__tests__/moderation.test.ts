@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findNgWord, stripNgWords } from "@/lib/moderation/ng-words";
+import { findNgWord, stripNgWords, maskNgWords } from "@/lib/moderation/ng-words";
 import { detectPersonalAttack } from "@/lib/moderation/personal-attack";
 import { containsRumorMarker } from "@/lib/moderation/rumor";
 import { findDuplicateArticle } from "@/lib/moderation/duplicate";
@@ -19,6 +19,22 @@ describe("findNgWord / stripNgWords（NGワード検出, F9）", () => {
 
   it("stripNgWordsはNGワードだけを除去する", () => {
     expect(stripNgWords("このゴミチャンピオンは強い")).toBe("このチャンピオンは強い");
+  });
+
+  it("maskNgWordsはNGワードを同じ文字数のアスタリスクに置換し、他の文字列は変えない（拡張E27）", () => {
+    expect(maskNgWords("このゴミチャンピオンは強い")).toBe("この**チャンピオンは強い");
+    expect(maskNgWords("このチャンピオンはアホだ")).toBe("このチャンピオンは**だ");
+    expect(findNgWord(maskNgWords("このチャンピオンはアホだ"))).toBeNull();
+  });
+
+  it("maskNgWordsは複数出現・複数種のNGワードすべてを伏字化する（拡張E27）", () => {
+    const masked = maskNgWords("死ねばいいのに、あとカスでゴミなやつ");
+    expect(masked).toBe("**ばいいのに、あと**で**なやつ");
+    expect(findNgWord(masked)).toBeNull();
+  });
+
+  it("maskNgWordsはNGワードを含まない文をそのまま返す", () => {
+    expect(maskNgWords("今回のパッチはとても良い調整だった")).toBe("今回のパッチはとても良い調整だった");
   });
 });
 
@@ -173,6 +189,25 @@ describe("moderateArticleContent（公開前安全フィルタの統合判定, F
       sourceCount: 1,
     });
     expect(result).toMatchObject({ status: "held", reason: "ng_word" });
+  });
+
+  it("reactionブロックのレス本文がmaskNgWordsで伏字化済みであればheldにならず公開される（拡張E27）", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "heading", text: "話題" },
+      {
+        type: "reaction",
+        number: 1,
+        name: "国内プレイヤーさん",
+        lines: [{ text: `このチャンピオンは${"*".repeat(2)}だと思う` }],
+      },
+    ];
+    const bodyText = bodyBlocksToText(blocks);
+    const result = moderateArticleContent({
+      title: "【LoL】あるチャンピオンについて語るスレ",
+      bodyText,
+      sourceCount: 1,
+    });
+    expect(result.status).toBe("published");
   });
 
   it("NGワード・中傷の無い通常のreactionブロック記事は公開される", () => {

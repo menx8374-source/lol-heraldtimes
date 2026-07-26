@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { composeArticleBody } from "@/lib/generation/compose";
 import { MockLLMClient, type LLMClient, type LLMMessage } from "@/lib/generation/llm-client";
 import { hasStructuredHeadings } from "@/lib/article-body";
+import { moderateArticleContent } from "@/lib/moderation/moderate";
+import { findNgWord } from "@/lib/moderation/ng-words";
+import { bodyBlocksToText } from "@/lib/search";
 
 const llm = new MockLLMClient();
 
@@ -350,5 +353,53 @@ describe("composeArticleBody（反応記事のLLMレス抜粋＋重要レス強�
     const reactions = body.filter((b) => b.type === "reaction");
     expect(reactions).toHaveLength(3);
     expect(reactions.every((b) => b.type === "reaction" && b.emphasis === undefined)).toBe(true);
+  });
+});
+
+describe("composeArticleBody（NGワードの伏字化、拡張E27 F-E27-2）", () => {
+  it("反応記事(5ch)のレス本文にNGワードが含まれる場合、生成後の本文で伏字化される（生のNG語は残らない）", async () => {
+    const body = await composeArticleBody(
+      {
+        sourceType: "5ch",
+        title: "【LoL】あるチャンピオンについて語るスレ",
+        content: "1: このチャンピオンはカスだと思う\n2: 同意、正直ゴミだわ",
+      },
+      llm,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(2);
+    const texts = reactions.flatMap((b) => (b.type === "reaction" ? b.lines.map((l) => l.text) : []));
+    // 逐語は保たれつつNG語のみアスタリスクになっている
+    expect(texts).toEqual(["このチャンピオンは**だと思う", "同意、正直**だわ"]);
+    expect(texts.every((t) => findNgWord(t) === null)).toBe(true);
+  });
+
+  it("NGワードを含む反応記事(reddit)がmoderateArticleContentでng_word保留されず公開される（伏字化後の本文でfindNgWordがnull）", async () => {
+    const body = await composeArticleBody(
+      {
+        sourceType: "reddit",
+        title: "Discussion about a champion",
+        content: "1: This champion player is 死ね worthy according to some toxic fans",
+      },
+      llm,
+    );
+    const bodyText = bodyBlocksToText(body);
+    expect(findNgWord(bodyText)).toBeNull();
+    const result = moderateArticleContent({
+      title: "Discussion about a champion",
+      bodyText,
+      sourceCount: 1,
+    });
+    expect(result.status).toBe("published");
+  });
+
+  it("NGワードを含まない反応記事は伏字化による変化がなく、従来どおり逐語のまま公開される（回帰なし）", async () => {
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "普通のスレ", content: "1: 壁飛び5連続でキャリーとか草生える\n2: それな" },
+      llm,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    const texts = reactions.flatMap((b) => (b.type === "reaction" ? b.lines.map((l) => l.text) : []));
+    expect(texts).toEqual(["壁飛び5連続でキャリーとか草生える", "それな"]);
   });
 });
