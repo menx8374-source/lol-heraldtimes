@@ -29,7 +29,13 @@ function textResponse(body: string, status = 200): Response {
 
 describe("純関数: buildPatchNoteUrl / buildPatchItem", () => {
   it("バージョンからmajor.minor単位で一意・安定なパッチノートURLを構築する", () => {
-    expect(buildPatchNoteUrl("14.6.1")).toBe("https://www.leagueoflegends.com/ja-jp/news/game-updates/patch-14-6-notes/");
+    expect(buildPatchNoteUrl("14.6.1")).toBe(
+      "https://www.leagueoflegends.com/ja-jp/news/game-updates/league-of-legends-patch-14-6-notes",
+    );
+    // DDragon 16.14 は公式パッチノートでは 26.14（2025年の呼称変更以降 major+10）。現行パッチのURLを正しく作れること（拡張E34c）。
+    expect(buildPatchNoteUrl("16.14.1")).toBe(
+      "https://www.leagueoflegends.com/ja-jp/news/game-updates/league-of-legends-patch-26-14-notes",
+    );
     // revision(3番目)が違っても同一パッチとして同じURLになる(dedupが効く)
     expect(buildPatchNoteUrl("14.6.2")).toBe(buildPatchNoteUrl("14.6.1"));
   });
@@ -146,7 +152,9 @@ describe("RiotDataDragonAdapter.fetchItems", () => {
 
     expect(items).toHaveLength(1);
     expect(items[0].title).toContain("パッチ");
-    expect(items[0].sourceUrl).toBe("https://www.leagueoflegends.com/ja-jp/news/game-updates/patch-14-6-notes/");
+    expect(items[0].sourceUrl).toBe(
+      "https://www.leagueoflegends.com/ja-jp/news/game-updates/league-of-legends-patch-14-6-notes",
+    );
 
     // champion.json へのfetchは発生しない
     const championCall = fetchMock.mock.calls.find(([url]) => (url as string).includes("/champion.json"));

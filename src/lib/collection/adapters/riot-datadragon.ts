@@ -79,7 +79,18 @@ function stripHtmlToText(html: string): string {
  */
 export async function fetchPatchNotesText(version: string): Promise<string | null> {
   const url = buildPatchNoteUrl(version);
-  const html = await fetchTextSafe(url, {}, { logLabel: "riot-patchnotes", context: url });
+  // 公式サイトが空/既定UAのbotアクセスを弾くことがあるため、ブラウザ相当のUAを付ける（拡張E34c）。
+  const html = await fetchTextSafe(
+    url,
+    {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        "Accept-Language": "ja,en;q=0.8",
+      },
+    },
+    { logLabel: "riot-patchnotes", context: url },
+  );
   if (!html) return null;
   const text = stripHtmlToText(html);
   if (text.length < PATCH_NOTES_MIN_LENGTH) return null;
@@ -92,9 +103,25 @@ export function patchSlug(version: string): string {
   return `${major ?? version}-${minor ?? "0"}`;
 }
 
-/** 公式パッチノートページURLを構築する（パッチごとに一意・安定。revision部分は含めない）。 */
+/**
+ * 公式パッチノートページURLを構築する（パッチごとに一意・安定。revision部分は含めない）。
+ * ⚠ Data Dragon の major（2026=16）と公式パッチノートの年ベース番号（2026=26）は、2025年の
+ * 呼称変更以降 +10 ずれる（DDragon 15→公式25, 16→26）。現行の公式スラッグは
+ * `league-of-legends-patch-<公式major>-<minor>-notes`（末尾スラッシュなし）。拡張E34cで実URLに合わせて修正。
+ */
+/**
+ * Data Dragon の version（例 "16.14.1"）を、ユーザーが認識する公式の年ベース番号（例 "26.14"）に変換する。
+ * 2025年の呼称変更以降、公式番号 = DDragon major + 10（major≥15）。それ未満は据え置き。タイトル表示・URL両方で使う。
+ */
+export function publicPatchNumber(version: string): string {
+  const [major, minor] = version.split(".");
+  const majorNum = Number(major);
+  const publicMajor = Number.isFinite(majorNum) && majorNum >= 15 ? majorNum + 10 : majorNum;
+  return `${publicMajor}.${minor ?? "0"}`;
+}
+
 export function buildPatchNoteUrl(version: string): string {
-  return `https://www.leagueoflegends.com/ja-jp/news/game-updates/patch-${patchSlug(version)}-notes/`;
+  return `https://www.leagueoflegends.com/ja-jp/news/game-updates/league-of-legends-patch-${publicPatchNumber(version).replace(".", "-")}-notes`;
 }
 
 /**
@@ -104,8 +131,8 @@ export function buildPatchNoteUrl(version: string): string {
  * 材料になる）。未指定/短すぎる場合は従来どおりの汎用事実速報になる（バランス数値等は含めない）。
  */
 export function buildPatchItem(version: string, now: Date, patchNotesText?: string | null): RawCollectionItem {
-  const [major, minor] = version.split(".");
-  const patchLabel = `${major ?? version}.${minor ?? "0"}`;
+  // タイトル表示はユーザーが認識する公式番号（例 26.14）を使う（DDragonの16.14ではなく。拡張E34c）。
+  const patchLabel = publicPatchNumber(version);
   const hasPatchNotes = typeof patchNotesText === "string" && patchNotesText.length >= PATCH_NOTES_MIN_LENGTH;
   return {
     sourceUrl: buildPatchNoteUrl(version),
