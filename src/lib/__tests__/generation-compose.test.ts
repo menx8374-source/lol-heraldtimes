@@ -1,5 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { composeArticleBody, extractPatchChangesDeterministic } from "@/lib/generation/compose";
+import {
+  composeArticleBody,
+  extractPatchChangesDeterministic,
+  selectMajorConversationCluster,
+} from "@/lib/generation/compose";
+import type { ThreadRes } from "@/lib/generation/thread-format";
 import { MockLLMClient, type LLMClient, type LLMMessage } from "@/lib/generation/llm-client";
 import { hasStructuredHeadings, blockText } from "@/lib/article-body";
 import { moderateArticleContent } from "@/lib/moderation/moderate";
@@ -661,6 +666,116 @@ describe("composeArticleBody（表示レスの返信先(アンカー先)の引�
     const body = await composeArticleBody({ sourceType: "5ch", title: "mock回帰テスト", content }, new MockLLMClient());
     const reactions = body.filter((b) => b.type === "reaction");
     expect(reactions).toHaveLength(2);
+  });
+});
+
+describe("selectMajorConversationCluster（>>Nアンカーで連結した会話クラスタの純関数選定、拡張E43 F-E43-2）", () => {
+  const res = (number: number, lines: string[]): ThreadRes => ({ number, lines });
+
+  it("複数の会話クラスタ＋独立レスがある場合、最大クラスタのレスindexだけを元スレ順で返す(独立レスは除外)", () => {
+    const reses: ThreadRes[] = [
+      res(1, ["最初の話題の投稿。"]),
+      res(2, [">>1 それについてなるほど。"]),
+      res(3, [">>2 わかる、俺もそう思う。"]),
+      res(4, ["別の話題。おすすめの配信者は誰？"]), // 独立(アンカー無し)
+      res(5, [">>4 それも気になる。"]), // サイズ2の小クラスタ
+      res(6, ["totally isolated comment"]), // 独立(アンカー無し)
+    ];
+    const selected = selectMajorConversationCluster(reses);
+    // 1,2,3(サイズ3)が最大クラスタ。4,5(サイズ2)・6(サイズ1、独立)は除外される。
+    expect(selected).toEqual([0, 1, 2]);
+  });
+
+  it("クラスタサイズが同じ場合は被参照延べ回数が多いクラスタを選ぶ(タイブレーク1)", () => {
+    // クラスタA={1,2}: 2→1の片方向のみ参照(被参照合計1)。
+    // クラスタB={30,31}: 31→30・30→31の相互参照(被参照合計2)。両方ともサイズ2。
+    const reses: ThreadRes[] = [res(1, ["A"]), res(2, [">>1 B"]), res(30, [">>31 C"]), res(31, [">>30 D"])];
+    const selected = selectMajorConversationCluster(reses);
+    expect(selected).toEqual([2, 3]);
+  });
+
+  it("クラスタサイズ・被参照合計が同じ場合はクラスタ内最小レス番号が小さい方を選ぶ(タイブレーク2)", () => {
+    const reses: ThreadRes[] = [
+      res(20, ["A"]),
+      res(21, [">>20 B"]), // クラスタ{20,21}: 被参照合計1、最小番号20
+      res(5, ["C"]),
+      res(6, [">>5 D"]), // クラスタ{5,6}: 被参照合計1、最小番号5
+    ];
+    const selected = selectMajorConversationCluster(reses);
+    // どちらもサイズ2・被参照合計1で同点。最小レス番号が小さい{5,6}(index2,3)が選ばれる。
+    expect(selected).toEqual([2, 3]);
+  });
+
+  it("最大クラスタがMAX_EXCERPT_RESES(12)を超える場合は元スレ順(レス番号昇順)で先頭12件に切る", () => {
+    // 1→2→3→...→15 の鎖状アンカーで1つの連結成分(サイズ15)を作る。
+    const reses: ThreadRes[] = Array.from({ length: 15 }, (_, i) => {
+      const number = i + 1;
+      return i === 0 ? res(number, ["起点"]) : res(number, [`>>${number - 1} 続き`]);
+    });
+    const selected = selectMajorConversationCluster(reses);
+    expect(selected).toHaveLength(12);
+    expect(selected).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  });
+
+  it("アンカーが全く無いスレは最後の保険として全レス(上限付き)を返す", () => {
+    const reses: ThreadRes[] = [res(1, ["A"]), res(2, ["B"]), res(3, ["C"])];
+    expect(selectMajorConversationCluster(reses)).toEqual([0, 1, 2]);
+  });
+
+  it("空のレス配列に対しては空配列を返す", () => {
+    expect(selectMajorConversationCluster([])).toEqual([]);
+  });
+});
+
+describe("composeArticleBody（反応記事: LLM選定失敗時のフォールバックが主要会話クラスタのみになる、拡張E43 F-E43-2）", () => {
+  it("LLM選定が失敗(JSON parse不能)した場合、複数の会話クラスタ＋無関係な独立レスを含むスレでも、最大クラスタのレスだけが反応ブロックになる", async () => {
+    const content = [
+      "58: 拮抗してるゲームだった。",
+      "59: >>58 それについてもう少し話そう。",
+      "61: >>59 拮抗してるゲームが面白かった。",
+      "65: 別チャンピオンのバランス調整の話。",
+      "70: >>65 それな。",
+      "413: midでベイガーみたいなAP誰かおらん？",
+      "738: jg上手くなりたい、いい配信者は？",
+    ].join("\n");
+    const stub = new StubLLMClient("これはJSONではない応答です"); // 選定失敗→null→クラスタfallback
+    const body = await composeArticleBody({ sourceType: "5ch", title: "拮抗試合スレ", content }, stub);
+    const reactions = body.filter((b) => b.type === "reaction");
+    const numbers = reactions.map((b) => (b.type === "reaction" ? b.number : -1));
+    // 最大クラスタ(58,59,61)のみ採用され、無関係な独立レス(413,738)・小さいクラスタ(65,70)は混入しない
+    expect(numbers).toEqual([58, 59, 61]);
+    expect(numbers).not.toContain(413);
+    expect(numbers).not.toContain(738);
+    expect(numbers).not.toContain(65);
+    expect(numbers).not.toContain(70);
+  });
+
+  it("LLM選定が成功した場合はkeepのレスがそのまま使われる(クラスタfallbackは発動しない、回帰なし)", async () => {
+    const content = "1: 最初のレス。\n2: 二番目のレス。\n3: 三番目のレス。";
+    const stub = new StubLLMClient(JSON.stringify({ keep: [0, 2], emphasize: [] }));
+    const body = await composeArticleBody({ sourceType: "5ch", title: "LLM成功テスト", content }, stub);
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions.map((b) => (b.type === "reaction" ? b.number : -1))).toEqual([1, 3]);
+  });
+});
+
+describe("selectReactionReses（強化プロンプト、拡張E43 F-E43-1）", () => {
+  it("systemプロンプトに「単一の中心話題への一貫」「無関係レスの除外」「会話のつながり優先」の指示が含まれる", async () => {
+    const stub = new StubLLMClient(JSON.stringify({ keep: [0], emphasize: [] }));
+    await composeArticleBody(
+      { sourceType: "5ch", title: "プロンプト確認テスト", content: "1: テスト用のレス。" },
+      stub,
+    );
+    const lastCall = stub.calls[stub.calls.length - 1];
+    const systemMessage = lastCall.find((m) => m.role === "system");
+    expect(systemMessage).toBeTruthy();
+    const text = systemMessage!.content;
+    expect(text).toContain("中心的な話題");
+    expect(text).toContain("除外");
+    expect(text).toContain("別の話題への脱線");
+    expect(text).toContain("おすすめは？");
+    expect(text).toContain(">>N");
+    expect(text).toContain("つながっている");
   });
 });
 

@@ -173,10 +173,16 @@ async function selectReactionReses(
         role: "system",
         content:
           "あなたはLoLまとめサイトの編集者です。渡されたスレッドのレス一覧(title=記事の話題, " +
-          "reses=各レスのindex/number/lines[行配列])の中から、記事の話題に関係する重要なレスだけを厳選してください。" +
-          "スレのルール文・テンプレ(「!extend」「次スレは>>950」「配信者やプロの話題禁止」等の定型・運営文)、" +
-          "単なる雑談、記事の話題に無関係なレスは除外し、話題の中心となる反応・意見・議論・感想があるレスだけを" +
-          "選んでください（無理に多く選ぶ必要はありません）。" +
+          "reses=各レスのindex/number/lines[行配列])から、記事としてまとめるレスを厳選してください。" +
+          "5chスレは複数の話題に脱線しがちです。まずスレ全体で最も反応・議論が集まっている1つの" +
+          "中心的な話題を見極め、それに沿ったレスだけを選んでください（話題を1つに絞ること）。" +
+          "次のようなレスは中心話題に無関係なので必ず除外してください: 別の話題への脱線、" +
+          "別チャンピオンや別のゲームシステムについての雑談、独立した別の質問(例:「〜のおすすめは？」" +
+          "「〜って誰かいる？」)、スレのルール文・テンプレ(「!extend」「次スレは>>950」" +
+          "「配信者やプロの話題禁止」等の定型・運営文)。" +
+          "互いに>>Nで参照し合い会話としてつながっているレスは、中心話題の議論である可能性が高いため" +
+          "優先して選んでください。無理に多く選ぶ必要はありません。少数でも話題が一貫している方を" +
+          "優先してください。" +
           "レス本文・行は書き換えず、渡された中からindexを選ぶだけです。長いレスは、記事の話題に沿った行だけを" +
           "残すために対象レスの lines のうち残す行indexを指定できます（指定しなければそのレスの全行を採用）。" +
           '出力はJSONのみとし、{"keep": [index または {"index": N, "lines": [行index,...]}, ...], ' +
@@ -199,6 +205,88 @@ async function selectReactionReses(
   } catch {
     return null;
   }
+}
+
+/**
+ * LLMの話題関連レス選定（selectReactionReses）が null を返したときのフォールバックとして使う純関数
+ * （拡張E43 F-E43-2）。スレは複数の話題に脱線しがちなため、収集した全レスをそのまま出すと中心話題と
+ * 無関係な独立レス（別質問・別話題の脱線）が混入する。代わりに `>>N` アンカーで双方向連結した
+ * 「会話クラスタ（連結成分）」を求め、最も会話が集まっている最大クラスタのレスindexだけを返す。
+ * - 各レスの `>>N`（reses に実在する番号のみ、自己参照は無視）を双方向の辺とみなし連結成分を作る
+ *   （union-find）。
+ * - 最大サイズの連結成分を採用。同サイズは「クラスタ内の被参照延べ回数が多い→クラスタ内最小レス番号が
+ *   小さい」の順で決定論的に選ぶ。
+ * - スレ内に有効な `>>N` アンカーが1つも無い（＝全レスが連結成分サイズ1）場合のみ、最後の保険として
+ *   全レスを採用する。
+ * - 採用レスは元スレ順（レス番号ではなく元の配列index昇順、＝reses自体が元スレ順）で並べ、
+ *   `MAX_EXCERPT_RESES` を超える分は先頭優先で切る。
+ */
+export function selectMajorConversationCluster(reses: ThreadRes[]): number[] {
+  const n = reses.length;
+  if (n === 0) return [];
+  const numberToIndex = new Map(reses.map((r, i) => [r.number, i]));
+
+  const parent = Array.from({ length: n }, (_, i) => i);
+  function find(x: number): number {
+    while (parent[x] !== x) {
+      parent[x] = parent[parent[x]];
+      x = parent[x];
+    }
+    return x;
+  }
+  function union(a: number, b: number): void {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  }
+
+  // 各レスindexが、他のレスから >>N で参照された延べ回数（同サイズクラスタのタイブレークに使う）。
+  const referencedCount = new Array<number>(n).fill(0);
+  let hasAnchoredPair = false;
+  reses.forEach((res, i) => {
+    for (const anchorNumber of extractAnchors(res.lines)) {
+      const anchorIndex = numberToIndex.get(anchorNumber);
+      if (anchorIndex === undefined || anchorIndex === i) continue;
+      hasAnchoredPair = true;
+      union(i, anchorIndex);
+      referencedCount[anchorIndex]++;
+    }
+  });
+
+  if (!hasAnchoredPair) {
+    // アンカーが全く無いスレ（会話クラスタが作れない）は、最後の保険として全レスを採用する。
+    return reses.map((_, i) => i).slice(0, MAX_EXCERPT_RESES);
+  }
+
+  const clusters = new Map<number, number[]>();
+  for (let i = 0; i < n; i++) {
+    const root = find(i);
+    const list = clusters.get(root);
+    if (list) list.push(i);
+    else clusters.set(root, [i]);
+  }
+
+  let best: number[] = [];
+  let bestReferenced = -1;
+  let bestMinNumber = Infinity;
+  for (const members of clusters.values()) {
+    const totalReferenced = members.reduce((sum, idx) => sum + referencedCount[idx], 0);
+    const minNumber = Math.min(...members.map((idx) => reses[idx].number));
+    const isBetter =
+      members.length > best.length ||
+      (members.length === best.length && totalReferenced > bestReferenced) ||
+      (members.length === best.length && totalReferenced === bestReferenced && minNumber < bestMinNumber);
+    if (isBetter) {
+      best = members;
+      bestReferenced = totalReferenced;
+      bestMinNumber = minNumber;
+    }
+  }
+
+  return best
+    .slice()
+    .sort((a, b) => a - b)
+    .slice(0, MAX_EXCERPT_RESES);
 }
 
 /** 拡張E33 F-E33-1: 色付き強調の最低保証で使う色の割り当て順（red→blue→purple→orange、拡張E36で緑を廃止）。 */
@@ -252,7 +340,9 @@ function removeNgSentences(text: string): string {
  * 拡張E25 F-E25-1: LLMに話題関連レスの抜粋・重要レスの強調選定を委ね、選定できた場合は
  * keepインデックスのレスだけを元スレ順で組み、emphasizeインデックスのレスにブロック単位の
  * 強調フラグを立てる。選定できない場合（mockモード・APIエラー・parse失敗・keep空等）は
- * 従来どおり全レス・強調なしで組む（本体を止めない）。
+ * 全レスではなく、`>>N`アンカーで連結した会話クラスタのうち最大のものだけを採用する
+ * （selectMajorConversationCluster、拡張E43 F-E43-2。アンカーが全く無いスレのみ全レス・強調なしで
+ * 組む。本体を止めない）。
  * 拡張E32: emphasizeに色(red/blue/purple/orange、拡張E36で緑を廃止し紫を追加)が指定されていれば
  * emphasisColor も付与する（任意・後方互換）。
  * 拡張E36 F-E36-3: 本文行にNGワードが含まれる場合、伏字化（拡張E27）ではなく該当する文（1文単位）
@@ -277,9 +367,13 @@ async function buildReactionBlocks(
   const numberToIndex = new Map(reses.map((r, i) => [r.number, i]));
 
   const selection = await selectReactionReses(llmClient, candidate.title, reses);
+  // LLM選定が失敗した場合（null）、拡張E43以前は「全レス無制限」にフォールバックしており、
+  // 話題バラバラの無関係レスが全部出てしまっていた。拡張E43 F-E43-2で、代わりに>>Nアンカーで
+  // 連結した会話クラスタのうち最大のもの（＝そのスレで最も会話が集まっている中心的な議論）だけを
+  // 採用するようにする（selectMajorConversationCluster）。
   const baseIndices = selection
     ? reses.map((_, i) => i).filter((i) => selection.keepLines.has(i))
-    : reses.map((_, i) => i);
+    : selectMajorConversationCluster(reses);
 
   // 表示レスが実際に表示する行から>>Nアンカーを集め、参照先Nが存在し未選択なら文脈として追加する
   // （1階層のみ＝baseIndicesの行だけを見る。追加した文脈レス自体の参照先は辿らない）。
