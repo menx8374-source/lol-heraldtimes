@@ -3,7 +3,9 @@ import {
   LABELS,
   HOOKS,
   checkTitleQuality,
+  containsConcreteElement,
   extractConcreteElements,
+  extractLLMTitle,
   generateHookTitle,
   generateHookTitleLLM,
   joinSubjectAndHook,
@@ -288,6 +290,31 @@ describe("generateHookTitleLLM（拡張E24 F-E24-2、LLMはスタブで実APIを
     // 固定フック語彙は含まない＝旧チェッカーでは不合格だったことを確認（緩和が効いている証拠）。
     expect(checkTitleQuality(naturalTitle, sourceText).hasEmotionalHook).toBe(false);
     expect(title).not.toBe(generateHookTitle(sample));
+  });
+
+  it("本文由来の具体要素を含まない自然なタイトルでも、ラベルと文字数を満たせば採用される（拡張E26: 具体要素の厳密一致要求を撤廃し過剰フォールバックを解消）", async () => {
+    // sample[0]本文の抽出済み具体要素(パッチ14.6/ダリウス/数値等)を一切含まないが、ラベル+文字数は満たすタイトル。
+    // E24の旧checkLLMTitleQuality(具体要素必須)なら落ちてルールベースにフォールバックしていたが、E26では採用される。
+    const noConcreteTitle = "【速報】ジャングルが弱くなって序盤の駆け引きが大きく変わりそう";
+    const llm = new FixedLLMClient(noConcreteTitle);
+    const title = await generateHookTitleLLM(llm, sample);
+    expect(title).toBe(noConcreteTitle);
+    expect(containsConcreteElement(noConcreteTitle, sourceText)).toBe(false);
+    expect(title).not.toBe(generateHookTitle(sample));
+  });
+
+  it("コードフェンス・引用符・「タイトル:」前置き付きのLLM出力からタイトル本体を取り出して採用する（拡張E26）", async () => {
+    const raw = "```\nタイトル: 「【速報】パッチ14.6でジャングル弱体化、序盤が激変」\n```";
+    const llm = new FixedLLMClient(raw);
+    const title = await generateHookTitleLLM(llm, sample);
+    expect(title).toBe("【速報】パッチ14.6でジャングル弱体化、序盤が激変");
+  });
+
+  it("extractLLMTitle: コードフェンス/引用符/前置き/複数行を除去し【ラベル】始まりの行を優先して取り出す", () => {
+    expect(extractLLMTitle('```json\n"【速報】テストタイトルだよ"\n```')).toBe("【速報】テストタイトルだよ");
+    expect(extractLLMTitle("title: 【議論】あああ")).toBe("【議論】あああ");
+    expect(extractLLMTitle("説明文です\n【朗報】本命はこちら\nおまけ")).toBe("【朗報】本命はこちら");
+    expect(extractLLMTitle("ラベル無しの1行")).toBe("ラベル無しの1行");
   });
 
   it("stripNgWordsがLLM出力にも適用される（NGワード除去後も検証通過すればそのタイトルを使う）", async () => {

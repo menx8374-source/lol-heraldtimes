@@ -355,18 +355,38 @@ export const LLM_TITLE_SYSTEM_PROMPT =
  * 念のためここでも例外を握りつぶす）の場合は必ずルールベースの generateHookTitle にフォールバックする
  * （＝呼び出し側から見てタイトルが空や例外になることはない）。
  */
+/** LLM生成タイトルで許容する最小文字数（全角相当）。ルールベースの MIN_TITLE_LENGTH(20) より緩め。
+ * まとめ速報の惹きつけタイトルは短く言い切る形もあるため、過剰なフォールバックを避ける（拡張E26）。 */
+export const LLM_MIN_TITLE_LENGTH = 12;
+
 /**
- * LLM生成タイトル用の緩めの品質判定（拡張E24）。ルールベースの固定フック語彙(HOOKS)への一致は
- * 要求しない（LLMは自然な言い回しの完結タイトルを作るため）。捏造防止のため本文由来の具体要素を
- * 1つ以上含むこと・冒頭に既定ラベル・文字数（MIN〜MAX）は引き続き必須とする。
+ * LLM生成タイトル用の品質判定（拡張E24、拡張E26で緩和）。
+ * 必須は「冒頭に既定ラベル(【速報】等)」と「文字数（LLM_MIN〜MAX）」の2点のみ。
+ * ⚠ 当初は「本文由来の具体要素を厳密な部分文字列一致で含むこと」も要求していたが、LLMの自然な言い回し
+ * ではほぼ一致せず毎回ルールベースへフォールバックしてしまい、LLMタイトル採用という目的が達成できなかった
+ * （拡張E26で撤廃）。捏造防止は「本文に無い固有名詞・事実を作らない」旨のプロンプト指示と stripNgWords に委ねる。
  */
-export function checkLLMTitleQuality(title: string, sourceText: string): boolean {
+export function checkLLMTitleQuality(title: string): boolean {
   const labelMatch = title.match(/^【([^】]+)】/);
   const hasLabel = !!labelMatch && (LABELS as readonly string[]).includes(labelMatch[1]);
-  const hasConcreteElement = containsConcreteElement(title, sourceText);
   const length = zenkakuLength(title);
-  const lengthOk = length >= MIN_TITLE_LENGTH && length <= MAX_TITLE_LENGTH;
-  return hasLabel && hasConcreteElement && lengthOk;
+  const lengthOk = length >= LLM_MIN_TITLE_LENGTH && length <= MAX_TITLE_LENGTH;
+  return hasLabel && lengthOk;
+}
+
+/**
+ * LLMの生の出力からタイトル文字列を頑健に取り出す（拡張E26）。Haiku等が付けがちな
+ * 前置き・引用符・コードフェンス・「タイトル:」ラベル・複数行を取り除き、【ラベル】から始まる
+ * 1行を優先的に拾う。見つからなければ最初の非空行を返す。
+ */
+export function extractLLMTitle(raw: string): string {
+  const cleaned = raw.replace(/```[a-zA-Z]*\n?/g, "").trim();
+  const lines = cleaned
+    .split(/\r?\n/)
+    .map((l) => l.trim().replace(/^(?:タイトル|title)\s*[:：]\s*/i, "").replace(/^["'「『]|["'」』]$/g, "").trim())
+    .filter((l) => l.length > 0);
+  const labeled = lines.find((l) => /^【[^】]+】/.test(l));
+  return (labeled ?? lines[0] ?? "").trim();
 }
 
 export async function generateHookTitleLLM(
@@ -379,14 +399,15 @@ export async function generateHookTitleLLM(
       { role: "system", content: LLM_TITLE_SYSTEM_PROMPT },
       { role: "user", content: sourceText },
     ]);
-    const candidate = stripNgWords(raw.trim());
+    // Haikuが付けがちな前置き・引用符・コードフェンス・改行を除去してタイトル本体を取り出す（拡張E26）。
+    const candidate = stripNgWords(extractLLMTitle(raw));
     if (candidate.length === 0) {
       return generateHookTitle(input);
     }
-    // LLMは自然な言い回しの完結タイトルを作るため、ルールベースの固定フック語彙(HOOKS)への
-    // 一致は要求しない（要求するとほぼ全てフォールバックし本来の意図＝LLMタイトル採用が達成できない）。
-    // 捏造防止の具体要素・冒頭ラベル・文字数は checkLLMTitleQuality で引き続き必須とする（拡張E24）。
-    if (!checkLLMTitleQuality(candidate, sourceText)) {
+    // LLMは自然な言い回しの完結タイトルを作るため、固定フック語彙も本文由来の具体要素も要求しない
+    // （要求するとほぼ全てフォールバックし本来の意図＝LLMタイトル採用が達成できない。拡張E26）。
+    // 必須はラベルと文字数のみ。捏造防止はプロンプト指示とstripNgWordsに委ねる。
+    if (!checkLLMTitleQuality(candidate)) {
       return generateHookTitle(input);
     }
     return candidate;

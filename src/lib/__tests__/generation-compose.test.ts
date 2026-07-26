@@ -252,6 +252,19 @@ describe("composeArticleBody（反応記事のLLMレス抜粋＋重要レス強�
     expect(sentTask.reses.map((r) => r.text)).toEqual(["最初のレス。", "二番目のレス。", "三番目のレス。"]);
   });
 
+  it("LLMがコードフェンス付きJSON(```json ... ```)を返しても抜粋・強調が効く（拡張E26で頑健化）", async () => {
+    const stub = new StubLLMClient("```json\n" + JSON.stringify({ keep: [1], emphasize: [1] }) + "\n```");
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "フェンステスト", content: threeResContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(1);
+    expect(reactions[0].type === "reaction" && reactions[0].number).toBe(2);
+    expect(reactions[0].type === "reaction" && reactions[0].lines.map((l) => l.text)).toEqual(["二番目のレス。"]);
+    expect(reactions[0].type === "reaction" && reactions[0].emphasis).toBe(true);
+  });
+
   it("範囲外・重複・emphasize⊄keepのインデックスが正規化される(実在範囲・keep部分集合)", async () => {
     // keep: 0を重複、-1と99は範囲外(3レスなのでindexは0-2)。emphasize: 1はkeepに含まれないため除外、2は含まれるため採用。
     const stub = new StubLLMClient(JSON.stringify({ keep: [0, 0, -1, 99, 2], emphasize: [1, 2] }));

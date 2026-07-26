@@ -39,6 +39,18 @@ type ReactionSelection = { keepIndices: Set<number>; emphasizeIndices: Set<numbe
  * emphasize は必ず keep の部分集合に丸める。keep が1件も残らない場合は null（＝呼び出し側で
  * 「全レス・強調なし」にフォールバックさせる）を返す。
  */
+/**
+ * LLMの生出力から最初のJSONオブジェクト（`{ ... }`）部分だけを取り出す（拡張E26）。
+ * ```json ... ``` のコードフェンスや前後の説明文が付いていてもparseできるようにする。
+ * `{`が無い/`}`が先行するなど不正な場合は null。
+ */
+function extractJsonObject(raw: string): string | null {
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start === -1 || end === -1 || end < start) return null;
+  return raw.slice(start, end + 1);
+}
+
 function normalizeReactionSelection(raw: unknown, resCount: number): ReactionSelection | null {
   if (typeof raw !== "object" || raw === null) return null;
   const obj = raw as Record<string, unknown>;
@@ -99,7 +111,11 @@ async function selectReactionReses(
       { role: "user", content: JSON.stringify(task) },
     ]);
     if (!raw || raw.trim().length === 0) return null;
-    const parsed: unknown = JSON.parse(raw);
+    // Haiku等が ```json ... ``` のコードフェンスや前置きを付けることがあるため、
+    // 最初の { から最後の } までを取り出してからparseする（拡張E26で頑健化）。
+    const jsonStr = extractJsonObject(raw);
+    if (!jsonStr) return null;
+    const parsed: unknown = JSON.parse(jsonStr);
     return normalizeReactionSelection(parsed, reses.length);
   } catch {
     return null;
