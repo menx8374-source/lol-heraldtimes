@@ -7,6 +7,7 @@ import {
 } from "@/lib/generation/generate-article";
 import { MockLLMClient, type LLMClient, type LLMMessage } from "@/lib/generation/llm-client";
 import { blockText, parseArticleBody } from "@/lib/article-body";
+import { pickDeterministicChampionSplashUrl } from "@/lib/generation/champion-thumbnail";
 
 const llm = new MockLLMClient();
 
@@ -140,7 +141,7 @@ describe("generateArticleForCandidate（チャンピオン検出→スプラッ�
     );
   });
 
-  it("ソース画像もチャンピオン検出も無ければthumbnailUrlはnullになる", async () => {
+  it("ソース画像もチャンピオン検出も無い反応記事(5ch/reddit)は決定論チャンピオンスプラッシュにフォールバックする(拡張E37)", async () => {
     const result = await generateArticleForCandidate(
       candidate({
         title: "パッチノートが公開",
@@ -152,10 +153,13 @@ describe("generateArticleForCandidate（チャンピオン検出→スプラッ�
       llm,
       championMap,
     );
-    expect(result.thumbnailUrl).toBeNull();
+    expect(result.thumbnailUrl).not.toBeNull();
+    expect(result.thumbnailUrl).toMatch(
+      /^https:\/\/ddragon\.leagueoflegends\.com\/cdn\/img\/champion\/splash\/[A-Za-z]+_0\.jpg$/,
+    );
   });
 
-  it("championMapを渡さない(未指定/null)場合は従来どおりチャンピオン検出を行わない", async () => {
+  it("championMapを渡さない(未指定/null)場合は従来どおりチャンピオン検出を行わないが、反応記事は決定論スプラッシュにフォールバックする(拡張E37)", async () => {
     const noMapArg = await generateArticleForCandidate(
       candidate({
         title: "リサンドラが強すぎると話題のスレ",
@@ -166,7 +170,11 @@ describe("generateArticleForCandidate（チャンピオン検出→スプラッ�
       }),
       llm,
     );
-    expect(noMapArg.thumbnailUrl).toBeNull();
+    // championMap未指定なので本文検出(Lissandra)は行われず、決定論フォールバックの絵になる
+    expect(noMapArg.thumbnailUrl).not.toBeNull();
+    expect(noMapArg.thumbnailUrl).toMatch(
+      /^https:\/\/ddragon\.leagueoflegends\.com\/cdn\/img\/champion\/splash\/[A-Za-z]+_0\.jpg$/,
+    );
 
     const nullMap = await generateArticleForCandidate(
       candidate({
@@ -179,7 +187,111 @@ describe("generateArticleForCandidate（チャンピオン検出→スプラッ�
       llm,
       null,
     );
-    expect(nullMap.thumbnailUrl).toBeNull();
+    expect(nullMap.thumbnailUrl).not.toBeNull();
+  });
+});
+
+describe("generateArticleForCandidate（反応記事の決定論チャンピオンスプラッシュフォールバック、拡張E37）", () => {
+  it("reaction(5ch/reddit)でimageUrlも本文チャンピオン検出も無い場合、candidate.idから決定論的に選んだチャンピオンのスプラッシュURLになる(null にならない)", async () => {
+    const result = await generateArticleForCandidate(
+      candidate({
+        id: "e37-c1",
+        title: "パッチノートが公開",
+        content: "1: 今回のパッチはアイテム調整が中心。",
+        sourceType: "5ch",
+        sourceUrl: "https://leagueoflegends.5ch.net/test/read.cgi/game/e37-1/",
+        imageUrl: null,
+      }),
+      llm,
+    );
+    expect(result.thumbnailUrl).toBe(pickDeterministicChampionSplashUrl("e37-c1"));
+  });
+
+  it("同じcandidate.idなら常に同じ決定論スプラッシュURLになる(再生成しても絵が変わらない)", async () => {
+    const first = await generateArticleForCandidate(
+      candidate({
+        id: "e37-stable",
+        title: "パッチノートが公開",
+        content: "1: 今回のパッチはアイテム調整が中心。",
+        sourceType: "reddit",
+        sourceUrl: "https://www.reddit.com/r/leagueoflegends/comments/e37-stable-1/",
+        imageUrl: null,
+      }),
+      llm,
+    );
+    const second = await generateArticleForCandidate(
+      candidate({
+        id: "e37-stable",
+        title: "パッチノートが公開(再生成)",
+        content: "1: 今回のパッチはアイテム調整が中心らしい。",
+        sourceType: "reddit",
+        sourceUrl: "https://www.reddit.com/r/leagueoflegends/comments/e37-stable-2/",
+        imageUrl: null,
+      }),
+      llm,
+    );
+    expect(first.thumbnailUrl).toBe(second.thumbnailUrl);
+  });
+
+  it("reactionでもimageUrlが安全なURLならそれが優先され、決定論スプラッシュは使われない(回帰なし)", async () => {
+    const result = await generateArticleForCandidate(
+      candidate({
+        id: "e37-with-image",
+        sourceType: "5ch",
+        sourceUrl: "https://leagueoflegends.5ch.net/test/read.cgi/game/e37-2/",
+        content: "1: 今回のパッチはアイテム調整が中心。",
+        imageUrl: "https://external.example.com/reaction-image.jpg",
+      }),
+      llm,
+    );
+    expect(result.thumbnailUrl).toBe("https://external.example.com/reaction-image.jpg");
+  });
+
+  it("reactionで本文にチャンピオン名があれば本文検出のスプラッシュが優先され、決定論スプラッシュは使われない(回帰なし)", async () => {
+    const championMap = new Map([["リリア", "Lillia"]]);
+    const result = await generateArticleForCandidate(
+      candidate({
+        id: "e37-with-detect",
+        title: "リリアが強すぎると話題のスレ",
+        content: "1: リリアの睡眠花が強すぎる。",
+        sourceType: "5ch",
+        sourceUrl: "https://leagueoflegends.5ch.net/test/read.cgi/game/e37-3/",
+        imageUrl: null,
+      }),
+      llm,
+      championMap,
+    );
+    expect(result.thumbnailUrl).toBe(
+      "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Lillia_0.jpg",
+    );
+  });
+
+  it("非reaction(riot/clip)でチャンピオン未検出のときは従来どおりthumbnailUrlがnullになる(カテゴリSVGに委ねる・回帰なし)", async () => {
+    const riotResult = await generateArticleForCandidate(
+      candidate({
+        id: "e37-riot",
+        sourceType: "riot",
+        title: "パッチ14.6ノート公開",
+        content:
+          "本パッチではジャングルモンスターの経験値量が全体的に引き下げられ、序盤のレベル差がつきにくくなる調整が入った。",
+        imageUrl: null,
+      }),
+      llm,
+    );
+    expect(riotResult.thumbnailUrl).toBeNull();
+
+    const clipResult = await generateArticleForCandidate(
+      candidate({
+        id: "e37-clip",
+        sourceType: "clip",
+        sourceUrl: "https://www.youtube.com/watch?v=e37clip",
+        title: "LoLハイライト動画",
+        content: "今週のLoL神プレイをまとめました。",
+        imageUrl: null,
+      }),
+      llm,
+    );
+    expect(clipResult.thumbnailUrl).toBeNull();
   });
 });
 

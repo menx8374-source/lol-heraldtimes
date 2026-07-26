@@ -238,6 +238,60 @@ export async function fetchChampionNameToIdMap(): Promise<ChampionNameToIdMap> {
 }
 
 /**
+ * 決定論的フォールバック（拡張E37 F-E37-1）用の、見栄えのする代表チャンピオンID固定プール。
+ * いずれも `_0`（1枚目）の公式スプラッシュが確実に存在するchampionId。
+ */
+const CURATED_SPLASH_CHAMPION_IDS: readonly string[] = [
+  "Ahri",
+  "Yasuo",
+  "Jinx",
+  "LeeSin",
+  "Lux",
+  "Ezreal",
+  "Zed",
+  "Katarina",
+  "MissFortune",
+  "Thresh",
+  "Garen",
+  "Darius",
+  "Vayne",
+  "Kaisa",
+  "Yone",
+  "Sett",
+  "Viego",
+  "Jhin",
+  "Akali",
+  "Riven",
+  "Irelia",
+  "Lucian",
+  "Kindred",
+  "Aphelios",
+];
+
+/**
+ * key（記事の安定キー。candidate.id を渡す想定）から決定論的にプール内indexを選ぶ。
+ * `Math.random`・`Date.now` は使わない（同じkeyなら常に同じindexになる）。
+ */
+function deterministicIndex(key: string, poolLength: number): number {
+  let sum = 0;
+  for (let i = 0; i < key.length; i++) {
+    sum += key.charCodeAt(i);
+  }
+  return sum % poolLength;
+}
+
+/**
+ * 反応記事（5ch/reddit）でチャンピオンが未検出のときの決定論フォールバック（拡張E37 F-E37-1）。
+ * key（candidate.id）ごとに固定プールから1体を安定して選び、公式スプラッシュURLを返す。
+ * 同じkeyなら常に同じチャンピオン、異なるkeyならプール内で分散する。
+ * 実ネット非依存（URL文字列を組み立てるだけ）。
+ */
+export function pickDeterministicChampionSplashUrl(key: string): string {
+  const index = deterministicIndex(key, CURATED_SPLASH_CHAMPION_IDS.length);
+  return buildChampionSplashUrl(CURATED_SPLASH_CHAMPION_IDS[index]);
+}
+
+/**
  * text（記事の原題+本文）中にチャンピオンの表示名が含まれていれば、そのチャンピオンの
  * 公式スプラッシュ画像URLを返す。含まれていなければ null。
  * 最長一致優先で判定する（例:「ジンクスは〜」を「ジン」の部分一致として誤検出しない）。

@@ -24,7 +24,11 @@ import { hasAcceptableQuoteRatio } from "@/lib/generation/quote-ratio";
 import { generateHookTitleLLM } from "@/lib/generation/title";
 import { threadBodyText } from "@/lib/generation/thread-format";
 import { isSafeImageUrl } from "@/lib/image-url";
-import { detectChampionSplashUrl, type ChampionNameToIdMap } from "@/lib/generation/champion-thumbnail";
+import {
+  detectChampionSplashUrl,
+  pickDeterministicChampionSplashUrl,
+  type ChampionNameToIdMap,
+} from "@/lib/generation/champion-thumbnail";
 
 /** 1記事あたりの本文最低文字数（見出し・段落・引用の合計、F7受け入れ基準）。riot(fact形式)のみに適用。 */
 export const MIN_BODY_LENGTH = 300;
@@ -53,10 +57,13 @@ export type GeneratedArticle = {
   body: ArticleBodyBlock[];
   sources: { label: string; url: string }[];
   /**
-   * 記事サムネイル画像URL。優先順（拡張E31 F-E31-2）:
+   * 記事サムネイル画像URL。優先順（拡張E31 F-E31-2、拡張E37 F-E37-2で③を追加）:
    * 1. candidate.imageUrl が https の妥当なURLならそれ。
    * 2. なければ、渡された championMap でタイトル+本文からチャンピオンを検出できればその公式スプラッシュ。
-   * 3. どちらも無ければ null（表示側 article-thumbnail.tsx がカテゴリ別/汎用の既定画像にフォールバックする）。
+   * 3. 反応形式（5ch/reddit）のみ、①②が無ければ candidate.id から決定論的に選んだチャンピオンの
+   *    公式スプラッシュ（pickDeterministicChampionSplashUrl）。
+   * 4. reaction以外（riot/clip）で①②が無ければ null（表示側 article-thumbnail.tsx がカテゴリ別/
+   *    汎用の既定画像にフォールバックする）。
    */
   thumbnailUrl: string | null;
 };
@@ -149,6 +156,12 @@ export async function generateArticleForCandidate(
   let thumbnailUrl: string | null = isSafeImageUrl(candidate.imageUrl) ? candidate.imageUrl : null;
   if (!thumbnailUrl && championMap) {
     thumbnailUrl = detectChampionSplashUrl(`${candidate.title}\n${candidate.content}`, championMap);
+  }
+  // 拡張E37 F-E37-2: 反応記事（5ch/reddit）でimageUrlも本文チャンピオン検出も無い場合のみ、
+  // candidate.idから決定論的に選んだチャンピオンの公式スプラッシュにフォールバックする
+  // （記事ごとに絵が固定され、パッチ/eスポーツ記事の挙動は変えない）。
+  if (!thumbnailUrl && isReactionFormat) {
+    thumbnailUrl = pickDeterministicChampionSplashUrl(candidate.id);
   }
 
   return {
