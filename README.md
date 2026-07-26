@@ -24,7 +24,7 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
   - 収集は各ソースとも fixture（`src/lib/collection/fixtures/*.json`）を読む **モック実装**（本番 API 未接続）。
   - ソースごとに実行間隔（既定: reddit/5ch 10分、riot 30分）を設けているため、直後に連続実行すると2回目以降は `skipped-rate-limited` になる（意図した挙動。上限・間隔の検証はこの動作で確認できる）。
 - **AIまとめ記事生成パイプライン実行**: `npm run generate`（記事化候補キュー(status="queued")を1件ずつ処理し、Article(+ArticleSource)を作成。結果をコンソールに表示。`npm run collect` の後に実行する）
-  - 生成LLMは決定論的な**モック実装**（テンプレート/ルールベース、API キー不要）。逐語一致率・引用の主従関係・最低文字数を満たさない候補は「生成失敗」(`CollectedItem.status="generation_failed"`、`generationError`にエラー内容を記録)として扱われ、他候補の生成は継続する。
+  - 生成LLMは既定で決定論的な**モック実装**（テンプレート/ルールベース、API キー不要）。`GENERATION_MODE=live`＋`ANTHROPIC_API_KEY`設定時のみAnthropic Claude(Haiku)へ本接続する（拡張E24。未設定ならmockに自動フォールバックし課金しない）。逐語一致率・引用の主従関係・最低文字数を満たさない候補は「生成失敗」(`CollectedItem.status="generation_failed"`、`generationError`にエラー内容を記録)として扱われ、他候補の生成は継続する。
   - 生成に成功した候補は `CollectedItem.articleId` と `status="articled"` が同一トランザクションで同期される（再実行しても二重記事化しない）。
   - **公開前コンテンツ安全フィルタ（F9）**: 生成した本文＋タイトルを NGワード／出典欠落／特定個人への中傷・晒し／重複の観点で判定し、通過した記事のみ `Article.status="published"` として公開される。通過しない記事は `status="held"`（保留）となり `heldReason`/`heldDetail` に理由が記録され、閲覧サイトの一覧・検索・個別ページのいずれにも表示されない（保留キューは `src/lib/moderation/queue.ts` の `listHeldArticles()` で参照できる）。未確定・噂レベルの表現を含む記事は保留にはせず `unconfirmed=true` として公開され、記事ページに「未確認情報」ラベルが表示される。
 - **統合パイプライン実行（F10・F11）**: `npm run pipeline`（収集→重複排除→記事生成→タイトル生成→安全フィルタ→公開までを1回の起動で人手介入なしで実行する。`npm run collect`+`npm run generate` を1本のオーケストレーションにまとめたもの）
@@ -40,8 +40,8 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
 | 変数名 | 必須 | 説明 |
 |---|---|---|
 | `DATABASE_URL` | 必須 | SQLite ファイルの場所。既定値 `file:./dev.db`（秘密情報ではない） |
-| `ANTHROPIC_API_KEY` | 後続スプリントで使用 | LLM 本接続用の Anthropic API キー（Sprint 1 時点では未使用） |
-| `ANTHROPIC_MODEL` | 任意 | 使用モデル。既定 `claude-haiku-4-5`（Sprint 1 時点では未使用） |
+| `ANTHROPIC_API_KEY` | live接続(拡張E24)を使うなら必須 | LLM本接続用のAnthropic APIキー（https://console.anthropic.com で発行）。**秘密情報のため必ず`.env`のみに設定しコミットしない**。未設定時は`GENERATION_MODE=live`でも自動でMockLLMClientにフォールバックする（未課金） |
+| `ANTHROPIC_MODEL` | 任意 | 使用モデル。既定 `claude-haiku-4-5`（コスト最小のHaiku固定） |
 | `COLLECTION_MODE` | 任意 | `mock`（既定）／`live`。`live` は全4ソース(riot=拡張E15, reddit=拡張E16, clip=拡張E17, 5ch=拡張E18)が本接続で収集する（フェーズ2完了） |
 | `COLLECTION_REDDIT_MAX_ITEMS` / `COLLECTION_5CH_MAX_ITEMS` / `COLLECTION_RIOT_MAX_ITEMS` / `COLLECTION_CLIP_MAX_ITEMS` | 任意 | ソースごとの1回の収集実行あたりの取得件数上限（既定: reddit/5ch=10, riot=20, clip=10） |
 | `COLLECTION_REDDIT_MIN_INTERVAL_MS` / `COLLECTION_5CH_MIN_INTERVAL_MS` / `COLLECTION_RIOT_MIN_INTERVAL_MS` / `COLLECTION_CLIP_MIN_INTERVAL_MS` | 任意 | ソースごとの最小実行間隔(ミリ秒)。既定: reddit/5ch=600000(10分), riot/clip=1800000(30分) |
@@ -51,7 +51,7 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
 | `TWITCH_CLIENT_ID` / `TWITCH_CLIENT_SECRET` | clip収集(拡張E17)のTwitch部分を使うなら必須 | Twitchアプリ（https://dev.twitch.tv/console/apps ）のクレデンシャル。app access token(client_credentials)取得に使う。**秘密情報のため必ず `.env` のみに設定しコミットしない**。未設定時はTwitch分のみ空配列＋ログでスキップ（YouTube等の他ソースは継続） |
 | `FIVECH_BOARDS` | 任意 | 5ch live収集(拡張E18)の対象板。`"server/board"` をカンマ区切りで指定（例 `egg.5ch.net/livegame`）。秘密情報ではない。未設定時は既定板を使用。取得失敗/板無効時は空配列＋ログでスキップ（他ソースは継続） |
 | `FIVECH_USER_AGENT` | 任意 | 5ch側が空/既定UAを弾くことがあるための説明的User-Agent文字列（秘密ではない）。未設定時は既定の説明的UAを使用 |
-| `GENERATION_MODE` | 任意 | `mock`（既定、APIキー不要の決定論的モックLLM）／`live`。`live` は本接続実装未整備のためエラーになる |
+| `GENERATION_MODE` | 任意 | `mock`（既定、APIキー不要の決定論的モックLLM）／`live`（拡張E24: `ANTHROPIC_API_KEY`設定時のみAnthropic Claude(Haiku)へ本接続。未設定ならmockに自動フォールバック） |
 | `PIPELINE_MAX_PUBLISH_PER_RUN` | 任意 | 統合パイプライン(`npm run pipeline`)1回の実行で処理・公開する記事本数の上限（既定5件） |
 | `PIPELINE_INTERVAL_MS` | 任意 | 統合パイプラインの繰り返し実行の目安間隔(ミリ秒)。既定14400000(4時間) |
 | `SITE_URL` | 任意 | サイトの絶対URLベース（既定 `http://localhost:3000`）。OGP／構造化データ／サイトマップ／robotsの絶対URL生成に使う |
@@ -63,7 +63,7 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
 
 ## 外部サービス接続の方針（現時点）
 当面はすべて **モック実装** で全スプリントを通し、将来の実運用時に順次本接続へ差し替える。いずれも差し替え可能な抽象越しに呼ぶ設計。
-- **LLM 記事・タイトル生成（F7・F8）**: `LLMClient` 抽象越しの決定論的モック実装（API キー不要）。将来は Anthropic Claude（`ANTHROPIC_API_KEY`・既定 `claude-haiku-4-5`）へ差し替え可能。
+- **LLM 記事・タイトル生成（F7・F8、拡張E24で本接続対応）**: `LLMClient` 抽象越し。既定は決定論的モック実装（API キー不要）。`GENERATION_MODE=live`＋`ANTHROPIC_API_KEY`設定時のみ Anthropic Claude（既定 `claude-haiku-4-5`）へ本接続する。タイトル生成（F8）はLLM生成→NGワード除去→品質検証を行い、検証不通過・空文字・APIエラー時は必ずルールベース(`generateHookTitle`)にフォールバックする（タイトルが空や例外になることはない）。
 - **ソース収集（Reddit／5ch／Riot 公式／YouTube・Twitchクリップ・F5）**: `SourceAdapter` 抽象越しの fixture モック（既定）。`COLLECTION_MODE=live` で riot（拡張E15）・reddit（拡張E16）・clip（拡張E17、YouTube+Twitch）・5ch（拡張E18、subject.txt/datスクレイピング・ベストエフォート）の全4ソースが本接続で収集する（フェーズ2完了）。5chは公式APIが無くHTML/dat仕様変更で壊れやすい前提のため、取得失敗は空配列＋ログでスキップし他ソースを止めない。逐語転載リスクがあるため削除依頼（`CONTACT_EMAIL`）への即応が運営者の安全弁。
 - **AdSense 広告（F12）**: アカウント開設・審査は Non-Goal。広告タグを差し込める枠と、設定でタグ文字列を受け取る仕組みまで（未設定時はプレースホルダー枠）。
 

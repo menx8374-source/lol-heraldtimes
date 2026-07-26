@@ -1,13 +1,14 @@
 /**
- * LLM 呼び出し抽象（architecture.md「LLM 接続方針」）。F7(本文)・F8(タイトル、後続スプリント) は
+ * LLM 呼び出し抽象（architecture.md「LLM 接続方針」）。F7(本文)・F8(タイトル) は
  * 必ずこのインターフェース越しに呼ぶ。
  *
- * 今スプリントは「LLM もモック」というユーザー決定のため、API キー不要の決定論的モック実装
- * (MockLLMClient) のみを提供する。将来 Anthropic Claude 等の本接続へ差し替える際は、
- * この LLMClient を実装する別クラスを用意し `getLLMClient()` の live 分岐に追加する
- * （収集アダプタの adapters/index.ts と同じ mock/live 切替構造）。呼び出し側(compose.ts)は
- * 差し替えても変更不要。
+ * 拡張E24でAnthropic Claude(Haiku)への本接続(AnthropicLLMClient)を追加した。
+ * `GENERATION_MODE=live` かつ `ANTHROPIC_API_KEY` 設定時のみ本接続になり、未設定なら
+ * 決定論的モック実装(MockLLMClient)にフォールバックする（既定は mock・無課金）。
+ * 呼び出し側(compose.ts等)は `getLLMClient()` 経由で受け取るだけで差し替えの影響を受けない
+ * （収集アダプタの adapters/index.ts と同じ mock/live 切替構造）。
  */
+import Anthropic from "@anthropic-ai/sdk";
 import type { SourceType } from "@/lib/collection/types";
 import { gistOf } from "@/lib/generation/text-utils";
 
@@ -93,21 +94,83 @@ export class MockLLMClient implements LLMClient {
   }
 }
 
-/** 生成モード。mock: 決定論的モック実装（既定）。live: 本接続（後日実装、現時点では未対応）。 */
+/** 生成モード。mock: 決定論的モック実装（既定）。live: 本接続（ANTHROPIC_API_KEY設定時）。 */
 export function getGenerationMode(): "mock" | "live" {
   return process.env.GENERATION_MODE === "live" ? "live" : "mock";
 }
 
+/** モデル既定値。コスト最小のHaiku固定（拡張E24: 月$3〜4程度の低頻度運用を想定）。 */
+const DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5";
+
+/**
+ * Anthropic Claude(Haiku) への本接続実装（拡張E24 F-E24-1）。
+ * APIキーは env `ANTHROPIC_API_KEY`（SDKの既定解決に任せる。ハードコードしない）。
+ * API呼び出しはtry/catchで囲み、失敗・タイムアウト時は例外を投げず空文字を返す
+ * （本体を止めない原則。呼び出し側＝title.tsのgenerateHookTitleLLM等がルールベースに
+ * フォールバックできるようにする）。
+ */
+export class AnthropicLLMClient implements LLMClient {
+  private readonly client: Anthropic;
+  private readonly model: string;
+
+  constructor() {
+    // 引数なしの new Anthropic() は SDK が ANTHROPIC_API_KEY を自動解決する。
+    this.client = new Anthropic();
+    this.model = process.env.ANTHROPIC_MODEL?.trim() || DEFAULT_ANTHROPIC_MODEL;
+  }
+
+  async generate(messages: LLMMessage[]): Promise<string> {
+    const system = messages
+      .filter((m) => m.role === "system")
+      .map((m) => m.content)
+      .join("\n\n");
+    const user = messages
+      .filter((m) => m.role === "user")
+      .map((m) => m.content)
+      .join("\n\n");
+    if (user.trim().length === 0) return "";
+
+    try {
+      const response = await this.client.messages.create({
+        model: this.model,
+        max_tokens: 1024,
+        ...(system.length > 0 ? { system } : {}),
+        messages: [{ role: "user", content: user }],
+      });
+      return response.content
+        .filter((block): block is Anthropic.TextBlock => block.type === "text")
+        .map((block) => block.text)
+        .join("")
+        .trim();
+    } catch (error) {
+      console.error(
+        "[AnthropicLLMClient] API呼び出しに失敗しました。呼び出し側のフォールバック処理に委ねます。",
+        error,
+      );
+      return "";
+    }
+  }
+}
+
+let mockFallbackNotified = false;
+
 /**
  * 設定に応じた LLMClient を返す。`mode` 省略時は `getGenerationMode()`（env `GENERATION_MODE`）に従う。
- * live モードは本接続実装が未整備のため、呼び出すと分かりやすいエラーで失敗する
- * （`ANTHROPIC_API_KEY` 等の認証情報が揃い次第、Anthropic実装をこのファイルに追加して差し替える）。
+ * live モードでも `ANTHROPIC_API_KEY` が未設定なら MockLLMClient にフォールバックする
+ * （例外を投げない。未課金・未設定でも本体を止めない）。フォールバック発生を1回だけログに残す。
  */
 export function getLLMClient(mode: "mock" | "live" = getGenerationMode()): LLMClient {
   if (mode === "live") {
-    throw new Error(
-      "live LLMクライアントは未実装です。ANTHROPIC_API_KEY等の認証情報が揃い次第、Anthropic実装をllm-client.tsに追加してください。",
-    );
+    if (process.env.ANTHROPIC_API_KEY) {
+      return new AnthropicLLMClient();
+    }
+    if (!mockFallbackNotified) {
+      console.log(
+        "[getLLMClient] GENERATION_MODE=live ですが ANTHROPIC_API_KEY が未設定のため MockLLMClient にフォールバックします。",
+      );
+      mockFallbackNotified = true;
+    }
+    return new MockLLMClient();
   }
   return new MockLLMClient();
 }

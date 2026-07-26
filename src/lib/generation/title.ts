@@ -1,17 +1,18 @@
 /**
  * 煽り速報タイトル生成と品質チェッカー（F8, 中核差別化機能）。
  *
- * ⚠ このスプリントもLLMはモック実装（ユーザー決定 2026-07-25）。タイトル生成は LLMClient を
- * 経由せず、ラベル語彙・具体要素抽出・感情フック語尾・文字数を満たすルールベースの決定論ロジックで
- * 行う（API キー不要）。判定ロジック（ラベル/具体要素/感情フック/文字数）は generateHookTitle（生成）と
- * checkTitleQuality（採点）の両方が同じ語彙・抽出関数を参照するため、生成した語彙をチェッカーが
- * 認識できないというズレは起きない。
+ * タイトルは2系統: (1) ルールベースの決定論生成 generateHookTitle（ラベル語彙・具体要素抽出・
+ * 感情フック語尾・文字数を満たす。API キー不要。判定ロジックは checkTitleQuality と語彙・抽出関数を
+ * 共有するためズレない）。(2) 拡張E24でLLM経由の generateHookTitleLLM を追加（本文の意味を踏まえた
+ * 惹きつけるタイトルを生成し、checkLLMTitleQuality で検証。不通過・空・APIエラー時は必ず(1)へ
+ * フォールバックする）。GENERATION_MODE=live かつ ANTHROPIC_API_KEY 設定時のみ(2)が本接続で動く。
  *
  * 「本文に存在しない固有名詞を捏造しない」を担保するため、具体要素は必ず
  * extractConcreteElements が sourceText から取り出した「そのままの部分文字列」だけを使う
  * （新しい文字列を組み立てて主張することはしない）。
  */
 import { stripNgWords } from "@/lib/moderation/ng-words";
+import type { LLMClient } from "@/lib/generation/llm-client";
 
 /** 冒頭ラベル語彙。生成タイトルは必ずこの中から1つを【】で囲んで先頭に付ける。 */
 export const LABELS = ["速報", "悲報", "朗報", "朗報か？", "議論", "海外の反応"] as const;
@@ -332,4 +333,64 @@ export function checkTitleQuality(title: string, sourceText: string): TitleQuali
     length,
     passed: hasLabel && hasConcreteElement && hasEmotionalHook && lengthOk,
   };
+}
+
+/**
+ * LLM(F-E24-2)に渡すタイトル生成プロンプトのsystem指示。本文はそのまま渡す(要約させない＝
+ * タイトル生成のみ)。捏造禁止・文字数・ラベル・省略記号禁止をここで指示する。
+ */
+export const LLM_TITLE_SYSTEM_PROMPT =
+  "あなたはLoLまとめ速報の編集者です。次に渡されるスレッド/投稿の内容（原題+本文）を踏まえて、" +
+  "日本語で人を惹きつける完結したまとめ速報風タイトルを1つだけ作ってください。" +
+  "冒頭に【速報】【悲報】【朗報】【議論】【海外の反応】等のラベルを【】付きで置いてください。" +
+  "本文に存在しない固有名詞や事実を捏造しないでください。全角20〜48文字程度に収めてください。" +
+  "省略記号「…」は使わないでください。出力はタイトルの文字列のみとし、説明や前置き、" +
+  "引用符・改行は付けないでください。";
+
+/**
+ * LLM経由でタイトルを生成する（拡張E24 F-E24-2）。本文の意味を踏まえた「【ラベル】＋惹きつける
+ * 完結タイトル」の生成をLLMClientに委ねるが、生成結果は必ず stripNgWords（NGワード除去）→
+ * checkTitleQuality（ラベル/具体要素/フック/文字数の検証）を通す。
+ * 検証不通過・空文字・APIエラー（LLMClient実装は失敗時に例外を投げず空文字を返す設計だが、
+ * 念のためここでも例外を握りつぶす）の場合は必ずルールベースの generateHookTitle にフォールバックする
+ * （＝呼び出し側から見てタイトルが空や例外になることはない）。
+ */
+/**
+ * LLM生成タイトル用の緩めの品質判定（拡張E24）。ルールベースの固定フック語彙(HOOKS)への一致は
+ * 要求しない（LLMは自然な言い回しの完結タイトルを作るため）。捏造防止のため本文由来の具体要素を
+ * 1つ以上含むこと・冒頭に既定ラベル・文字数（MIN〜MAX）は引き続き必須とする。
+ */
+export function checkLLMTitleQuality(title: string, sourceText: string): boolean {
+  const labelMatch = title.match(/^【([^】]+)】/);
+  const hasLabel = !!labelMatch && (LABELS as readonly string[]).includes(labelMatch[1]);
+  const hasConcreteElement = containsConcreteElement(title, sourceText);
+  const length = zenkakuLength(title);
+  const lengthOk = length >= MIN_TITLE_LENGTH && length <= MAX_TITLE_LENGTH;
+  return hasLabel && hasConcreteElement && lengthOk;
+}
+
+export async function generateHookTitleLLM(
+  llmClient: LLMClient,
+  input: TitleGenInput,
+): Promise<string> {
+  const sourceText = `${input.title}\n${input.content}`;
+  try {
+    const raw = await llmClient.generate([
+      { role: "system", content: LLM_TITLE_SYSTEM_PROMPT },
+      { role: "user", content: sourceText },
+    ]);
+    const candidate = stripNgWords(raw.trim());
+    if (candidate.length === 0) {
+      return generateHookTitle(input);
+    }
+    // LLMは自然な言い回しの完結タイトルを作るため、ルールベースの固定フック語彙(HOOKS)への
+    // 一致は要求しない（要求するとほぼ全てフォールバックし本来の意図＝LLMタイトル採用が達成できない）。
+    // 捏造防止の具体要素・冒頭ラベル・文字数は checkLLMTitleQuality で引き続き必須とする（拡張E24）。
+    if (!checkLLMTitleQuality(candidate, sourceText)) {
+      return generateHookTitle(input);
+    }
+    return candidate;
+  } catch {
+    return generateHookTitle(input);
+  }
 }

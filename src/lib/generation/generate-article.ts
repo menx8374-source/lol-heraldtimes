@@ -21,7 +21,7 @@ import type { LLMClient } from "@/lib/generation/llm-client";
 import { composeArticleBody } from "@/lib/generation/compose";
 import { computeVerbatimMatchRatio, DEFAULT_VERBATIM_THRESHOLD } from "@/lib/generation/verbatim";
 import { hasAcceptableQuoteRatio } from "@/lib/generation/quote-ratio";
-import { generateHookTitle } from "@/lib/generation/title";
+import { generateHookTitleLLM } from "@/lib/generation/title";
 import { threadBodyText } from "@/lib/generation/thread-format";
 import { isSafeImageUrl } from "@/lib/image-url";
 
@@ -46,7 +46,7 @@ export type GenerationCandidate = {
 };
 
 export type GeneratedArticle = {
-  /** 煽り速報タイトル（F8）。generateHookTitle により候補の原題+本文から生成する。 */
+  /** 煽り速報タイトル（F8）。generateHookTitleLLM（LLM生成、失敗時はgenerateHookTitleにフォールバック）により候補の原題+本文から生成する。 */
   title: string;
   category: CategoryLabel;
   body: ArticleBodyBlock[];
@@ -129,9 +129,15 @@ export async function generateArticleForCandidate(
     }
   }
 
+  // タイトルのソースはレス番号「N: 」やアンカー行を除いた本文にする（タイトルへの「1: 」混入を防ぐ）。
+  // LLM経由で生成し（拡張E24 F-E24-2）、検証不通過・APIエラー時は関数内でルールベースにフォールバックする。
+  const title = await generateHookTitleLLM(llmClient, {
+    title: candidate.title,
+    content: threadBodyText(candidate.content),
+  });
+
   return {
-    // タイトルのソースはレス番号「N: 」やアンカー行を除いた本文にする（タイトルへの「1: 」混入を防ぐ）。
-    title: generateHookTitle({ title: candidate.title, content: threadBodyText(candidate.content) }),
+    title,
     category: CATEGORY_BY_SOURCE[candidate.sourceType],
     body,
     sources: [{ label: ARTICLE_SOURCE_LABEL[candidate.sourceType], url: candidate.sourceUrl }],

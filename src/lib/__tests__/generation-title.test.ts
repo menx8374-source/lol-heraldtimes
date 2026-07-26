@@ -5,10 +5,12 @@ import {
   checkTitleQuality,
   extractConcreteElements,
   generateHookTitle,
+  generateHookTitleLLM,
   joinSubjectAndHook,
   zenkakuLength,
   type TitleGenInput,
 } from "@/lib/generation/title";
+import type { LLMClient, LLMMessage } from "@/lib/generation/llm-client";
 
 /** 10件のサンプル記事化候補（title+content）。ベンチマーク検証(F8受け入れ基準)に使う。 */
 const SAMPLES: TitleGenInput[] = [
@@ -229,5 +231,71 @@ describe("F8受け入れ基準ベンチマーク: 10件のサンプル記事に�
 
     expect(usedLabels.size).toBeGreaterThanOrEqual(2);
     expect(usedHooks.size).toBeGreaterThanOrEqual(2);
+  });
+});
+
+/** 固定文字列/例外を返すスタブLLMClient（拡張E24: テストでは実APIを叩かない）。 */
+class FixedLLMClient implements LLMClient {
+  constructor(private readonly response: string) {}
+  async generate(_messages: LLMMessage[]): Promise<string> {
+    return this.response;
+  }
+}
+
+class ThrowingLLMClient implements LLMClient {
+  async generate(_messages: LLMMessage[]): Promise<string> {
+    throw new Error("APIエラー（テスト用シミュレーション）");
+  }
+}
+
+describe("generateHookTitleLLM（拡張E24 F-E24-2、LLMはスタブで実APIを叩かない）", () => {
+  const sample = SAMPLES[0];
+  const sourceText = sourceTextOf(sample);
+
+  it("LLMが検証通過するタイトルを返したとき、そのタイトル（NGワード除去後）をそのまま使う", async () => {
+    const llmTitle = "【速報】パッチ14.6でジャングルが弱体化、判明";
+    const llm = new FixedLLMClient(llmTitle);
+    const title = await generateHookTitleLLM(llm, sample);
+    expect(title).toBe(llmTitle);
+    expect(checkTitleQuality(title, sourceText).passed).toBe(true);
+  });
+
+  it("LLMが空文字を返したときルールベース(generateHookTitle)にフォールバックする", async () => {
+    const llm = new FixedLLMClient("");
+    const title = await generateHookTitleLLM(llm, sample);
+    expect(title).toBe(generateHookTitle(sample));
+  });
+
+  it("LLMが検証不通過のタイトル（ラベル無し等）を返したときルールベースにフォールバックする", async () => {
+    const llm = new FixedLLMClient("パッチ14.6でジャングルが弱体化した件についての解説");
+    const title = await generateHookTitleLLM(llm, sample);
+    expect(title).toBe(generateHookTitle(sample));
+  });
+
+  it("LLM呼び出しが例外を投げたときルールベースにフォールバックし、例外が外に漏れない", async () => {
+    const llm = new ThrowingLLMClient();
+    await expect(generateHookTitleLLM(llm, sample)).resolves.toBe(generateHookTitle(sample));
+  });
+
+  it("固定フック語彙を含まない自然なLLMタイトルでも、ラベル・具体要素・文字数を満たせば採用される（拡張E24: 過剰フォールバック防止）", async () => {
+    // 「だった件」「がヤバいと話題に」等の固定フックを含まないが、ラベル・具体要素(パッチ14.6)・
+    // 文字数を満たす自然な完結タイトル。旧checkTitleQuality(フック必須)なら落ちてルールベースに
+    // フォールバックしていたが、LLM用の緩い判定では採用される。
+    const naturalTitle = "【議論】パッチ14.6のジャングル経験値ナーフにプレイヤーから賛否の声";
+    const llm = new FixedLLMClient(naturalTitle);
+    const title = await generateHookTitleLLM(llm, sample);
+    expect(title).toBe(naturalTitle);
+    // 固定フック語彙は含まない＝旧チェッカーでは不合格だったことを確認（緩和が効いている証拠）。
+    expect(checkTitleQuality(naturalTitle, sourceText).hasEmotionalHook).toBe(false);
+    expect(title).not.toBe(generateHookTitle(sample));
+  });
+
+  it("stripNgWordsがLLM出力にも適用される（NGワード除去後も検証通過すればそのタイトルを使う）", async () => {
+    const rawWithNg = "【速報】アホなパッチ14.6でジャングルが弱体化、判明";
+    const llm = new FixedLLMClient(rawWithNg);
+    const title = await generateHookTitleLLM(llm, sample);
+    expect(title).not.toContain("アホ");
+    expect(title).toBe("【速報】なパッチ14.6でジャングルが弱体化、判明");
+    expect(checkTitleQuality(title, sourceText).passed).toBe(true);
   });
 });
