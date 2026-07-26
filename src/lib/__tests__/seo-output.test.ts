@@ -93,16 +93,14 @@ describe("sitemap（F13）", () => {
     expect(urls.some((u) => u.endsWith("/archive/2026-07"))).toBe(true);
   });
 
-  it("攻略・データ固定ページ一覧・個別ページを含む（拡張E6）", async () => {
+  it("用語集を含み、champions・tier・patches はsitemapから除外される（拡張E34b: 運用方針変更で導線・sitemapから削除）", async () => {
     const entries = await sitemap();
     const urls = entries.map((e) => e.url);
 
-    expect(urls.some((u) => u.endsWith("/champions"))).toBe(true);
-    expect(urls.some((u) => u.endsWith("/champions/garen"))).toBe(true);
-    expect(urls.some((u) => u.endsWith("/patches"))).toBe(true);
-    expect(urls.some((u) => u.endsWith("/patches/14-13"))).toBe(true);
-    expect(urls.some((u) => u.endsWith("/tier"))).toBe(true);
     expect(urls.some((u) => u.endsWith("/glossary"))).toBe(true);
+    expect(urls.some((u) => u.endsWith("/champions"))).toBe(false);
+    expect(urls.some((u) => u.endsWith("/patches"))).toBe(false);
+    expect(urls.some((u) => u.endsWith("/tier"))).toBe(false);
   });
 });
 
