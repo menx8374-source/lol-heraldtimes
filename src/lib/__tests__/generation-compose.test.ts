@@ -1405,3 +1405,187 @@ describe("composeArticleBody（riotパッチ記事の3段フォールバック: 
     expect(headings).not.toContain("主な変更点（公式パッチノートより）");
   });
 });
+
+describe("composeArticleBody（reddit反応記事のレス翻訳＋原文併記、拡張E47 F-E47-1/F-E47-2）", () => {
+  /**
+   * reaction-select と reaction-translate を呼び出しタスク種別ごとに応答を切り替えるスタブ。
+   * reaction-select は常に「全レスkeep・強調なし」を返し（抜粋選定の影響を排除して翻訳だけを検証する）、
+   * reaction-translate は指定した応答（文字列固定）を返す。呼び出し回数も種別ごとに数える。
+   */
+  class ReactionTranslateStubLLMClient implements LLMClient {
+    public selectCalls = 0;
+    public translateCalls = 0;
+    constructor(private readonly translateResponse: string | (() => string)) {}
+    async generate(messages: LLMMessage[]): Promise<string> {
+      const user = messages.find((m) => m.role === "user");
+      const task = JSON.parse(user!.content) as { kind: string; reses: { index: number }[] };
+      if (task.kind === "reaction-select") {
+        this.selectCalls++;
+        return JSON.stringify({ keep: task.reses.map((r) => r.index), emphasize: [] });
+      }
+      this.translateCalls++;
+      return typeof this.translateResponse === "function" ? this.translateResponse() : this.translateResponse;
+    }
+  }
+
+  /** reaction-select は正常応答、reaction-translate は必ず例外を投げるスタブ（翻訳APIエラー再現用）。 */
+  class ThrowingOnlyForTranslateStub implements LLMClient {
+    async generate(messages: LLMMessage[]): Promise<string> {
+      const user = messages.find((m) => m.role === "user");
+      const task = JSON.parse(user!.content) as { kind: string; reses: { index: number }[] };
+      if (task.kind === "reaction-select") {
+        return JSON.stringify({ keep: task.reses.map((r) => r.index), emphasize: [] });
+      }
+      throw new Error("simulated translate API error");
+    }
+  }
+
+  const redditContent = "1: Nice teamfight there.\n2: >>1 That was so good, I love this play.";
+
+  it("翻訳が成功すると各行が{text:日本語, original:英語}になり、行の対応が正しい", async () => {
+    const stub = new ReactionTranslateStubLLMClient(
+      JSON.stringify({
+        translations: [
+          { index: 0, lines: ["いいチームファイトだった。"] },
+          { index: 1, lines: [">>1 それめっちゃ良かった、大好きだ。"] },
+        ],
+      }),
+    );
+    const body = await composeArticleBody(
+      { sourceType: "reddit", title: "Teamfight discussion", content: redditContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(2);
+    expect(reactions[0].type === "reaction" && reactions[0].lines).toEqual([
+      { text: "いいチームファイトだった。", original: "Nice teamfight there." },
+    ]);
+    expect(reactions[1].type === "reaction" && reactions[1].lines).toEqual([
+      {
+        text: ">>1 それめっちゃ良かった、大好きだ。",
+        original: ">>1 That was so good, I love this play.",
+        emphasis: "orange",
+      },
+    ]);
+    expect(stub.translateCalls).toBe(1);
+  });
+
+  it("複数行レスでも行index対応で正しく組まれる", async () => {
+    const content = "1: First line here.\nSecond line here.";
+    const stub = new ReactionTranslateStubLLMClient(
+      JSON.stringify({ translations: [{ index: 0, lines: ["最初の行です。", "二番目の行です。"] }] }),
+    );
+    const body = await composeArticleBody({ sourceType: "reddit", title: "Multi-line test", content }, stub);
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions[0].type === "reaction" && reactions[0].lines).toEqual([
+      { text: "最初の行です。", original: "First line here." },
+      { text: "二番目の行です。", original: "Second line here." },
+    ]);
+  });
+
+  it("NGワードを含む文だけが日本語訳(text)に対して削除される", async () => {
+    const stub = new ReactionTranslateStubLLMClient(
+      JSON.stringify({ translations: [{ index: 0, lines: ["カスだと思う。でも強いと思う。"] }] }),
+    );
+    const body = await composeArticleBody(
+      { sourceType: "reddit", title: "Champion talk", content: "1: This champion sucks. But it is strong." },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(1);
+    expect(reactions[0].type === "reaction" && reactions[0].lines).toEqual([
+      { text: "でも強いと思う。", original: "This champion sucks. But it is strong." },
+    ]);
+  });
+
+  it("強調(computeLineEmphasis)は日本語訳(text)に対して判定される", async () => {
+    const stub = new ReactionTranslateStubLLMClient(
+      JSON.stringify({ translations: [{ index: 0, lines: ["これは草生えるわ"] }] }),
+    );
+    const body = await composeArticleBody(
+      { sourceType: "reddit", title: "Emphasis test", content: "1: haha this is hilarious" },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions[0].type === "reaction" && reactions[0].lines[0].emphasis).toBe("red");
+  });
+
+  it("翻訳がnull(mock)のとき、各行は{text:英語}(originalなし)にフォールバックする(E46相当)", async () => {
+    const body = await composeArticleBody(
+      { sourceType: "reddit", title: "Teamfight discussion", content: redditContent },
+      new MockLLMClient(),
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    for (const r of reactions) {
+      expect(r.type === "reaction" && r.lines.every((l) => l.original === undefined)).toBe(true);
+    }
+    const texts = reactions.flatMap((b) => (b.type === "reaction" ? b.lines.map((l) => l.text) : []));
+    expect(texts).toEqual(["Nice teamfight there.", ">>1 That was so good, I love this play."]);
+  });
+
+  it("翻訳LLMが行数不一致を返した場合、そのレスのみ英語フォールバックになる(originalなし)", async () => {
+    const stub = new ReactionTranslateStubLLMClient(
+      JSON.stringify({
+        translations: [{ index: 0, lines: ["いいチームファイトだった。", "余分な行。"] }], // 1行のはずが2行(不一致)
+      }),
+    );
+    const body = await composeArticleBody(
+      { sourceType: "reddit", title: "Mismatch test", content: redditContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions[0].type === "reaction" && reactions[0].lines).toEqual([{ text: "Nice teamfight there." }]);
+  });
+
+  it("翻訳LLMが不正なJSONを返しても例外を投げず英語フォールバックになる", async () => {
+    const stub = new ReactionTranslateStubLLMClient("これはJSONではない応答です");
+    const body = await composeArticleBody(
+      { sourceType: "reddit", title: "Bad json test", content: redditContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    const texts = reactions.flatMap((b) => (b.type === "reaction" ? b.lines.map((l) => l.text) : []));
+    expect(texts).toEqual(["Nice teamfight there.", ">>1 That was so good, I love this play."]);
+  });
+
+  it("翻訳LLM呼び出しが例外を投げても記事生成は止まらず英語フォールバックになる", async () => {
+    const body = await composeArticleBody(
+      { sourceType: "reddit", title: "Throwing translate test", content: redditContent },
+      new ThrowingOnlyForTranslateStub(),
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(2);
+    const texts = reactions.flatMap((b) => (b.type === "reaction" ? b.lines.map((l) => l.text) : []));
+    expect(texts).toEqual(["Nice teamfight there.", ">>1 That was so good, I love this play."]);
+  });
+
+  it("reddit記事1本で翻訳LLM呼び出しは1回、5chでは翻訳が呼ばれない(0回)・逐語不変", async () => {
+    const redditStub = new ReactionTranslateStubLLMClient(
+      JSON.stringify({
+        translations: [
+          { index: 0, lines: ["いいチームファイトだった。"] },
+          { index: 1, lines: [">>1 それめっちゃ良かった、大好きだ。"] },
+        ],
+      }),
+    );
+    await composeArticleBody(
+      { sourceType: "reddit", title: "Reddit call count test", content: redditContent },
+      redditStub,
+    );
+    expect(redditStub.translateCalls).toBe(1);
+
+    const fivechContent = "1: 普通の反応だけ。\n2: それな。";
+    const fivechStub = new ReactionTranslateStubLLMClient("この応答は使われないはず");
+    const fivechBody = await composeArticleBody(
+      { sourceType: "5ch", title: "5ch call count test", content: fivechContent },
+      fivechStub,
+    );
+    expect(fivechStub.translateCalls).toBe(0);
+    const reactions = fivechBody.filter((b) => b.type === "reaction");
+    const texts = reactions.flatMap((b) => (b.type === "reaction" ? b.lines.map((l) => l.text) : []));
+    expect(texts).toEqual(["普通の反応だけ。", "それな。"]);
+    expect(reactions.every((b) => b.type === "reaction" && b.lines.every((l) => l.original === undefined))).toBe(
+      true,
+    );
+  });
+});

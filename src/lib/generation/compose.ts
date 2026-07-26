@@ -207,6 +207,71 @@ async function selectReactionReses(
   }
 }
 
+/** レス翻訳（reaction-translate、拡張E47 F-E47-1）の system 指示。捏造禁止・行数厳密一致をここで固定する。 */
+const REACTION_TRANSLATE_SYSTEM_PROMPT =
+  "あなたはLoLまとめサイトの翻訳担当です。渡された各レスの行（英語）を自然な日本語に訳してください。" +
+  "行数・順序は入力と厳密に一致させてください（1行に1行で対応）。LoL用語（チャンピオン名・レーン・" +
+  "BAN/ピック等）は一般的な日本語表記にしてください。意味を変えない・要約しない・増やさないでください。" +
+  '出力はJSONのみとし、{"translations": [{"index": N, "lines": ["日本語行", ...]}, ...]} の形式に' +
+  "してください（説明文・前置き・コードブロックは付けない）。";
+
+/**
+ * LLMが返した `{translations:[{index,lines}]}` 生JSON値を検証・正規化する純関数（拡張E47 F-E47-1）。
+ * index が入力に実在し、その行数が入力と一致するレスだけを採用する（行数不一致のレスは個別に除外）。
+ * 上位の `translateReactionLines` が最終的に null を返すかどうかを判断できるよう、ここでは
+ * （空も含め）Map を返す。
+ */
+function normalizeTranslations(
+  raw: unknown,
+  reses: { index: number; lines: string[] }[],
+): Map<number, string[]> | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const obj = raw as Record<string, unknown>;
+  if (!Array.isArray(obj.translations)) return null;
+
+  const lineCountByIndex = new Map(reses.map((r) => [r.index, r.lines.length]));
+  const result = new Map<number, string[]>();
+  for (const rawEntry of obj.translations) {
+    if (typeof rawEntry !== "object" || rawEntry === null) continue;
+    const e = rawEntry as Record<string, unknown>;
+    const index = e.index;
+    if (typeof index !== "number" || !Number.isInteger(index) || !lineCountByIndex.has(index)) continue;
+    if (result.has(index)) continue;
+    const expectedLen = lineCountByIndex.get(index)!;
+    if (!Array.isArray(e.lines) || e.lines.length !== expectedLen) continue;
+    if (!e.lines.every((l): l is string => typeof l === "string" && l.trim().length > 0)) continue;
+    result.set(index, e.lines as string[]);
+  }
+  return result;
+}
+
+/**
+ * reddit反応記事の表示対象レス行（英語）をLLMで日本語訳する（拡張E47 F-E47-1）。1記事につき1回だけ
+ * 呼ぶことを想定し、複数レスの行をまとめて渡す。失敗（mock・APIエラー・空応答・parse不能・不正形式）
+ * 時は例外を投げず null を返す（呼び出し側が英語原文フォールバックする）。行数が入力と一致しない
+ * レスは個別に除外される（他のレスの翻訳は活かす）。
+ */
+async function translateReactionLines(
+  llmClient: LLMClient,
+  reses: { index: number; lines: string[] }[],
+): Promise<Map<number, string[]> | null> {
+  if (reses.length === 0) return null;
+  try {
+    const task: GenerationTask = { kind: "reaction-translate", reses };
+    const raw = await llmClient.generate([
+      { role: "system", content: REACTION_TRANSLATE_SYSTEM_PROMPT },
+      { role: "user", content: JSON.stringify(task) },
+    ]);
+    if (!raw || raw.trim().length === 0) return null;
+    const jsonStr = extractJsonObject(raw);
+    if (!jsonStr) return null;
+    const parsed: unknown = JSON.parse(jsonStr);
+    return normalizeTranslations(parsed, reses);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * LLMの話題関連レス選定（selectReactionReses）が null を返したときのフォールバックとして使う純関数
  * （拡張E43 F-E43-2）。スレは複数の話題に脱線しがちなため、収集した全レスをそのまま出すと中心話題と
@@ -391,25 +456,52 @@ async function buildReactionBlocks(
   }
   const selectedIndices = [...baseIndices, ...contextIndices].sort((a, b) => a - b);
 
+  // 表示対象レスの実表示行（keepLines適用後、英語のまま）を先に確定しておく（翻訳バッチ・強調判定・
+  // NG削除のいずれもこの行配列を起点にする）。
+  const extractedLinesByIndex = new Map<number, string[]>(
+    selectedIndices.map((i) => {
+      const lineIndices = selection?.keepLines.get(i) ?? null;
+      return [i, lineIndices ? lineIndices.map((li) => reses[i].lines[li]) : reses[i].lines];
+    }),
+  );
+
+  // 拡張E47 F-E47-1/F-E47-2: reddit のときだけ、表示対象レスの行（英語）をまとめて1回で日本語訳する。
+  // 5ch では呼ばない（追加LLM呼び出しゼロ・逐語不変）。翻訳が失敗（null・行数不一致で当該レス除外）
+  // した場合はそのレスは英語原文のままフォールバックする（本体を止めない）。
+  let translations: Map<number, string[]> | null = null;
+  if (sourceType === "reddit" && selectedIndices.length > 0) {
+    const toTranslate = selectedIndices.map((i) => ({ index: i, lines: extractedLinesByIndex.get(i)! }));
+    translations = await translateReactionLines(llmClient, toTranslate);
+  }
+
   const blocks = selectedIndices
     .map((i): ArticleBodyReactionBlock | null => {
       const res = reses[i];
       // 行indexの指定があれば元 res.lines からその行だけを逐語のまま抽出する（拡張E28 F-E28-2）。
       // 指定なし（null＝全行採用、または選定自体が無いフォールバック）はres.linesをそのまま使う。
-      const lineIndices = selection?.keepLines.get(i) ?? null;
-      const extractedLines = lineIndices ? lineIndices.map((li) => res.lines[li]) : res.lines;
-      const emphasis = computeLineEmphasis(extractedLines);
+      const extractedLines = extractedLinesByIndex.get(i)!;
+      // 翻訳が取れた（行数一致で採用された）レスは日本語訳を表示テキストにし、原文(英語)を各行の
+      // originalに保持する。翻訳が無い（5ch・reddit翻訳失敗）レスは従来どおり抽出行そのものを使う。
+      const translatedLines = translations?.get(i) ?? null;
+      const displayLines = translatedLines ?? extractedLines;
+      const emphasis = computeLineEmphasis(displayLines);
       const anchors = extractAnchors(extractedLines).filter((n) => n !== res.number && knownNumbers.has(n));
       const isEmphasized = selection ? selection.emphasize.has(i) : false;
       const emphasisColor = isEmphasized ? (selection!.emphasize.get(i) ?? null) : null;
 
-      // NGワードを含む文だけを削除する（拡張E36 F-E36-3）。文削除後に空になった行は落とし、
+      // NGワードを含む文だけを削除する（拡張E36 F-E36-3）。拡張E47では表示テキスト（reddit翻訳成功時は
+      // 日本語訳、それ以外は英語/日本語の逐語）に対して適用する。文削除後に空になった行は落とし、
       // レスの全行が空になった場合はそのレス自体を不掲載にする（null を返す）。
       const cleanedLines: ArticleBodyReactionBlock["lines"] = [];
-      extractedLines.forEach((rawText, li) => {
+      displayLines.forEach((rawText, li) => {
         const cleanedText = removeNgSentences(rawText);
         if (cleanedText.length === 0) return;
-        cleanedLines.push(emphasis[li] ? { text: cleanedText, emphasis: emphasis[li] } : { text: cleanedText });
+        const original = translatedLines ? extractedLines[li] : undefined;
+        cleanedLines.push({
+          text: cleanedText,
+          ...(emphasis[li] ? { emphasis: emphasis[li] } : {}),
+          ...(original ? { original } : {}),
+        });
       });
       if (cleanedLines.length === 0) return null;
 

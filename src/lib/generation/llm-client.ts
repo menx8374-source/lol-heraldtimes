@@ -29,6 +29,14 @@ export type GenerationTask =
       kind: "reaction-select";
       title: string;
       reses: { index: number; number: number; lines: string[] }[];
+    }
+  | {
+      /**
+       * 拡張E47 F-E47-1: reddit反応記事のレス行（英語）を日本語訳させるタスク。
+       * 出力は `{ translations: [{ index, lines: [日本語行,...] }, ...] }`（行数・順序は入力と厳密一致）。
+       */
+      kind: "reaction-translate";
+      reses: { index: number; lines: string[] }[];
     };
 
 function renderIntro(task: Extract<GenerationTask, { kind: "intro" }>): string {
@@ -65,6 +73,15 @@ function renderReactionSelect(task: Extract<GenerationTask, { kind: "reaction-se
   return JSON.stringify({ keep: task.reses.map((r) => r.index), emphasize: [] });
 }
 
+/**
+ * レス翻訳タスク（拡張E47 F-E47-1）のモック応答。決定論的モックは実際の翻訳を行わないため、
+ * 常に空文字を返す（＝呼び出し側の `translateReactionLines` がparse失敗として null 扱いにし、
+ * reddit記事は英語原文のまま表示される。翻訳はlive時のみという設計）。
+ */
+function renderReactionTranslate(): string {
+  return "";
+}
+
 function renderTask(task: GenerationTask): string {
   switch (task.kind) {
     case "intro":
@@ -77,6 +94,8 @@ function renderTask(task: GenerationTask): string {
       return renderClosing(task);
     case "reaction-select":
       return renderReactionSelect(task);
+    case "reaction-translate":
+      return renderReactionTranslate();
   }
 }
 
