@@ -31,11 +31,34 @@ export const NG_WORDS = [
   "障害者",
   "ガイジ",
   "がいじ",
+  // 追加の差別語（拡張E29/E30。放送禁止用語・障害/民族差別語のうち、中立的用法がほぼ無く
+  // 誤検知リスクの低いものを厳選。参考: MosasoM/inappropriate-words-ja(MITライセンス)のカテゴリ）。
+  "気違い",
+  "気狂い",
+  "障がい者",
+  "精神異常者",
+  "カタワ",
+  "つんぼ",
+  "めくら",
+  "土人",
+  "ニガー",
 ] as const;
 
-/** text にNGワードが含まれていれば最初に一致した語を返す。含まれなければ null。 */
+/**
+ * NGワード照合用にテキストを正規化する（拡張E30）。NFKC正規化で半角カナ・全角/半角の表記ゆらぎを
+ * 吸収し、`ｶﾞｲｼﾞ`→`ガイジ`のような回避表記も検出できるようにする（検出のみに使う純関数）。
+ * ※空白挿入等の分断回避は誤検知(例「バ カメラ」)を招くため行わない。文脈依存の高度な検出は
+ *   LLMモデレーションに委ねる方針。
+ */
+export function normalizeForNgMatch(text: string): string {
+  return text.normalize("NFKC");
+}
+
+/** text にNGワードが含まれていれば最初に一致した語を返す。含まれなければ null。
+ * NFKC正規化後のテキストに対して照合するため、半角カナ等の表記ゆらぎも検出する（拡張E30）。 */
 export function findNgWord(text: string): string | null {
-  return NG_WORDS.find((word) => text.includes(word)) ?? null;
+  const normalized = normalizeForNgMatch(text);
+  return NG_WORDS.find((word) => normalized.includes(word)) ?? null;
 }
 
 /** text からNGワードをすべて除去する（タイトル生成の具体要素穴埋め等で安全側に倒すために使う）。 */

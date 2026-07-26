@@ -47,6 +47,19 @@ describe("findNgWord / stripNgWords（NGワード検出, F9）", () => {
       expect(findNgWord(`こいつ${w}かよ`)).toBe(w);
     }
   });
+
+  it("追加した差別語（放送禁止用語系）を検出する（拡張E30）", () => {
+    for (const w of ["気違い", "気狂い", "障がい者", "精神異常者", "カタワ", "つんぼ", "めくら", "土人", "ニガー"]) {
+      expect(findNgWord(`まじで${w}だな`)).toBe(w);
+    }
+  });
+
+  it("NFKC正規化で半角カナ等の表記ゆらぎのNGワードも検出する（拡張E30: ｶﾞｲｼﾞ→ガイジ）", () => {
+    // 半角カナで書かれた「ガイジ」も検出される（回避表記対策）。
+    expect(findNgWord("こいつｶﾞｲｼﾞ")).toBe("ガイジ");
+    // 中立的な文は誤検知しない（空白分断は正規化対象外なので「バ カメラ」等の誤検知は起きない）。
+    expect(findNgWord("その バ カメラは高性能だ")).toBeNull();
+  });
 });
 
 describe("detectPersonalAttack（特定個人への中傷／晒し検出, F9）", () => {
