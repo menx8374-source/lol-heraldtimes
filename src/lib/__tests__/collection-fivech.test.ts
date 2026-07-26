@@ -12,14 +12,6 @@ import {
 } from "@/lib/collection/adapters/fivech";
 import { parseThreadReses, extractAnchors } from "@/lib/generation/thread-format";
 
-function textResponse(body: string, status = 200): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    text: async () => body,
-  } as unknown as Response;
-}
-
 const SUBJECT_TEXT =
   "1700000001.dat<>【LoL】バロン前ワイプ、議論勃発 (12)\n" +
   "1700000002.dat<>麻雀の戦術について語るスレ (50)\n" +
@@ -30,6 +22,35 @@ const DAT_TEXT_THREAD1 =
   "名無しさん<><>2026/07/25(土) 10:00:00.00 ID:aaa<>今日のランクでバロン前に味方ADCが単独で突っ込んで負けた。これADCが悪いよな?<>【LoL】バロン前ワイプ、議論勃発\n" +
   "名無しさん<><>2026/07/25(土) 10:01:00.00 ID:bbb<>&gt;&gt;1<br>状況によるけど、フラッシュが無い状態なら判断ミスだと思う。<>\n" +
   '名無しさん<><>2026/07/25(土) 10:02:00.00 ID:ccc<>いや<a href="./test/read.cgi/game/1700000001/1">サポート</a>が先に落ちたのが原因では?<>\n';
+
+// SUBJECT_TEXT/DAT_TEXT_THREAD1 をShift_JIS(Windows-31J/CP932)でエンコードした生バイト列(16進)。
+// 5chが実際に返すのと同じShift_JISバイト列でFiveChAdapterの取得経路(拡張E23)を検証するため、
+// UTF-8前提のtext()ではなくarrayBuffer()でこのバイト列を返すモックを使う。
+// (事前にNode `TextDecoder("shift_jis").decode()` で上記2定数と完全一致することを確認済み)
+const SUBJECT_TEXT_SJIS_HEX =
+  "313730303030303030312e6461743c3e81794c6f4c817a836f838d8393914f838f8343837681418b63985f967594ad20283132290a" +
+  "313730303030303030322e6461743c3e9683909d82cc90ed8f7082c982c282a282c48cea82e98358838c20283530290a" +
+  "313730303030303030332e6461743c3e83848358834982cc936090e093498341834583678376838c834382c988ea93af919b915220283230290a" +
+  "696e76616c6964206c696e6520776974686f75742070726f70657220666f726d61740a";
+
+const DAT_TEXT_THREAD1_SJIS_HEX =
+  "96bc96b382b582b382f13c3e3c3e323032362f30372f3235289379292031303a30303a30302e30302049443a6161613c3e" +
+  "8da193fa82cc83898393834e82c5836f838d8393914f82c996a195fb41444382aa925093c682c593cb82c18d9e82f182c5958982af82bd814282b182ea41444382aa88ab82a282e682c83f3c3e" +
+  "81794c6f4c817a836f838d8393914f838f8343837681418b63985f967594ad0a" +
+  "96bc96b382b582b382f13c3e3c3e323032362f30372f3235289379292031303a30313a30302e30302049443a6262623c3e" +
+  "2667743b2667743b313c62723e8ff38bb582c982e682e982af82c781418374838983628356838582aa96b382a28ff391d482c882e794bb9266837e835882be82c68e7682a481423c3e0a" +
+  "96bc96b382b582b382f13c3e3c3e323032362f30372f3235289379292031303a30323a30302e30302049443a6363633c3e" +
+  "82a282e23c6120687265663d222e2f746573742f726561642e6367692f67616d652f313730303030303030312f31223e8354837c815b83673c2f613e82aa90e682c9978e82bf82bd82cc82aa8cb488f682c582cd3f3c3e0a";
+
+/** fetchのモック応答: FiveChAdapterは`fetchShiftJisTextSafe`(arrayBuffer→shift_jisデコード)で読むため、
+ * `text()`ではなく`arrayBuffer()`でShift_JISの生バイト列を返す(5chの実際の応答を模す)。 */
+function sjisResponse(bodyHex: string, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    arrayBuffer: async () => Uint8Array.from(Buffer.from(bodyHex, "hex")).buffer,
+  } as unknown as Response;
+}
 
 describe("純関数: parseBoards", () => {
   it("\"server/board\"のカンマ区切りをboard定義配列にパースする", () => {
@@ -151,9 +172,9 @@ describe("FiveChAdapter.fetchItems", () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const headers = init?.headers as Record<string, string>;
       expect(headers["User-Agent"]).toBe("test-ua");
-      if (url === buildSubjectUrl(board.server, board.board)) return textResponse(SUBJECT_TEXT);
-      if (url === buildDatUrl(board.server, board.board, "1700000001")) return textResponse(DAT_TEXT_THREAD1);
-      if (url === buildDatUrl(board.server, board.board, "1700000003")) return textResponse(DAT_TEXT_THREAD1);
+      if (url === buildSubjectUrl(board.server, board.board)) return sjisResponse(SUBJECT_TEXT_SJIS_HEX);
+      if (url === buildDatUrl(board.server, board.board, "1700000001")) return sjisResponse(DAT_TEXT_THREAD1_SJIS_HEX);
+      if (url === buildDatUrl(board.server, board.board, "1700000003")) return sjisResponse(DAT_TEXT_THREAD1_SJIS_HEX);
       throw new Error(`unexpected url: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -172,9 +193,9 @@ describe("FiveChAdapter.fetchItems", () => {
 
   it("同一スレ(同一read.cgi URL)が重複した場合は重複排除して1件になる", async () => {
     const fetchMock = vi.fn(async (url: string) => {
-      if (url === buildSubjectUrl(board.server, board.board)) return textResponse(SUBJECT_TEXT);
-      if (url === buildDatUrl(board.server, board.board, "1700000001")) return textResponse(DAT_TEXT_THREAD1);
-      if (url === buildDatUrl(board.server, board.board, "1700000003")) return textResponse(DAT_TEXT_THREAD1);
+      if (url === buildSubjectUrl(board.server, board.board)) return sjisResponse(SUBJECT_TEXT_SJIS_HEX);
+      if (url === buildDatUrl(board.server, board.board, "1700000001")) return sjisResponse(DAT_TEXT_THREAD1_SJIS_HEX);
+      if (url === buildDatUrl(board.server, board.board, "1700000003")) return sjisResponse(DAT_TEXT_THREAD1_SJIS_HEX);
       throw new Error(`unexpected url: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -202,7 +223,7 @@ describe("FiveChAdapter.fetchItems", () => {
 
   it("subject.txt取得がHTTPエラーの場合は空配列を返す(dat取得は行わず、例外を投げない)", async () => {
     const fetchMock = vi.fn(async (url: string) =>
-      url === buildSubjectUrl(board.server, board.board) ? textResponse("", 403) : textResponse(DAT_TEXT_THREAD1),
+      url === buildSubjectUrl(board.server, board.board) ? sjisResponse("", 403) : sjisResponse(DAT_TEXT_THREAD1_SJIS_HEX),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -213,9 +234,9 @@ describe("FiveChAdapter.fetchItems", () => {
 
   it("dat取得の失敗(ネットワーク断)は当該スレのみスキップし、他は継続する(例外を投げない)", async () => {
     const fetchMock = vi.fn(async (url: string) => {
-      if (url === buildSubjectUrl(board.server, board.board)) return textResponse(SUBJECT_TEXT);
+      if (url === buildSubjectUrl(board.server, board.board)) return sjisResponse(SUBJECT_TEXT_SJIS_HEX);
       if (url === buildDatUrl(board.server, board.board, "1700000001")) throw new Error("network down");
-      if (url === buildDatUrl(board.server, board.board, "1700000003")) return textResponse(DAT_TEXT_THREAD1);
+      if (url === buildDatUrl(board.server, board.board, "1700000003")) return sjisResponse(DAT_TEXT_THREAD1_SJIS_HEX);
       throw new Error(`unexpected url: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -229,7 +250,7 @@ describe("FiveChAdapter.fetchItems", () => {
   it("既定board(env未設定)でもエラーにならず動作する(既定値使用)", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => textResponse("", 500)),
+      vi.fn(async () => sjisResponse("", 500)),
     );
     const adapter = new FiveChAdapter({});
     await expect(adapter.fetchItems()).resolves.toEqual([]);

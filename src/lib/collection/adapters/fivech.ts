@@ -13,13 +13,14 @@
  * スレッドダンプ文字列を content に入れるのみでHTMLとして解釈させる経路には入れない
  * （安全フィルタ・XSSエスケープ・出典必須は既存の生成/表示層が担保）。
  *
- * 注記（既知の限界）: 5chの一部の古い板はShift_JISで応答することがあるが、追加依存
- * （iconv-lite等）を避けるため `fetchTextSafe`（標準 `Response#text()`、UTF-8前提）で
- * そのまま読む。文字化けする板がある場合は運営者側でUTF-8配信の板/ミラーに切り替える。
+ * 注記（拡張E23で修正）: 5chの subject.txt/dat は多くがShift_JIS（Windows-31J/CP932）で
+ * 配信されるため、`fetchShiftJisTextSafe`（`res.arrayBuffer()` を Node標準 `TextDecoder("shift_jis")`
+ * でデコード。フルICUで利用可能・追加依存なし）で明示的にデコードして取得する
+ * （以前はUTF-8前提の `fetchTextSafe` で読んでいたため日本語が文字化けしていた）。
  */
 import type { RawCollectionItem, SourceAdapter } from "@/lib/collection/types";
 import { getDefaultSourceConfigs } from "@/lib/collection/config";
-import { fetchTextSafe, dedupeBySourceUrl } from "@/lib/collection/adapters/http";
+import { fetchShiftJisTextSafe, dedupeBySourceUrl } from "@/lib/collection/adapters/http";
 
 /** 板未設定時の既定（LoLスレが立つことがあるネトゲ実況板の一例。運営者が env で差し替え可能）。 */
 const DEFAULT_BOARDS_RAW = "egg.5ch.net/livegame";
@@ -182,7 +183,7 @@ export class FiveChAdapter implements SourceAdapter {
   private async fetchBoardItems(boardConf: FiveChBoard): Promise<RawCollectionItem[]> {
     const now = this.now();
     const boardLabel = `${boardConf.server}/${boardConf.board}`;
-    const subjectText = await fetchTextSafe(
+    const subjectText = await fetchShiftJisTextSafe(
       buildSubjectUrl(boardConf.server, boardConf.board),
       { headers: { "User-Agent": this.userAgent } },
       { logLabel: "5ch", context: `${boardLabel} subject.txt` },
@@ -194,7 +195,7 @@ export class FiveChAdapter implements SourceAdapter {
 
     const items: RawCollectionItem[] = [];
     for (const entry of relevant) {
-      const datText = await fetchTextSafe(
+      const datText = await fetchShiftJisTextSafe(
         buildDatUrl(boardConf.server, boardConf.board, entry.threadId),
         { headers: { "User-Agent": this.userAgent } },
         { logLabel: "5ch", context: `${boardLabel}/${entry.threadId}.dat` },

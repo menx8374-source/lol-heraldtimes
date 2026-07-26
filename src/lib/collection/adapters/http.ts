@@ -87,3 +87,21 @@ export function fetchTextSafe(
 ): Promise<string | null> {
   return fetchSafe<string>(url, init, opts, (res) => res.text());
 }
+
+/**
+ * Shift_JIS（Windows-31J/CP932）でエンコードされた外部エンドポイント（例: 5chのsubject.txt/dat）を
+ * タイムアウト付きで安全に取得する。`res.text()` はUTF-8前提で日本語が文字化けするため、
+ * `res.arrayBuffer()` で生バイト列を取得し `TextDecoder("shift_jis")`（Node標準・フルICUで利用可能。
+ * 追加依存不要）で明示的にデコードする。`fetchTextSafe`（UTF-8既定）の挙動には一切影響しない
+ * （呼び出し側で用途に応じて使い分ける）。失敗時は`fetchTextSafe`同様 `null` を返す。
+ */
+export function fetchShiftJisTextSafe(
+  url: string,
+  init: RequestInit = {},
+  opts: FetchSafeOptions = {},
+): Promise<string | null> {
+  return fetchSafe<string>(url, init, opts, async (res) => {
+    const buf = await res.arrayBuffer();
+    return new TextDecoder("shift_jis").decode(buf);
+  });
+}
