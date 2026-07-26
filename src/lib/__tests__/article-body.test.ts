@@ -128,7 +128,7 @@ describe("parseArticleBody", () => {
     ).toThrow(InvalidArticleBodyError);
   });
 
-  it("reactionブロックのemphasisColor(赤/青/緑)をパースできる(拡張E32)", () => {
+  it("reactionブロックのemphasisColor(赤/青/紫/オレンジ)をパースできる(拡張E32、拡張E36で緑を廃止)", () => {
     const input = [
       {
         type: "reaction",
@@ -166,6 +166,50 @@ describe("parseArticleBody", () => {
           lines: [{ text: "x" }],
           emphasis: true,
           emphasisColor: "pink",
+        },
+      ]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
+  it("reactionブロックのemphasisColorとしてpurpleを許可する(拡張E36、緑の代替として追加)", () => {
+    const input = [
+      {
+        type: "reaction",
+        number: 1,
+        name: "国内プレイヤーさん",
+        lines: [{ text: "補足の反応" }],
+        emphasis: true,
+        emphasisColor: "purple",
+      },
+    ];
+    const result = parseArticleBody(input);
+    expect(result[0]).toEqual(input[0]);
+  });
+
+  it("reactionブロックのemphasisColorとしてorangeを許可する(拡張E36)", () => {
+    const result = parseArticleBody([
+      {
+        type: "reaction",
+        number: 1,
+        name: "国内プレイヤーさん",
+        lines: [{ text: "強めの反応" }],
+        emphasis: true,
+        emphasisColor: "orange",
+      },
+    ]);
+    expect(result[0]).toMatchObject({ emphasisColor: "orange" });
+  });
+
+  it("reactionブロックのemphasisColorとしてgreenはもう許可しない(拡張E36で緑を廃止)", () => {
+    expect(() =>
+      parseArticleBody([
+        {
+          type: "reaction",
+          number: 1,
+          name: "国内プレイヤーさん",
+          lines: [{ text: "x" }],
+          emphasis: true,
+          emphasisColor: "green",
         },
       ]),
     ).toThrow(InvalidArticleBodyError);

@@ -21,8 +21,9 @@ import { isSafeLocalAssetPath } from "@/lib/image-url";
  * （`text` 側が日本語訳）。 */
 export type ArticleBodyReactionLine = { text: string; emphasis?: "red" | "orange"; original?: string };
 
-/** レス単位の強調色（拡張E32）。おばにゅー流に赤/青/緑で色分けする。 */
-export type ArticleBodyEmphasisColor = "red" | "blue" | "green";
+/** レス単位の強調色（拡張E32、拡張E36で緑を廃止し紫を追加）。おばにゅー流に赤/青/紫/オレンジで
+ * 色分けする（名前見出し（ResHeader）の緑と被って見えづらくなるため緑は使わない）。 */
+export type ArticleBodyEmphasisColor = "red" | "blue" | "purple" | "orange";
 
 /** 掲示板/SNSの1書き込み（レス）をまとめ速報形式で表すブロック。逐語表示が前提。 */
 export type ArticleBodyReactionBlock = {
@@ -41,8 +42,9 @@ export type ArticleBodyReactionBlock = {
    */
   emphasis?: boolean;
   /**
-   * 強調レスの色（拡張E32 F-E32-1）。`emphasis:true` のときのみ意味を持ち、LLMが割り当てた場合に
-   * 赤/青/緑の色付きで強調する。未指定（`emphasis:true`のみ）は従来どおり色無しの濃色強調（後方互換）。
+   * 強調レスの色（拡張E32 F-E32-1、拡張E36で緑を廃止し紫を追加）。`emphasis:true` のときのみ
+   * 意味を持ち、LLMが割り当てた場合に赤/青/紫/オレンジの色付きで強調する。未指定（`emphasis:true`のみ）は
+   * 色無し・通常サイズ・非太字の黒字表示になる（拡張E36 F-E36-2: 黒字は統一表示にする）。
    */
   emphasisColor?: ArticleBodyEmphasisColor;
 };
@@ -119,7 +121,12 @@ function parseReactionBlock(b: Record<string, unknown>, index: number): ArticleB
   }
   let emphasisColor: ArticleBodyEmphasisColor | undefined;
   if (b.emphasisColor !== undefined) {
-    if (b.emphasisColor !== "red" && b.emphasisColor !== "blue" && b.emphasisColor !== "green") {
+    if (
+      b.emphasisColor !== "red" &&
+      b.emphasisColor !== "blue" &&
+      b.emphasisColor !== "purple" &&
+      b.emphasisColor !== "orange"
+    ) {
       throw new InvalidArticleBodyError(`本文ブロック[${index}]のemphasisColorが不正です`);
     }
     emphasisColor = b.emphasisColor;

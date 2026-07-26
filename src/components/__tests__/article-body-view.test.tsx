@@ -209,19 +209,20 @@ describe("ArticleBodyView（埋め込みブロックの実iframe化, 拡張E22�
   });
 });
 
-describe("ArticleBodyView（レス単位の重要レス強調, 拡張E25 F-E25-2）", () => {
-  it("emphasisフラグ付きレスは文字を大きく＋太字のクラスで描画する", () => {
+describe("ArticleBodyView（レス単位の重要レス強調, 拡張E25 F-E25-2／黒字統一, 拡張E36 F-E36-2）", () => {
+  it("emphasisフラグのみ(emphasisColor無し)のレスは通常サイズ・非太字・黒字で描画する(拡張E36)", () => {
     const blocks: ArticleBodyBlock[] = [
       { type: "reaction", number: 1, name: "国内プレイヤーさん", lines: [{ text: "重要な反応" }], emphasis: true },
     ];
     const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
     expect(html).toContain("重要な反応");
-    expect(html).toContain("text-lg");
-    expect(html).toContain("font-bold");
     expect(html).toContain("data-res-emphasis");
+    // 色付き強調ではないので「大きく＋太字」クラス(sm:text-lg)は付かない
+    expect(html).not.toContain("text-lg");
+    expect(html).toContain("text-neutral-800");
   });
 
-  it("emphasisフラグが無いレスは従来どおりの通常クラスで描画する(後方互換)", () => {
+  it("emphasisフラグが無いレスも同様に通常クラスで描画する(後方互換)", () => {
     const blocks: ArticleBodyBlock[] = [
       { type: "reaction", number: 1, name: "国内プレイヤーさん", lines: [{ text: "普通の反応" }] },
     ];
@@ -231,7 +232,7 @@ describe("ArticleBodyView（レス単位の重要レス強調, 拡張E25 F-E25-2
     expect(html).not.toContain("text-lg");
   });
 
-  it("行単位の強調(red)とレス単位の強調(emphasis)は併存できる", () => {
+  it("行単位の強調(red)はemphasisColor無しのレスでも従来どおり効くが、レス全体は大きく＋太字にならない(拡張E36)", () => {
     const blocks: ArticleBodyBlock[] = [
       {
         type: "reaction",
@@ -243,13 +244,12 @@ describe("ArticleBodyView（レス単位の重要レス強調, 拡張E25 F-E25-2
     ];
     const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
     expect(html).toContain("text-red-600");
-    expect(html).toContain("text-lg");
-    expect(html).toContain("font-bold");
+    expect(html).not.toContain("text-lg");
   });
 });
 
-describe("ArticleBodyView（強調レスの色分け, 拡張E32 F-E32-1）", () => {
-  it("emphasisColor='blue'のとき青系クラスで描画し、data-res-emphasis-colorも付く", () => {
+describe("ArticleBodyView（強調レスの色分け, 拡張E32 F-E32-1／緑廃止・紫追加, 拡張E36 F-E36-1）", () => {
+  it("emphasisColor='blue'のとき青系クラス＋大きく太字で描画し、data-res-emphasis-colorも付く", () => {
     const blocks: ArticleBodyBlock[] = [
       {
         type: "reaction",
@@ -263,10 +263,11 @@ describe("ArticleBodyView（強調レスの色分け, 拡張E32 F-E32-1）", () 
     const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
     expect(html).toContain("text-blue-600");
     expect(html).toContain('data-res-emphasis-color="blue"');
+    expect(html).toContain("text-lg");
     expect(html).toContain("font-bold");
   });
 
-  it("emphasisColor='green'のとき緑系クラスで描画する", () => {
+  it("emphasisColor='purple'のとき紫系クラス＋大きく太字で描画する(拡張E36、緑の代替)", () => {
     const blocks: ArticleBodyBlock[] = [
       {
         type: "reaction",
@@ -274,20 +275,46 @@ describe("ArticleBodyView（強調レスの色分け, 拡張E32 F-E32-1）", () 
         name: "国内プレイヤーさん",
         lines: [{ text: "補足の反応" }],
         emphasis: true,
-        emphasisColor: "green",
+        emphasisColor: "purple",
       },
     ];
     const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
-    expect(html).toContain("text-green-700");
+    expect(html).toContain("text-purple-600");
+    expect(html).toContain("text-lg");
   });
 
-  it("emphasisColor無し(emphasisのみ)は従来どおりの濃色クラスで描画する(後方互換)", () => {
+  it("emphasisColor='orange'のときオレンジ系クラスで描画する(拡張E36)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      {
+        type: "reaction",
+        number: 1,
+        name: "国内プレイヤーさん",
+        lines: [{ text: "強めの反応" }],
+        emphasis: true,
+        emphasisColor: "orange",
+      },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("text-orange-600");
+  });
+
+  it("article-body-view.tsxはレス強調色として green を扱わない(拡張E36、名前見出しの緑とは独立)", async () => {
+    const fs = await import("node:fs/promises");
+    const src = await fs.readFile(new URL("../article-body-view.tsx", import.meta.url), "utf-8");
+    // レス単位の強調色パレット(RES_EMPHASIS_COLOR_CLASS)の型・キーとしてgreenは登場しない
+    // (ResHeaderの名前色`text-green-700 dark:text-green-400`は別用途で残るため、その値自体では判定しない)。
+    expect(src).not.toMatch(/"red"\s*\|\s*"blue"\s*\|\s*"green"/);
+    expect(src).not.toContain("green: ");
+  });
+
+  it("emphasisColor無し(emphasisのみ)は通常サイズ・非太字・黒字クラスで描画する(拡張E36 F-E36-2)", () => {
     const blocks: ArticleBodyBlock[] = [
       { type: "reaction", number: 1, name: "国内プレイヤーさん", lines: [{ text: "重要な反応" }], emphasis: true },
     ];
     const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
     expect(html).toContain("text-neutral-800");
     expect(html).not.toContain("data-res-emphasis-color");
+    expect(html).not.toContain("text-lg");
   });
 
   it("行単位の強調(red)とレス単位の色(blue)は併存する(行単位が優先されつつ両方存在)", () => {

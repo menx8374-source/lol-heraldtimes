@@ -17,7 +17,7 @@ import type { LLMClient, GenerationTask } from "@/lib/generation/llm-client";
 import { splitIntoSentences, excerptForQuote, gistOf } from "@/lib/generation/text-utils";
 import { parseThreadReses, extractAnchors, computeLineEmphasis, type ThreadRes } from "@/lib/generation/thread-format";
 import { isAllowedEmbedUrl, embedProviderForUrl } from "@/lib/embed";
-import { maskNgWords } from "@/lib/moderation/ng-words";
+import { findNgWord } from "@/lib/moderation/ng-words";
 import { PATCH_NOTES_MIN_LENGTH } from "@/lib/collection/adapters/riot-datadragon";
 
 export type GenerationCandidateInput = {
@@ -40,7 +40,8 @@ const MAX_EXCERPT_RESES = 12;
 /**
  * LLMによるレス抜粋・強調選定の正規化結果（拡張E28で行抽出、拡張E32で強調色に対応）。
  * keepLines: 採用したレスindex → 残す行indexの配列（元順・昇順）。null は「そのレス全行を採用」。
- * emphasize: 強調するレスindex → 色（"red"|"blue"|"green"）または null（色無しの従来強調）。
+ * emphasize: 強調するレスindex → 色（"red"|"blue"|"purple"|"orange"、拡張E36で緑を廃止し紫を追加）
+ * または null（色無しの従来強調）。
  */
 type ReactionSelection = {
   keepLines: Map<number, number[] | null>;
@@ -78,8 +79,8 @@ function parseKeepEntry(entry: unknown): { index: unknown; rawLines: unknown } |
   return null;
 }
 
-/** 強調色として許可する値の集合（拡張E32、おばにゅー流の赤/青/緑）。 */
-const ALLOWED_EMPHASIS_COLORS = new Set<ArticleBodyEmphasisColor>(["red", "blue", "green"]);
+/** 強調色として許可する値の集合（拡張E32、おばにゅー流。拡張E36で緑を廃止し紫を追加）。 */
+const ALLOWED_EMPHASIS_COLORS = new Set<ArticleBodyEmphasisColor>(["red", "blue", "purple", "orange"]);
 
 /**
  * emphasize の1要素（number または {index, color?}）から、レスindexと生の color 指定を取り出す。
@@ -175,11 +176,12 @@ async function selectReactionReses(
           "レス本文・行は書き換えず、渡された中からindexを選ぶだけです。長いレスは、記事の話題に沿った行だけを" +
           "残すために対象レスの lines のうち残す行indexを指定できます（指定しなければそのレスの全行を採用）。" +
           '出力はJSONのみとし、{"keep": [index または {"index": N, "lines": [行index,...]}, ...], ' +
-          '"emphasize": [index または {"index": N, "color": "red"|"blue"|"green"}, ...]} の形式にしてください' +
-          "（説明文・前置き・コードブロックは付けない）。" +
+          '"emphasize": [index または {"index": N, "color": "red"|"blue"|"purple"|"orange"}, ...]} の形式に' +
+          "してください（説明文・前置き・コードブロックは付けない）。" +
           "keepは厳選した重要レスのindex（全行採用ならindexの数値のまま、行を絞る場合はオブジェクト形式）、" +
           "emphasizeはkeepの中でも特に注目・重要なレスのindexです。おばにゅー流に色(red=最重要/否定的な反応、" +
-          "blue=注目/肯定的な反応、green=補足的な反応 等)を割り当ててよい（色は任意、無くても構わない）。",
+          "blue=注目/肯定的な反応、purple=補足的な反応、orange=ネタ・ユーモラスな反応 等)を割り当ててよい" +
+          "（色は任意、無くても構わない）。",
       },
       { role: "user", content: JSON.stringify(task) },
     ]);
@@ -195,8 +197,8 @@ async function selectReactionReses(
   }
 }
 
-/** 拡張E33 F-E33-1: 色付き強調の最低保証で使う色の割り当て順（red→blue→green）。 */
-const MIN_COLOR_FALLBACK_COLORS: ArticleBodyEmphasisColor[] = ["red", "blue", "green"];
+/** 拡張E33 F-E33-1: 色付き強調の最低保証で使う色の割り当て順（red→blue→purple→orange、拡張E36で緑を廃止）。 */
+const MIN_COLOR_FALLBACK_COLORS: ArticleBodyEmphasisColor[] = ["red", "blue", "purple", "orange"];
 
 /** レス1件分の表示本文の総文字数（行テキストの合計）。長いレス優先の判定に使う。 */
 function reactionBlockCharCount(block: ArticleBodyReactionBlock): number {
@@ -229,15 +231,30 @@ function applyMinColorFallback(blocks: ArticleBodyReactionBlock[]): ArticleBodyR
 }
 
 /**
+ * 行テキストのうち、NGワード（findNgWord）を含む文（splitIntoSentencesで分割した1文単位）だけを
+ * 削除し、残りの文をそのまま結合して返す（拡張E36 F-E36-3、伏字(*)化からの置き換え）。
+ * NGワードを含まない文は一切書き換えない（逐語維持）。全ての文がNGで削除された場合は空文字列を
+ * 返す（呼び出し側でその行を落とす判断に使う）。
+ */
+function removeNgSentences(text: string): string {
+  return splitIntoSentences(text)
+    .filter((sentence) => findNgWord(sentence) === null)
+    .join("");
+}
+
+/**
  * スレッドの content（逐語）を、まとめ速報のレス（reaction）ブロック配列に組み立てる。
  * レス番号・本文行は逐語のまま保持し、重要行の強調・アンカーの妥当性(既出番号のみ)だけを付加する。
  * 拡張E25 F-E25-1: LLMに話題関連レスの抜粋・重要レスの強調選定を委ね、選定できた場合は
  * keepインデックスのレスだけを元スレ順で組み、emphasizeインデックスのレスにブロック単位の
  * 強調フラグを立てる。選定できない場合（mockモード・APIエラー・parse失敗・keep空等）は
  * 従来どおり全レス・強調なしで組む（本体を止めない）。
- * 拡張E32: emphasizeに色(red/blue/green)が指定されていれば emphasisColor も付与する（任意・後方互換）。
- * 拡張E27: 本文行にNGワードが含まれる場合は maskNgWords で同数のアスタリスクに伏字化する
- * （逐語は保つがNG語だけ伏字にし、moderateArticleContent の ng_word 保留を避けて公開する）。
+ * 拡張E32: emphasizeに色(red/blue/purple/orange、拡張E36で緑を廃止し紫を追加)が指定されていれば
+ * emphasisColor も付与する（任意・後方互換）。
+ * 拡張E36 F-E36-3: 本文行にNGワードが含まれる場合、伏字化（拡張E27）ではなく該当する文（1文単位）
+ * だけを removeNgSentences で削除する。削除後に空になった行は落とし、レスの全行が空になった
+ * （＝NG文を除くと何も残らない＝意味が通らない）場合は、そのレス自体を反応ブロックに含めない
+ * （moderateArticleContent の ng_word 保留を避けて公開する意図は維持しつつ、逐語＋伏字なしにする）。
  * 拡張E33: 反応ブロックが2件以上あるのにどのレスにも強調が付かない場合は、決定論フォールバック
  * （applyMinColorFallback）で最低限の色付き強調を補い、全黒字の記事が出ないようにする。
  */
@@ -255,30 +272,39 @@ async function buildReactionBlocks(
     ? reses.map((_, i) => i).filter((i) => selection.keepLines.has(i))
     : reses.map((_, i) => i);
 
-  const blocks = selectedIndices.map((i) => {
-    const res = reses[i];
-    // 行indexの指定があれば元 res.lines からその行だけを逐語のまま抽出する（拡張E28 F-E28-2）。
-    // 指定なし（null＝全行採用、または選定自体が無いフォールバック）はres.linesをそのまま使う。
-    const lineIndices = selection?.keepLines.get(i) ?? null;
-    const extractedLines = lineIndices ? lineIndices.map((li) => res.lines[li]) : res.lines;
-    const emphasis = computeLineEmphasis(extractedLines);
-    const anchors = extractAnchors(extractedLines).filter((n) => n !== res.number && knownNumbers.has(n));
-    const isEmphasized = selection ? selection.emphasize.has(i) : false;
-    const emphasisColor = isEmphasized ? (selection!.emphasize.get(i) ?? null) : null;
-    return {
-      type: "reaction",
-      number: res.number,
-      name,
-      lines: extractedLines.map((rawText, li) => {
-        // 逐語転載を保ちつつNGワードのみ伏字化する（拡張E27）。他の文字列は一切書き換えない。
-        const text = maskNgWords(rawText);
-        return emphasis[li] ? { text, emphasis: emphasis[li] } : { text };
-      }),
-      ...(anchors.length > 0 ? { anchors } : {}),
-      ...(isEmphasized ? { emphasis: true } : {}),
-      ...(emphasisColor ? { emphasisColor } : {}),
-    } satisfies ArticleBodyReactionBlock;
-  });
+  const blocks = selectedIndices
+    .map((i): ArticleBodyReactionBlock | null => {
+      const res = reses[i];
+      // 行indexの指定があれば元 res.lines からその行だけを逐語のまま抽出する（拡張E28 F-E28-2）。
+      // 指定なし（null＝全行採用、または選定自体が無いフォールバック）はres.linesをそのまま使う。
+      const lineIndices = selection?.keepLines.get(i) ?? null;
+      const extractedLines = lineIndices ? lineIndices.map((li) => res.lines[li]) : res.lines;
+      const emphasis = computeLineEmphasis(extractedLines);
+      const anchors = extractAnchors(extractedLines).filter((n) => n !== res.number && knownNumbers.has(n));
+      const isEmphasized = selection ? selection.emphasize.has(i) : false;
+      const emphasisColor = isEmphasized ? (selection!.emphasize.get(i) ?? null) : null;
+
+      // NGワードを含む文だけを削除する（拡張E36 F-E36-3）。文削除後に空になった行は落とし、
+      // レスの全行が空になった場合はそのレス自体を不掲載にする（null を返す）。
+      const cleanedLines: ArticleBodyReactionBlock["lines"] = [];
+      extractedLines.forEach((rawText, li) => {
+        const cleanedText = removeNgSentences(rawText);
+        if (cleanedText.length === 0) return;
+        cleanedLines.push(emphasis[li] ? { text: cleanedText, emphasis: emphasis[li] } : { text: cleanedText });
+      });
+      if (cleanedLines.length === 0) return null;
+
+      return {
+        type: "reaction",
+        number: res.number,
+        name,
+        lines: cleanedLines,
+        ...(anchors.length > 0 ? { anchors } : {}),
+        ...(isEmphasized ? { emphasis: true } : {}),
+        ...(emphasisColor ? { emphasisColor } : {}),
+      };
+    })
+    .filter((b): b is ArticleBodyReactionBlock => b !== null);
 
   return applyMinColorFallback(blocks);
 }

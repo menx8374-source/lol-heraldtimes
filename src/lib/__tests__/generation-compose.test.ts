@@ -406,8 +406,8 @@ describe("composeArticleBody（強調レスの色分け、拡張E32 F-E32-2）",
     expect(reactions[1].type === "reaction" && reactions[1].emphasisColor).toBeUndefined();
   });
 
-  it("emphasizeのindexがkeep外(例:{index:2,color:'green'}だがkeepは[0,1]のみ)ならLLM選定の色付き強調は付かないが、拡張E33の最低保証で色が付く", async () => {
-    const stub = new StubLLMClient(JSON.stringify({ keep: [0, 1], emphasize: [{ index: 2, color: "green" }] }));
+  it("emphasizeのindexがkeep外(例:{index:2,color:'purple'}だがkeepは[0,1]のみ)ならLLM選定の色付き強調は付かないが、拡張E33の最低保証で色が付く", async () => {
+    const stub = new StubLLMClient(JSON.stringify({ keep: [0, 1], emphasize: [{ index: 2, color: "purple" }] }));
     const body = await composeArticleBody(
       { sourceType: "5ch", title: "keep外emphasizeテスト", content: threeResContent },
       stub,
@@ -431,25 +431,42 @@ describe("composeArticleBody（強調レスの色分け、拡張E32 F-E32-2）",
   });
 });
 
-describe("composeArticleBody（NGワードの伏字化、拡張E27 F-E27-2）", () => {
-  it("反応記事(5ch)のレス本文にNGワードが含まれる場合、生成後の本文で伏字化される（生のNG語は残らない）", async () => {
+describe("composeArticleBody（NG文の削除、拡張E36 F-E36-3。伏字化(拡張E27)からの置き換え）", () => {
+  it("NGワードを含む文だけが削除され、残りの文で意味が通れば結合されて掲載される（逐語は保たれ、伏字は使わない）", async () => {
     const body = await composeArticleBody(
       {
         sourceType: "5ch",
         title: "【LoL】あるチャンピオンについて語るスレ",
-        content: "1: このチャンピオンはカスだと思う\n2: 同意、正直ゴミだわ",
+        content: "1: このチャンピオンはカスだと思う。でも強いと思う。\n2: 普通の反応だけ。",
       },
       llm,
     );
     const reactions = body.filter((b) => b.type === "reaction");
     expect(reactions).toHaveLength(2);
     const texts = reactions.flatMap((b) => (b.type === "reaction" ? b.lines.map((l) => l.text) : []));
-    // 逐語は保たれつつNG語のみアスタリスクになっている
-    expect(texts).toEqual(["このチャンピオンは**だと思う", "同意、正直**だわ"]);
+    // NG文("このチャンピオンはカスだと思う。")のみ削除され、残りの文("でも強いと思う。")だけが残る
+    expect(texts).toEqual(["でも強いと思う。", "普通の反応だけ。"]);
     expect(texts.every((t) => findNgWord(t) === null)).toBe(true);
+    // 伏字(*)化はしない
+    expect(texts.some((t) => t.includes("*"))).toBe(false);
   });
 
-  it("NGワードを含む反応記事(reddit)がmoderateArticleContentでng_word保留されず公開される（伏字化後の本文でfindNgWordがnull）", async () => {
+  it("行の全文がNGで消えた場合はその行を落とし、レスの全行が空になった場合はそのレス自体を不掲載にする", async () => {
+    const body = await composeArticleBody(
+      {
+        sourceType: "5ch",
+        title: "【LoL】語るスレ",
+        content: "1: 通常の反応だけ。\n2: カスすぎる。ゴミだと思う。",
+      },
+      llm,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    // レス2は全文がNGで消え意味が通らないため不掲載。レス1のみ残る。
+    expect(reactions).toHaveLength(1);
+    expect(reactions[0].type === "reaction" && reactions[0].number).toBe(1);
+  });
+
+  it("NGワードを含む反応記事(reddit)がmoderateArticleContentでng_word保留されず公開される（NG文削除後の本文でfindNgWordがnull）", async () => {
     const body = await composeArticleBody(
       {
         sourceType: "reddit",
@@ -468,7 +485,7 @@ describe("composeArticleBody（NGワードの伏字化、拡張E27 F-E27-2）", 
     expect(result.status).toBe("published");
   });
 
-  it("NGワードを含まない反応記事は伏字化による変化がなく、従来どおり逐語のまま公開される（回帰なし）", async () => {
+  it("NGワードを含まない反応記事は変化がなく、従来どおり逐語のまま公開される（回帰なし）", async () => {
     const body = await composeArticleBody(
       { sourceType: "5ch", title: "普通のスレ", content: "1: 壁飛び5連続でキャリーとか草生える\n2: それな" },
       llm,
@@ -560,7 +577,7 @@ describe("composeArticleBody（長レスのレス内文抽出、拡張E28 F-E28-
     ]);
   });
 
-  it("抽出後の行にNG伏字・行強調・アンカーが整合的に効く（抽出前の行indexに依存しない）", async () => {
+  it("抽出後の行にNG除外・行強調・アンカーが整合的に効く（抽出前の行indexに依存しない）", async () => {
     // レス2(index=1): 0行目に「>>1」アンカー、1行目にNGワード「カス」、2行目に強調キーワード「草」。
     // keepでlines=[0,2]を指定し、NGワードを含む1行目を除外する。
     const content = "1: 最初のレス。\n2: >>1 その通り。\nこれはカスだと思う。\nこれは草生えるわ。\n3: 三番目。";
@@ -570,7 +587,7 @@ describe("composeArticleBody（長レスのレス内文抽出、拡張E28 F-E28-
     expect(reactions).toHaveLength(1);
     const res = reactions[0];
     expect(res.type === "reaction" && res.lines.map((l) => l.text)).toEqual([">>1 その通り。", "これは草生えるわ。"]);
-    // NGワード「カス」を含む行は除外されているので、伏字にする対象すら残らない(=NGワードは出てこない)
+    // NGワード「カス」を含む行はLLM選定(lines指定)の時点で除外されているので、そもそもNGワードは出てこない
     expect(res.type === "reaction" && res.lines.every((l) => findNgWord(l.text) === null)).toBe(true);
     // アンカー(>>1)は抽出後の0行目に残っているので検出される
     expect(res.type === "reaction" && res.anchors).toEqual([1]);
@@ -776,7 +793,7 @@ describe("composeArticleBody（色付き強調の最低保証、拡張E33 F-E33-
   // 8レス・文字数が単調増加(A=1文字〜H=8文字)なので、長いレス優先の並びが一意に決まる。
   const eightResContent = Array.from({ length: 8 }, (_, i) => `${i + 1}: ${"X".repeat(i + 1)}`).join("\n");
 
-  it("反応レス2件以上・強調ゼロの記事に、決定論的にminColored件の色付き強調が付く(長いレス優先・red→blue→greenの順)", async () => {
+  it("反応レス2件以上・強調ゼロの記事に、決定論的にminColored件の色付き強調が付く(長いレス優先・red→blue→purple→orangeの順、拡張E36で緑を廃止)", async () => {
     const stub = new StubLLMClient(
       JSON.stringify({ keep: Array.from({ length: 8 }, (_, i) => i), emphasize: [] }),
     );
@@ -797,12 +814,12 @@ describe("composeArticleBody（色付き強調の最低保証、拡張E33 F-E33-
   it("既にいずれかのレスに強調が付いている記事は変更されない(LLM選定を尊重)", async () => {
     const threeResContent = "1: 最初のレス。\n2: 二番目のレス。\n3: 三番目のレス。";
     const stub = new StubLLMClient(
-      JSON.stringify({ keep: [0, 1, 2], emphasize: [{ index: 0, color: "green" }] }),
+      JSON.stringify({ keep: [0, 1, 2], emphasize: [{ index: 0, color: "purple" }] }),
     );
     const body = await composeArticleBody({ sourceType: "5ch", title: "既存強調尊重テスト", content: threeResContent }, stub);
     const reactions = body.filter((b) => b.type === "reaction");
     expect(reactions[0].type === "reaction" && reactions[0].emphasis).toBe(true);
-    expect(reactions[0].type === "reaction" && reactions[0].emphasisColor).toBe("green");
+    expect(reactions[0].type === "reaction" && reactions[0].emphasisColor).toBe("purple");
     // フォールバックは発動せず、他のレスに勝手に色は付かない
     expect(reactions[1].type === "reaction" && reactions[1].emphasis).toBeUndefined();
     expect(reactions[2].type === "reaction" && reactions[2].emphasis).toBeUndefined();

@@ -15,11 +15,13 @@ const LINE_EMPHASIS_CLASS: Record<"red" | "orange", string> = {
   orange: "font-bold text-orange-600",
 };
 
-/** レス単位の強調色（拡張E32、おばにゅー流）のテキストカラー。ダーク/ライト両対応。 */
-const RES_EMPHASIS_COLOR_CLASS: Record<"red" | "blue" | "green", string> = {
+/** レス単位の強調色（拡張E32、おばにゅー流、拡張E36で緑を廃止し紫を追加）のテキストカラー。
+ * 名前見出し（ResHeader）の緑と被らないよう、ここでは緑を使わない。ダーク/ライト両対応。 */
+const RES_EMPHASIS_COLOR_CLASS: Record<"red" | "blue" | "purple" | "orange", string> = {
   red: "text-red-600 dark:text-red-400",
   blue: "text-blue-600 dark:text-blue-400",
-  green: "text-green-700 dark:text-green-400",
+  purple: "text-purple-600 dark:text-purple-400",
+  orange: "text-orange-600 dark:text-orange-400",
 };
 
 /** レスの「番号: 名前」見出し行（名前は緑）。まとめ本文の reaction ブロック描画でのみ使う
@@ -38,22 +40,23 @@ function ResHeader({ number, name }: { number: number; name: string }) {
  * AA（アスキーアート）らしい行（拡張E3・`isAsciiArtLine`で判定）は等幅フォント＋空白保持で
  * 崩れないように表示する。単純な顔文字（"(^^)/" 等）はAAと判定されず通常テキストのまま表示される。
  * `original`（拡張E3・海外の反応の原文併記）がある行は、日本語訳の前に「原文: ...（英語）」を表示する。
- * `emphasis`（拡張E25・レス単位の重要レス強調）が true のとき、行単位の色付けとは別に
- * 文字サイズを大きく＋太字にしてレス全体を目立たせる（行単位のemphasis(red/orange)と併存可能）。
- * `emphasisColor`（拡張E32）が指定されていれば、行単位のemphasis(red/orange)が無い行のベース色を
- * その色（赤/青/緑）にする。行単位のemphasisがある行はそちらの色を優先する（役割が違うため上書きしない）。
- * `emphasisColor`未指定（`emphasis`のみ）は従来どおり色無しの濃色のまま（後方互換）。
+ * `emphasisColor`（拡張E32、拡張E36で緑を廃止し紫を追加）が指定されているレスのみ、行単位の
+ * emphasis(red/orange)が無い行を「大きく＋太字＋色（赤/青/紫/オレンジ）」で目立たせる
+ * （拡張E36 F-E36-2: 色付き強調と黒字を区別するため、黒字（無色、emphasisColor無し）は常に
+ * 通常サイズ・非太字にする。レス単位の`emphasis`フラグ自体は`data-res-emphasis`属性の付与にのみ
+ * 使い、色が無ければ見た目には影響しない）。行単位のemphasis(red/orange)がある行はそちらの色を
+ * 優先する（役割が違うため上書きしない）。
  */
 export function ResLines({
   lines,
-  emphasis,
   emphasisColor,
 }: {
   lines: { text: string; emphasis?: "red" | "orange"; original?: string }[];
-  emphasis?: boolean;
-  emphasisColor?: "red" | "blue" | "green";
+  emphasisColor?: "red" | "blue" | "purple" | "orange";
 }) {
-  const sizeClass = emphasis ? " text-base sm:text-lg font-bold" : "";
+  // 「大きく＋太字」は色付き強調（emphasisColor有り）のときだけ（拡張E36 F-E36-2）。
+  // emphasisのみ（色無し）は黒字・通常サイズ・非太字に統一する。
+  const sizeClass = emphasisColor ? " text-base sm:text-lg font-bold" : "";
   const baseColorClass = emphasisColor
     ? RES_EMPHASIS_COLOR_CLASS[emphasisColor]
     : "text-neutral-800 dark:text-neutral-200";
@@ -181,7 +184,7 @@ function ReactionGroupView({ blocks }: { blocks: ArticleBodyReactionBlock[] }) {
           {...(block.emphasisColor ? { "data-res-emphasis-color": block.emphasisColor } : {})}
         >
           <ResHeader number={block.number} name={block.name} />
-          <ResLines lines={block.lines} emphasis={block.emphasis} emphasisColor={block.emphasisColor} />
+          <ResLines lines={block.lines} emphasisColor={block.emphasisColor} />
         </div>
       ))}
     </div>
