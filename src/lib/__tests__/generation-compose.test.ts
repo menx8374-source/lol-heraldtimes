@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { composeArticleBody } from "@/lib/generation/compose";
+import { composeArticleBody, extractPatchChangesDeterministic } from "@/lib/generation/compose";
 import { MockLLMClient, type LLMClient, type LLMMessage } from "@/lib/generation/llm-client";
 import { hasStructuredHeadings, blockText } from "@/lib/article-body";
 import { moderateArticleContent } from "@/lib/moderation/moderate";
@@ -852,5 +852,275 @@ describe("composeArticleBody（色付き強調の最低保証、拡張E33 F-E33-
     const reactions = body.filter((b) => b.type === "reaction");
     const texts = reactions.flatMap((b) => (b.type === "reaction" ? b.lines.map((l) => l.text) : []));
     expect(texts).toEqual(["最初のレス。", "二番目のレス。", "三番目のレス。"]);
+  });
+});
+
+describe("extractPatchChangesDeterministic（変更点の決定的・逐語抽出、拡張E40 F-E40-2）", () => {
+  it("チャンピオン名の単独行を節開始とみなし、「⇒」を含む行のみを逐語で抽出する（直前の非空行を文脈として前置）", () => {
+    const text = [
+      "パッチ26.14ノートへようこそ。",
+      "エディタ: サンプルライター",
+      "T1がLCKを制覇し3連覇を達成しました。",
+      "",
+      "アジール",
+      "基本ステータス",
+      "攻撃力: 55 ⇒ 58",
+      "",
+      "ガレン",
+      "R - デマーシアの正義",
+      "確定ダメージ: 150/250/350 ⇒ 130/230/330",
+      "",
+      "TFTのお知らせ",
+      "TFTセット14が近日公開予定です。詳細は追ってお知らせします。",
+    ].join("\n");
+
+    const result = extractPatchChangesDeterministic(text);
+    expect(result).not.toBeNull();
+    expect(result!.map((c) => c.champion)).toEqual(["アジール", "ガレン"]);
+    // 変更行は本文の部分文字列そのもの(逐語)。直前の非空行(スキル名/項目名)が前置されている。
+    expect(result![0].changes).toEqual(["基本ステータス 攻撃力: 55 ⇒ 58"]);
+    expect(result![1].changes).toEqual(["R - デマーシアの正義 確定ダメージ: 150/250/350 ⇒ 130/230/330"]);
+    // 抽出された各変更行は、元テキストの行(改行区切り)をそのまま繋いだもの(新しい文字列を作らず、
+    // 直前の非空行と変更行という既存の2行を空白で連結しているだけ=捏造禁止を満たす)。
+    const flattenedLines = text
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0)
+      .join(" ");
+    for (const c of result!) {
+      for (const change of c.changes) {
+        expect(flattenedLines).toContain(change);
+      }
+    }
+  });
+
+  it("「⇒」を含まないノイズ(intro/クレジット/TFT導線)は変更点として拾わない", () => {
+    const text = [
+      "パッチ26.14ノートへようこそ。",
+      "エディタ: サンプルライター",
+      "T1がLCKを制覇し3連覇を達成しました。",
+      "TFTのお知らせ",
+      "TFTセット14が近日公開予定です。詳細は追ってお知らせします。",
+    ].join("\n");
+    expect(extractPatchChangesDeterministic(text)).toBeNull();
+  });
+
+  it("チャンピオン名行があっても配下に「⇒」変更行が無ければそのチャンピオンは結果に含まれない(全体でも0件ならnull)", () => {
+    const text = ["アジール", "今回は特に変更がありません。", "ケイトリン", "同じく変更なし。"].join("\n");
+    expect(extractPatchChangesDeterministic(text)).toBeNull();
+  });
+
+  it("チャンピオン数は最大12体、1体あたりの変更行は最大5行に有界化される", () => {
+    const championNames = [
+      "アリスター", "アニビア", "アニー", "アフェリオス", "アッシュ", "アジール", "バード", "アムム",
+      "ブリッツクランク", "ブランド", "ブラウム", "ケイトリン", "カミール", "キャシオペア", "チョガス",
+    ]; // 15体(上限12を超える)
+    const sections = championNames.map((name, i) => {
+      const changeLines = Array.from({ length: 6 }, (_, j) => `ステータス${j}: ${i + j} ⇒ ${i + j + 1}`);
+      return [name, ...changeLines].join("\n");
+    });
+    const text = sections.join("\n\n");
+
+    const result = extractPatchChangesDeterministic(text);
+    expect(result).not.toBeNull();
+    // 上限12体まで(13〜15体目は含まれない)
+    expect(result!.length).toBe(12);
+    expect(result!.map((c) => c.champion)).toEqual(championNames.slice(0, 12));
+    // 1体あたり最大5行(6行与えたが5行までに制限される)
+    for (const c of result!) {
+      expect(c.changes.length).toBe(5);
+    }
+  });
+
+  it("同じチャンピオン名が本文中で複数回言及されても、単独行と完全一致しない限り節開始として誤検知しない", () => {
+    const text = [
+      "アジールは今回のパッチで最も注目されているチャンピオンの一つです。",
+      "アジール",
+      "攻撃力: 50 ⇒ 55",
+    ].join("\n");
+    const result = extractPatchChangesDeterministic(text);
+    expect(result).not.toBeNull();
+    expect(result!.map((c) => c.champion)).toEqual(["アジール"]);
+    expect(result![0].changes).toEqual(["攻撃力: 50 ⇒ 55"]);
+  });
+
+  describe("値が複数行に分割される実データケースの復元（拡張E40b・重大バグ修正）", () => {
+    it("「：2 ⇒」で行が終わり変更後の値が次行にある場合、次行を連結して変更後の値まで復元する", () => {
+      // 実際の fetchPatchNotesText → stripHtmlToText 出力を模したfixture（ラベル行/矢印行/値行が分割）。
+      const text = [
+        "アジール",
+        "基本ステータス",
+        "レベルアップごとの攻撃力",
+        "：2 ⇒",
+        "2.5",
+        "",
+        "ジェイス",
+        "基本ステータス",
+        "増加移動速度",
+        "：40 ⇒",
+        "45",
+      ].join("\n");
+
+      const result = extractPatchChangesDeterministic(text);
+      expect(result).not.toBeNull();
+      expect(result!.map((c) => c.champion)).toEqual(["アジール", "ジェイス"]);
+      // 変更後の値（2.5 / 45）まで含めて復元されている（欠落しない）
+      expect(result![0].changes).toEqual(["レベルアップごとの攻撃力 ：2 ⇒ 2.5"]);
+      expect(result![1].changes).toEqual(["増加移動速度 ：40 ⇒ 45"]);
+      // 矢印だけで終わる壊れた行は残らない
+      for (const c of result!) {
+        for (const change of c.changes) {
+          expect(change.trim().endsWith("⇒")).toBe(false);
+        }
+      }
+    });
+
+    it("矢印の前後が同一行に収まっている従来ケースも引き続き正しく抽出される（回帰なし）", () => {
+      const text = ["ガレン", "R - デマーシアの正義", "確定ダメージ: 150/250/350 ⇒ 130/230/330"].join("\n");
+      const result = extractPatchChangesDeterministic(text);
+      expect(result).not.toBeNull();
+      expect(result![0].changes).toEqual(["R - デマーシアの正義 確定ダメージ: 150/250/350 ⇒ 130/230/330"]);
+    });
+
+    it("変更後の値が本当に存在しない異常系（矢印の直後が次のチャンピオン節）では、矢印だけの不完全な行を残さず捨てる", () => {
+      const text = [
+        "アジール",
+        "レベルアップごとの攻撃力",
+        "：2 ⇒",
+        "",
+        "ケイトリン",
+        "攻撃力: 10 ⇒ 12",
+      ].join("\n");
+      const result = extractPatchChangesDeterministic(text);
+      expect(result).not.toBeNull();
+      // アジールは値が復元できず変更点0件になり結果から除外される。ケイトリンのみ残る。
+      expect(result!.map((c) => c.champion)).toEqual(["ケイトリン"]);
+      expect(result![0].changes).toEqual(["攻撃力: 10 ⇒ 12"]);
+    });
+
+    it("変更後の値が本当に存在しない異常系（矢印の直後が次の項目ラベル）でも、矢印だけの不完全な行を残さず捨てる", () => {
+      const text = [
+        "アジール",
+        "レベルアップごとの攻撃力",
+        "：2 ⇒",
+        "次のスキル名っぽい項目ラベル",
+        "攻撃力: 10 ⇒ 12",
+      ].join("\n");
+      const result = extractPatchChangesDeterministic(text);
+      expect(result).not.toBeNull();
+      expect(result!.map((c) => c.champion)).toEqual(["アジール"]);
+      // 「：2 ⇒」の壊れた行は捨てられ、後続の完全な変更行のみが残る
+      expect(result![0].changes).toEqual(["次のスキル名っぽい項目ラベル 攻撃力: 10 ⇒ 12"]);
+    });
+
+    it("値が1行の連結で復元できた後は、それ以降の数値らしい行を余分に飲み込まない(非貪欲)", () => {
+      const text = ["セナ", "ダメージ", "：70 ⇒", "75", "80"].join("\n");
+      const result = extractPatchChangesDeterministic(text);
+      expect(result).not.toBeNull();
+      // "75"を連結した時点で矢印の後が空でなくなるため、後続の"80"は連結されない
+      expect(result![0].changes).toEqual(["ダメージ ：70 ⇒ 75"]);
+    });
+  });
+});
+
+describe("composeArticleBody（riotパッチ記事の3段フォールバック: LLM要約→決定的抽出→クリーン定型、拡張E40 F-E40-2）", () => {
+  /** 実パッチノートらしいノイズ(intro/クレジット/TFT導線, ⇒を含まない)を大量に含みつつ、
+   * チャンピオン別の「⇒」変更行を複数含む、実運用相当のfixture(PATCH_NOTES_MIN_LENGTH以上)。 */
+  function buildRealisticPatchFixture(): string {
+    // 単純な繰り返し文だと同じn-gramが大量に重複するため、番号を変えた文を多数連結して
+    // 実ページ相当の「大量の非反復ノイズ」を作る(拡張E40)。
+    const noise = Array.from(
+      { length: 200 },
+      (_, i) => `これはテスト用のダミー文${i}です。実際のパッチ内容とは関係ありません。`,
+    ).join("");
+    const champions = [
+      { name: "アジール", context: "基本ステータス", changes: ["攻撃力: 55 ⇒ 58", "体力: 550 ⇒ 570"] },
+      { name: "ケイトリン", context: "基本ステータス", changes: ["レベルアップごとの攻撃力: 2 ⇒ 2.5", "移動速度: 335 ⇒ 340"] },
+      {
+        name: "ガレン",
+        context: "R - デマーシアの正義",
+        changes: ["確定ダメージ: 150/250/350 ⇒ 130/230/330", "クールダウン: 120/100/80 ⇒ 130/110/90"],
+      },
+      { name: "ダリウス", context: "Q - 大鎌の一撃", changes: ["クールダウン: 9/8/7/6/5 ⇒ 8/7/6/5/4"] },
+      { name: "ヴィエゴ", context: "パッシブ - 王家の運命", changes: ["支配時間: 6秒 ⇒ 8秒"] },
+      { name: "セナ", context: "W - 慈悲の光弾", changes: ["ダメージ: 70/115/160/205/250 ⇒ 65/105/145/185/225"] },
+    ];
+    const sections = champions.map((c) => [c.name, c.context, ...c.changes].join("\n"));
+    // 実データ(stripHtmlToText出力)同様に「ラベル行/：X ⇒行/値行」が分割されるケースも1件含める
+    // (拡張E40b: 変更後の値が次行に割れても復元できることの回帰確認)。
+    const jaceSplitSection = ["ジェイス", "基本ステータス", "増加移動速度", "：40 ⇒", "45"].join("\n");
+    return [noise, ...sections, jaceSplitSection, "TFTのお知らせ\nTFTセット14が近日公開予定です。", noise].join(
+      "\n\n",
+    );
+  }
+
+  it("LLM要約が失敗(mock)しても、決定的抽出で変更点があれば「主な変更点」見出し＋チャンピオン別段落の本文になり、クリーン定型には落ちない", async () => {
+    const patchText = buildRealisticPatchFixture();
+    const body = await composeArticleBody(
+      { sourceType: "riot", title: "【パッチ】26.14 の主な変更点まとめ", content: patchText },
+      new MockLLMClient(),
+    );
+    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headings[0]).toBe("主な変更点（公式パッチノートより）");
+    expect(headings).toContain("アジール");
+    expect(headings).toContain("ケイトリン");
+    expect(headings).toContain("ガレン");
+    expect(headings).toContain("ジェイス");
+    // クリーン定型(「の変更点」見出し1件のみ)には落ちていない
+    expect(headings).not.toEqual(["26.14の変更点"]);
+    expect(body.some((b) => b.type === "quote")).toBe(false);
+
+    // 各チャンピオンの変更点が正しく自身の節に紐づいている(隣接チャンピオンへの誤帰属がない)
+    const paragraphs = body.filter((b) => b.type === "paragraph").map((b) => b.text);
+    expect(paragraphs).toContain("基本ステータス レベルアップごとの攻撃力: 2 ⇒ 2.5");
+
+    // 拡張E40bの重大バグ修正: 値が複数行に割れた実データケース(ジェイス)でも変更後の値まで復元される
+    // (欠落していない)。矢印だけで終わる壊れた行が本文に残っていないことも確認する。
+    expect(paragraphs).toContain("増加移動速度 ：40 ⇒ 45");
+    for (const p of paragraphs) {
+      expect(p.trim().endsWith("⇒")).toBe(false);
+    }
+
+    // 抽出された変更点は、本文の行(改行区切り)をそのまま連結したもの(逐語。新しい文字列を作らない)
+    const flattenedLines = patchText
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0)
+      .join(" ");
+    for (const p of paragraphs) {
+      expect(flattenedLines).toContain(p);
+    }
+  });
+
+  it("決定的抽出も空(チャンピオン変更点なし)ならクリーン定型フォールバックになる(回帰なし)", async () => {
+    const noPatchChanges = "実際のパッチノート本文らしいテキスト。".repeat(30);
+    const body = await composeArticleBody(
+      { sourceType: "riot", title: "【パッチ】26.14 の主な変更点まとめ", content: noPatchChanges },
+      new MockLLMClient(),
+    );
+    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toContain("の変更点");
+  });
+
+  it("LLM要約が成功すればそれを優先し、決定的抽出は使われない(回帰なし)", async () => {
+    const patchText = buildRealisticPatchFixture();
+    const validSummaryJson = JSON.stringify({
+      buffed: ["アジール: 攻撃力が引き上げられ、序盤の主導権を握りやすくなった。"],
+      nerfed: [],
+      other: [],
+    });
+    class StubLLMClient implements LLMClient {
+      async generate(): Promise<string> {
+        return validSummaryJson;
+      }
+    }
+    const body = await composeArticleBody(
+      { sourceType: "riot", title: "【パッチ】26.14 の主な変更点まとめ", content: patchText },
+      new StubLLMClient(),
+    );
+    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headings).toEqual(["主な強化チャンピオン"]);
+    expect(headings).not.toContain("主な変更点（公式パッチノートより）");
   });
 });

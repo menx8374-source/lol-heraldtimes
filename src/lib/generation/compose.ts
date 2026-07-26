@@ -19,6 +19,7 @@ import { parseThreadReses, extractAnchors, computeLineEmphasis, type ThreadRes }
 import { isAllowedEmbedUrl, embedProviderForUrl } from "@/lib/embed";
 import { findNgWord } from "@/lib/moderation/ng-words";
 import { PATCH_NOTES_MIN_LENGTH } from "@/lib/collection/adapters/riot-datadragon";
+import { CHAMPIONS } from "@/lib/generation/title";
 
 export type GenerationCandidateInput = {
   sourceType: SourceType;
@@ -507,6 +508,128 @@ function composeCleanPatchFallbackBody(candidate: GenerationCandidateInput): Art
   ];
 }
 
+/**
+ * 決定的（逐語）抽出したチャンピオン別の変更点（拡張E40 F-E40-2）。
+ * `changes` は本文の部分文字列そのもの（新規に文字列を組み立てない＝捏造しない）。
+ */
+export type PatchChampionChanges = { champion: string; changes: string[] };
+
+/** チャンピオン節・変更行の有界化（読みやすさ・トークン節約）。 */
+const MAX_PATCH_CHAMPIONS = 12;
+const MAX_CHANGES_PER_CHAMPION = 5;
+
+/**
+ * 変更後の値が次行に割れた場合に連結してよい最大行数（拡張E40b）。
+ * 実データの `stripHtmlToText` 出力では「：2 ⇒」で行が終わり、変更後の値（例「2.5」）が
+ * 次の1行に単独で来るケースが多い。稀に値がさらに割れる場合に備えて2行まで許容する。
+ */
+const MAX_VALUE_CONTINUATION_LINES = 2;
+
+/** 行が「⇒」を含み、かつ矢印の直後（行末まで）が空白のみ＝変更後の値がその行に無いか判定する。 */
+function arrowTrailingIsEmpty(line: string): boolean {
+  const idx = line.lastIndexOf("⇒");
+  if (idx === -1) return false;
+  return line.slice(idx + 1).trim().length === 0;
+}
+
+/**
+ * 「⇒」で終わった行の続き（変更後の値）とみなせる行か判定する。実データでは変更後の値は
+ * 数値・スラッシュ区切りの複数値・小数点・%等の短い断片であることが多く、新しいチャンピオン名や
+ * 項目ラベル（漢字・カタカナ主体の文）とは区別できる。行内に「⇒」を含む（＝別の新しい変更行）場合は
+ * 続きとみなさない。
+ */
+const VALUE_CONTINUATION_RE = /^[0-9][0-9./%\-+\s]*$/;
+function looksLikeValueContinuation(line: string): boolean {
+  return line.length <= 20 && VALUE_CONTINUATION_RE.test(line);
+}
+
+/**
+ * 公式パッチノート本文（テキストダンプ）から、チャンピオン別の変更点をLLMを使わず決定的・逐語で
+ * 抽出する純関数（拡張E40 F-E40-2、拡張E40bで値分割の復元に対応）。単独行がチャンピオン名
+ * （`title.ts` の `CHAMPIONS`）と完全一致する行を節の開始とみなし、節内で「⇒」を含む行（値変更
+ * マーカー）をその章の変更点として集める。直前の非空行（スキル名/項目名。それ自体が「⇒」を含む
+ * 変更行やチャンピオン名でない場合のみ）を文脈として前置する。
+ * 拡張E40b: 実データの `stripHtmlToText` 出力では「レベルアップごとの攻撃力\n：2 ⇒\n2.5」のように
+ * 変更後の値が次行以降に割れることがある。矢印の直後（行末まで）が空の場合は、後続の非空行のうち
+ * 「値の続きらしい短い行」を最大 `MAX_VALUE_CONTINUATION_LINES` 行まで連結して復元する（次の
+ * チャンピオン節・次の項目ラベルに達したらそこで止める）。連結後も値が空のまま（＝本当に値が
+ * 無い異常系）の場合は、矢印だけの不完全な行を残さずその変更点自体を捨てる。
+ * チャンピオン最大 `MAX_PATCH_CHAMPIONS` 体・1体あたり変更行最大 `MAX_CHANGES_PER_CHAMPION` 行に
+ * 有界化する。変更点が1件も取れなければ null を返す。連結はすべて本文の行をそのまま繋ぐだけで、
+ * 新しい数値・文言を作らない（逐語維持・捏造禁止）。「⇒」を含まないノイズ行（intro/クレジット/
+ * TFT導線等）は変更点として拾わない。
+ */
+export function extractPatchChangesDeterministic(text: string): PatchChampionChanges[] | null {
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  const champions: PatchChampionChanges[] = [];
+  let current: PatchChampionChanges | null = null;
+  let prevLine = "";
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if ((CHAMPIONS as readonly string[]).includes(line)) {
+      current = champions.length < MAX_PATCH_CHAMPIONS ? { champion: line, changes: [] } : null;
+      if (current) champions.push(current);
+      prevLine = line;
+      i++;
+      continue;
+    }
+
+    if (current && line.includes("⇒") && current.changes.length < MAX_CHANGES_PER_CHAMPION) {
+      // 矢印の直後(行末まで)が空なら、後続の非空行から変更後の値を連結して復元する（拡張E40b）。
+      let combined = line;
+      let consumed = 0;
+      while (arrowTrailingIsEmpty(combined) && consumed < MAX_VALUE_CONTINUATION_LINES) {
+        const nextLine = lines[i + 1 + consumed];
+        if (nextLine === undefined) break;
+        if ((CHAMPIONS as readonly string[]).includes(nextLine)) break; // 次のチャンピオン節に到達
+        if (!looksLikeValueContinuation(nextLine)) break; // 次の項目ラベル等が来たらそこで止める
+        combined = `${combined} ${nextLine}`;
+        consumed++;
+      }
+
+      // 連結後も値が空のまま（本当に値が無い異常系）なら、矢印だけの不完全な行を残さず捨てる。
+      if (!arrowTrailingIsEmpty(combined)) {
+        const hasUsableContext =
+          prevLine.length > 0 && prevLine !== current.champion && !prevLine.includes("⇒");
+        current.changes.push(hasUsableContext ? `${prevLine} ${combined}` : combined);
+      }
+
+      prevLine = lines[i + consumed];
+      i += 1 + consumed;
+      continue;
+    }
+
+    prevLine = line;
+    i++;
+  }
+
+  const withChanges = champions.filter((c) => c.changes.length > 0);
+  return withChanges.length > 0 ? withChanges : null;
+}
+
+/**
+ * extractPatchChangesDeterministic の抽出結果から本文ブロックを組み立てる（拡張E40 F-E40-2）。
+ * 見出し「主な変更点（公式パッチノートより）」＋チャンピオンごとの見出し＋変更点段落（逐語）。
+ */
+function composeDeterministicPatchChangesBody(
+  changes: PatchChampionChanges[],
+): ArticleBodyBlock[] {
+  const blocks: ArticleBodyBlock[] = [{ type: "heading", text: "主な変更点（公式パッチノートより）" }];
+  for (const c of changes) {
+    blocks.push({ type: "heading", text: c.champion });
+    for (const change of c.changes) {
+      blocks.push({ type: "paragraph", text: change });
+    }
+  }
+  return blocks;
+}
+
 /** Riot公式（riot）由来: 「速報＋要点整理」構成（従来どおり）。 */
 const FACT_PROFILE = {
   introHeading: "速報",
@@ -606,8 +729,14 @@ export async function composeArticleBody(
     if (candidate.content.length >= PATCH_NOTES_MIN_LENGTH) {
       const patchSummaryBody = await composePatchSummaryBody(candidate, llmClient);
       if (patchSummaryBody) return patchSummaryBody;
-      // 要約失敗（mock・APIエラー・解析失敗・全カテゴリ空等）した場合、パッチノート本文
-      // （ページ全体ダンプでノイズ込み）は composeFactBody（逐文リライト）には渡さず、
+      // 要約失敗（mock・APIエラー・解析失敗・全カテゴリ空等）時は、まずLLM非依存の決定的（逐語）抽出
+      // （拡張E40 F-E40-2）を試みる。「⇒」を含む変更行がチャンピオン節から取れれば、ノイズ断片・
+      // 破綻文を含まない「主な変更点」本文をそのまま採用する（捏造無しの実用的な本文になる）。
+      const deterministicChanges = extractPatchChangesDeterministic(candidate.content);
+      console.log(`[patch] deterministic changes champions=${deterministicChanges?.length ?? 0}`);
+      if (deterministicChanges) return composeDeterministicPatchChangesBody(deterministicChanges);
+      // 決定的抽出も空（本文が取れていない可能性）の場合のみ、パッチノート本文
+      // （ページ全体ダンプでノイズ込み）を composeFactBody（逐文リライト）には渡さず、
       // ノイズ断片・破綻文を含まないクリーンな簡易パッチ記事にする（拡張E35 F-E35-3）。
       return composeCleanPatchFallbackBody(candidate);
     }

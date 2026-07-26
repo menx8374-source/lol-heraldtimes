@@ -8,6 +8,7 @@ import {
 import { MockLLMClient, type LLMClient, type LLMMessage } from "@/lib/generation/llm-client";
 import { blockText, parseArticleBody } from "@/lib/article-body";
 import { pickDeterministicChampionSplashUrl } from "@/lib/generation/champion-thumbnail";
+import { LLM_TITLE_SYSTEM_PROMPT } from "@/lib/generation/title";
 
 const llm = new MockLLMClient();
 
@@ -345,6 +346,117 @@ describe("generateArticleForCandidate（riot公式パッチノートのまとめ
     const totalLength = result.body.reduce((sum, b) => sum + blockText(b).length, 0);
     expect(totalLength).toBeGreaterThanOrEqual(MIN_BODY_LENGTH);
     expect(result.sources[0].url).toBe(candidate().sourceUrl);
+  });
+});
+
+describe("generateArticleForCandidate（タイトル決定、拡張E40 F-E40-1: 捏造タイトル解消）", () => {
+  /** LLM_TITLE_SYSTEM_PROMPT(タイトル生成)向けの呼び出しだけを検知し、それ以外の呼び出し
+   * (本文組み立て等)は従来どおりMockLLMClientに委譲するテスト用スタブ。 */
+  class TitleCallTrackingLLMClient implements LLMClient {
+    public titleCallCount = 0;
+    private readonly mock = new MockLLMClient();
+    async generate(messages: LLMMessage[]): Promise<string> {
+      if (messages.some((m) => m.role === "system" && m.content === LLM_TITLE_SYSTEM_PROMPT)) {
+        this.titleCallCount++;
+        return "【速報】これはテスト用のLLM生成タイトルだよ";
+      }
+      return this.mock.generate(messages);
+    }
+  }
+
+  it("riot候補は candidate.title をそのままタイトルにし、煽りタイトルLLM(generateHookTitleLLM)を経由しない(捏造防止)", async () => {
+    const tracker = new TitleCallTrackingLLMClient();
+    const result = await generateArticleForCandidate(
+      candidate({ sourceType: "riot", title: "【パッチ】26.14 の主な変更点まとめ" }),
+      tracker,
+    );
+    expect(result.title).toBe("【パッチ】26.14 の主な変更点まとめ");
+    expect(tracker.titleCallCount).toBe(0);
+  });
+
+  it("5ch/reddit候補は従来どおり煽りタイトルLLMを経由する(回帰なし)", async () => {
+    const trackerFivech = new TitleCallTrackingLLMClient();
+    const fivechResult = await generateArticleForCandidate(
+      candidate({
+        sourceType: "5ch",
+        sourceUrl: "https://leagueoflegends.5ch.net/test/read.cgi/game/e40-1/",
+        content: "1: 最初のレス。\n2: 二番目のレス。",
+      }),
+      trackerFivech,
+    );
+    expect(fivechResult.title).toBe("【速報】これはテスト用のLLM生成タイトルだよ");
+    expect(trackerFivech.titleCallCount).toBe(1);
+
+    const trackerReddit = new TitleCallTrackingLLMClient();
+    const redditResult = await generateArticleForCandidate(
+      candidate({
+        sourceType: "reddit",
+        sourceUrl: "https://www.reddit.com/r/leagueoflegends/comments/e40-1/",
+        content: "1: 最初のレス。\n2: 二番目のレス。",
+      }),
+      trackerReddit,
+    );
+    expect(redditResult.title).toBe("【速報】これはテスト用のLLM生成タイトルだよ");
+    expect(trackerReddit.titleCallCount).toBe(1);
+  });
+});
+
+describe("generateArticleForCandidate（riotパッチ記事の決定的抽出フォールバック、拡張E40 F-E40-2）", () => {
+  /** 実パッチノートらしいノイズを大量に含みつつ、チャンピオン別の「⇒」変更行を複数含むfixture。
+   * generation-compose.test.ts の同名関数と同じ設計方針(ノイズを大きくして逐語一致率を抑える)。 */
+  function buildRealisticPatchFixture(): string {
+    // 単純な繰り返し文だと同じn-gramが大量に重複し、逐語一致率の判定(文字n-gramの被覆率)を
+    // 実質的に薄められない(distinctなn-gram数がほぼ増えない)ため、番号を変えた文を多数連結して
+    // 実ページ相当の「大量の非反復ノイズ」を作る(拡張E40)。
+    const noise = Array.from(
+      { length: 200 },
+      (_, i) => `これはテスト用のダミー文${i}です。実際のパッチ内容とは関係ありません。`,
+    ).join("");
+    const champions = [
+      { name: "アジール", context: "基本ステータス", changes: ["攻撃力: 55 ⇒ 58", "体力: 550 ⇒ 570"] },
+      { name: "ケイトリン", context: "基本ステータス", changes: ["レベルアップごとの攻撃力: 2 ⇒ 2.5", "移動速度: 335 ⇒ 340"] },
+      {
+        name: "ガレン",
+        context: "R - デマーシアの正義",
+        changes: ["確定ダメージ: 150/250/350 ⇒ 130/230/330", "クールダウン: 120/100/80 ⇒ 130/110/90"],
+      },
+      { name: "ダリウス", context: "Q - 大鎌の一撃", changes: ["クールダウン: 9/8/7/6/5 ⇒ 8/7/6/5/4"] },
+      { name: "ヴィエゴ", context: "パッシブ - 王家の運命", changes: ["支配時間: 6秒 ⇒ 8秒"] },
+      { name: "セナ", context: "W - 慈悲の光弾", changes: ["ダメージ: 70/115/160/205/250 ⇒ 65/105/145/185/225"] },
+    ];
+    const sections = champions.map((c) => [c.name, c.context, ...c.changes].join("\n"));
+    // 実データ(stripHtmlToText出力)同様に「ラベル行/：X ⇒行/値行」が分割されるケースも1件含める
+    // (拡張E40b: 変更後の値が次行に割れても復元できることの回帰確認)。
+    const jaceSplitSection = ["ジェイス", "基本ステータス", "増加移動速度", "：40 ⇒", "45"].join("\n");
+    return [noise, ...sections, jaceSplitSection, "TFTのお知らせ\nTFTセット14が近日公開予定です。", noise].join(
+      "\n\n",
+    );
+  }
+
+  it("実パッチノート本文＋LLM要約が失敗(mock)でも、決定的抽出で変更点があればGenerationErrorにならず「主な変更点」まとめ本文になる(捏造なし・最低文字数/逐語一致率/引用比率を満たす)", async () => {
+    const patchText = buildRealisticPatchFixture();
+    const result = await generateArticleForCandidate(
+      candidate({ content: patchText, title: "【パッチ】26.14 の主な変更点まとめ" }),
+      llm,
+    );
+    const headings = result.body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headings[0]).toBe("主な変更点（公式パッチノートより）");
+    expect(headings).toContain("アジール");
+    expect(headings).toContain("ジェイス");
+    expect(headings).not.toEqual(["26.14の変更点"]); // クリーン定型ではない
+    expect(result.body.some((b) => b.type === "quote")).toBe(false);
+    // タイトルは事実タイトル(candidate.title)そのまま(拡張E40 F-E40-1、捏造なし)
+    expect(result.title).toBe("【パッチ】26.14 の主な変更点まとめ");
+    // 拡張E40bの重大バグ修正: 値が複数行に割れた実データケース(ジェイス)でも変更後の値まで復元され、
+    // 矢印だけで終わる壊れた行が残っていない
+    const paragraphs = result.body.filter((b) => b.type === "paragraph").map((b) => b.text);
+    expect(paragraphs).toContain("増加移動速度 ：40 ⇒ 45");
+    for (const p of paragraphs) {
+      expect(p.trim().endsWith("⇒")).toBe(false);
+    }
+    // 受け入れ基準(generate-article.tsの検証: 最低300字・逐語一致率・引用比率)を満たしGenerationErrorにならない
+    const totalLength = result.body.reduce((sum, b) => sum + blockText(b).length, 0);
+    expect(totalLength).toBeGreaterThanOrEqual(MIN_BODY_LENGTH);
   });
 });
 

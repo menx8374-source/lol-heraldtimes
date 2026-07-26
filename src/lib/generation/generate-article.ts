@@ -146,12 +146,19 @@ export async function generateArticleForCandidate(
     }
   }
 
+  // タイトル決定（拡張E40 F-E40-1）: riot（パッチ/公式データ）は事実性が最優先のため、煽り速報タイトル
+  // LLM（generateHookTitleLLM）を使わず、収集アダプタが既に組み立てた事実タイトル（candidate.title。
+  // 例「【パッチ】26.14 の主な変更点まとめ」）をそのまま採用する。拡張E26で「本文由来の具体要素を含む」
+  // チェックを撤廃したため、煽りLLMに通すとラベル＋文字数さえ満たせば本文に無い主張（捏造）でも
+  // 通ってしまう問題があった。反応記事（5ch/reddit）・clip は従来どおり惹きつけタイトルLLMを使う。
   // タイトルのソースはレス番号「N: 」やアンカー行を除いた本文にする（タイトルへの「1: 」混入を防ぐ）。
-  // LLM経由で生成し（拡張E24 F-E24-2）、検証不通過・APIエラー時は関数内でルールベースにフォールバックする。
-  const title = await generateHookTitleLLM(llmClient, {
-    title: candidate.title,
-    content: threadBodyText(candidate.content),
-  });
+  const title =
+    candidate.sourceType === "riot"
+      ? candidate.title
+      : await generateHookTitleLLM(llmClient, {
+          title: candidate.title,
+          content: threadBodyText(candidate.content),
+        });
 
   let thumbnailUrl: string | null = isSafeImageUrl(candidate.imageUrl) ? candidate.imageUrl : null;
   if (!thumbnailUrl && championMap) {
