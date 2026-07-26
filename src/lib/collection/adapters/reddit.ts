@@ -1,96 +1,191 @@
 /**
- * Reddit（海外の反応）から取得する live アダプタ（拡張E16 F-E16-1）。
- * 認証は Application-only OAuth2（client_credentials）。Redditアカウントのパスワードは不要で、
- * 公開リスティングの読み取り専用スコープのみを使う。
+ * Reddit（海外の反応）から取得する live アダプタ（拡張E46でArctic Shiftへ全面切替）。
  *
- * 手順: (1) トークン取得（Basic認証: client_id:client_secret、body: grant_type=client_credentials）
- *   → (2) 許可サブレディットの hot リスティング取得（Bearerトークン＋必須User-Agent）
- *   → (3) 各投稿を RawCollectionItem へ整形。
+ * 経緯: 公式OAuth（Application-only）は認証情報未設定時に常に空・かつ投稿本文のみでコメント無し＝弱い。
+ * 無認証の公式JSONは403、RSSはレート制限が厳しく無人運用に不向き（検証済み）。PullPushはデータが
+ * 約14か月古く不採用。**Arctic Shift**（`arctic-shift.photon-reddit.com`・無認証・無料）は最新データが
+ * あるが、スコアはAPI側でソート/絞込できず（`created_utc`順のみ）、作成直後はスコアが未反映で
+ * 2日程度でバックフィルされる特性がある。そのため「2〜4日前の投稿」を取得しクライアント側でスコア降順に
+ * 選抜し、各スレの上位コメントを取得して「OP＋上位コメント」のスレッドダンプに整形する
+ * （翻訳は次スプリントE47。本スプリントは英語のまま実データ化する）。
  *
- * 信頼境界（外部API）: fetch はタイムアウト付き。トークン取得失敗・HTTPエラー・不正JSON・
- * ネットワーク断・クレデンシャル未設定はいずれも例外を投げず握り潰して空配列を返す
- * （1ソースの失敗が収集パイプライン全体を止めない方針。riot live アダプタと同方針）。
- * シークレット（client_secret・アクセストークン）はログに出さない。
- * Redditの返す本文は信頼できないユーザー生成テキストとして扱い、content文字列に入れるのみで
- * HTMLとして解釈させる経路には入れない（安全フィルタ・XSSエスケープ・出典必須は既存の生成/表示層が担保）。
+ * 信頼境界（外部API）: `fetchJsonSafe`（タイムアウト付き）。HTTPエラー・不正JSON・ネットワーク断は
+ * いずれも例外を投げず握り潰して空配列を返す（1ソースの失敗が収集パイプライン全体を止めない方針。
+ * riot/5ch live アダプタと同方針）。キー不要のため常に試行する。
+ * Redditの返す本文（title/selftext/コメントbody）は信頼できないユーザー生成テキストとして扱い、
+ * 整形済みのスレッドダンプ文字列を content に入れるのみでHTMLとして解釈させる経路には入れない
+ * （安全フィルタ・XSSエスケープ・出典必須は既存の生成/表示層が担保）。逐語は不変（選定・整形のみ）。
  */
 import type { RawCollectionItem, SourceAdapter } from "@/lib/collection/types";
-import { DEFAULT_ALLOWED_SUBREDDITS } from "@/lib/collection/config";
+import { getDefaultSourceConfigs } from "@/lib/collection/config";
 import { fetchJsonSafe, dedupeBySourceUrl } from "@/lib/collection/adapters/http";
 
-const TOKEN_URL = "https://www.reddit.com/api/v1/access_token";
-/** 1リクエストで取得するリスティング件数（最終的な件数上限は呼び出し側pipelineのconfigが適用）。 */
-const LISTING_LIMIT = 25;
+const ARCTIC_SHIFT_BASE = "https://arctic-shift.photon-reddit.com/api";
+/** 5chアダプタ同様、説明的な既定UA（env `REDDIT_USER_AGENT` で上書き可）。 */
+const DEFAULT_USER_AGENT = "lol-matome-sokuhou-collector/1.0 (bot; +contact via operator CONTACT_EMAIL)";
 
-function listingUrl(subreddit: string): string {
-  return `https://oauth.reddit.com/r/${subreddit}/hot?limit=${LISTING_LIMIT}&raw_json=1`;
-}
+/** 投稿選別の下限スコア（既定50。env `REDDIT_MIN_SCORE` で上書き可）。 */
+const DEFAULT_MIN_SCORE = 50;
+/** 収集対象にする投稿数の上限（既定5。env `REDDIT_MAX_THREADS` で上書き可）。 */
+const DEFAULT_MAX_THREADS = 5;
+/** 1投稿あたり取り込むコメント数の上限（既定20。env `REDDIT_MAX_COMMENTS` で上書き可）。 */
+const DEFAULT_MAX_COMMENTS = 20;
+/** 取得窓の下限（何日前までを対象にするか。既定2。env `REDDIT_MIN_AGE_DAYS` で上書き可）。 */
+const DEFAULT_MIN_AGE_DAYS = 2;
+/** 取得窓の上限（何日前から遡るか。既定4。env `REDDIT_MAX_AGE_DAYS` で上書き可）。 */
+const DEFAULT_MAX_AGE_DAYS = 4;
+/** 連続fetch間のディレイ(ms)（既定1000。env `REDDIT_REQUEST_DELAY_MS` で上書き可）。 */
+const DEFAULT_REQUEST_DELAY_MS = 1000;
+/** 投稿本文(selftext)抜粋の最大長（有界化）。 */
+const SELFTEXT_EXCERPT_MAX_LENGTH = 500;
 
-type RedditCredentials = {
-  clientId: string;
-  clientSecret: string;
-  userAgent: string;
-};
-
-type RedditTokenResponse = {
-  access_token?: string;
-};
-
-/** app-only OAuthのアクセストークンを取得する。失敗時はnullを返す（例外を投げない）。 */
-async function fetchAccessToken(creds: RedditCredentials): Promise<string | null> {
-  const basicAuth = Buffer.from(`${creds.clientId}:${creds.clientSecret}`).toString("base64");
-  const json = await fetchJsonSafe<RedditTokenResponse>(
-    TOKEN_URL,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${basicAuth}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": creds.userAgent,
-      },
-      body: new URLSearchParams({ grant_type: "client_credentials" }).toString(),
-    },
-    { logLabel: "reddit", context: "アクセストークン取得" },
-  );
-  return json?.access_token ?? null;
+/** 非負整数のenv値をパースする（不正・未設定はfallback）。 */
+function envIntLocal(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 export type RedditPostData = {
-  permalink: string;
+  id: string;
+  permalink?: string;
   title: string;
   selftext?: string;
   created_utc: number;
+  score?: number;
+  stickied?: boolean;
+  over_18?: boolean;
   /** 投稿画像プレビュー（Redditが自動生成する画像バリエーション）。あれば最優先で使う。 */
   preview?: { images?: { source?: { url?: string } }[] };
   /** サムネイルURL、または"self"/"default"/"nsfw"/"spoiler"等の非画像プレースホルダー文字列。 */
   thumbnail?: string;
 };
 
-type RedditListingChild = { data?: RedditPostData };
-export type RedditListingResponse = {
-  data?: { children?: RedditListingChild[] };
+export type RedditCommentData = {
+  id: string;
+  body?: string;
+  score?: number;
+  author?: string;
 };
 
-/** リスティングJSONから投稿データ配列を取り出す（不正な形の子要素は無視する）。 */
-export function extractPosts(listing: RedditListingResponse): RedditPostData[] {
-  const children = listing.data?.children ?? [];
-  const posts: RedditPostData[] = [];
-  for (const child of children) {
-    if (child?.data) posts.push(child.data);
-  }
-  return posts;
+type ArcticShiftPostsResponse = { data?: RedditPostData[] };
+type ArcticShiftCommentsResponse = { data?: RedditCommentData[] };
+
+/** 投稿検索エンドポイントのURLを組み立てる（取得窓はISO日時文字列で渡す）。 */
+export function buildPostsSearchUrl(subreddit: string, afterIso: string, beforeIso: string): string {
+  const params = new URLSearchParams({
+    subreddit,
+    after: afterIso,
+    before: beforeIso,
+    limit: "100",
+    sort: "desc",
+  });
+  return `${ARCTIC_SHIFT_BASE}/posts/search?${params.toString()}`;
 }
 
-/** 投稿permalinkから一意・安定な絶対URLを構築する。 */
-export function buildPostUrl(permalink: string): string {
-  return `https://www.reddit.com${permalink}`;
+/** コメント検索エンドポイントのURLを組み立てる。 */
+export function buildCommentsSearchUrl(postId: string): string {
+  const params = new URLSearchParams({ link_id: postId, limit: "100", sort: "desc" });
+  return `${ARCTIC_SHIFT_BASE}/comments/search?${params.toString()}`;
+}
+
+/** 投稿permalinkから一意・安定な絶対URLを構築する（permalink無ければ `.../comments/<id>` にフォールバック）。 */
+export function buildPostUrl(post: Pick<RedditPostData, "id" | "permalink">): string {
+  if (post.permalink && post.permalink.trim().length > 0) {
+    return `https://www.reddit.com${post.permalink}`;
+  }
+  return `https://www.reddit.com/comments/${post.id}`;
+}
+
+export type FetchWindow = { afterIso: string; beforeIso: string };
+
+/**
+ * 取得窓（after/before）を計算する純関数（拡張E46 F-E46-1）。
+ * Arctic Shiftはスコアが作成直後は未反映で2日程度でバックフィルされる特性があるため、
+ * 「`maxAgeDays`日前〜`minAgeDays`日前」の投稿だけを対象にする。`now` はテスト注入可能。
+ */
+export function computeFetchWindow(now: Date, minAgeDays: number, maxAgeDays: number): FetchWindow {
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const after = new Date(now.getTime() - maxAgeDays * msPerDay);
+  const before = new Date(now.getTime() - minAgeDays * msPerDay);
+  return { afterIso: after.toISOString(), beforeIso: before.toISOString() };
+}
+
+/**
+ * 投稿配列からタイトルがLoL関連キーワードに一致する投稿のみを残す（sticky/NSFW/スコア絞込は行わない）。
+ */
+export function matchKeywordPosts(posts: RedditPostData[], keywords: string[]): RedditPostData[] {
+  const lowerKeywords = keywords.map((k) => k.toLowerCase()).filter((k) => k.length > 0);
+  return posts.filter((p) => {
+    const lowerTitle = p.title.toLowerCase();
+    return lowerKeywords.some((k) => lowerTitle.includes(k));
+  });
+}
+
+/**
+ * 投稿を選抜する純関数（拡張E46 F-E46-1）。`stickied`・`over_18` を除外し、タイトルがキーワードに
+ * 一致し、`score >= minScore` の投稿のみを残す。score降順にソートし上位 `limit` 件を返す。
+ */
+export function selectRelevantPosts(
+  posts: RedditPostData[],
+  keywords: string[],
+  minScore: number,
+  limit: number,
+): RedditPostData[] {
+  const candidates = posts.filter((p) => !p.stickied && !p.over_18);
+  const keywordMatched = matchKeywordPosts(candidates, keywords);
+  const qualified = keywordMatched.filter((p) => (p.score ?? 0) >= minScore);
+  const sorted = [...qualified].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  return sorted.slice(0, Math.max(0, limit));
+}
+
+/** コメント本文が実質空（削除・除去・空白のみ）かどうか。 */
+function isEmptyOrRemovedBody(body: string | undefined): boolean {
+  if (!body) return true;
+  const trimmed = body.trim();
+  return trimmed.length === 0 || trimmed === "[deleted]" || trimmed === "[removed]";
+}
+
+/**
+ * コメントを整形する純関数（拡張E46 F-E46-1）。`[deleted]`/`[removed]`/空本文/`AutoModerator` を除外し、
+ * score降順で上位 `limit` 件を返す（逐語は不変・選定のみ）。
+ */
+export function selectTopComments(comments: RedditCommentData[], limit: number): RedditCommentData[] {
+  const filtered = comments.filter(
+    (c) => !isEmptyOrRemovedBody(c.body) && c.author?.toLowerCase() !== "automoderator",
+  );
+  const sorted = [...filtered].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  return sorted.slice(0, Math.max(0, limit));
+}
+
+/** OP本文（title＋selftext冒頭抜粋）を組み立てる（有界化。改行はスペースに畳んで1レス化）。 */
+function buildOpBodyLine(post: RedditPostData): string {
+  const selftext = post.selftext?.trim();
+  if (!selftext) return post.title;
+  const excerpt =
+    selftext.length > SELFTEXT_EXCERPT_MAX_LENGTH ? `${selftext.slice(0, SELFTEXT_EXCERPT_MAX_LENGTH)}…` : selftext;
+  return `${post.title}\n${excerpt}`;
+}
+
+/**
+ * OP＋上位コメントを `parseThreadReses` が解釈するスレッドダンプ（`"N: 本文\n\n…"`）に組み立てる純関数
+ * （拡張E46 F-E46-1）。レス1=OP、レス2..=上位コメント本文（逐語・改行保持）。
+ * redditは5chの`>>N`アンカーが無いためフラット一覧でよい。
+ */
+export function buildRedditThreadDump(post: RedditPostData, comments: RedditCommentData[]): string {
+  const parts = [`1: ${buildOpBodyLine(post)}`];
+  comments.forEach((c, idx) => {
+    parts.push(`${idx + 2}: ${(c.body ?? "").trim()}`);
+  });
+  return parts.join("\n\n");
 }
 
 /** Redditが返す非画像のプレースホルダー thumbnail 値（"self"投稿・画像なし・NSFW/スポイラー隠し等）。 */
 const NON_IMAGE_THUMBNAIL_VALUES = new Set(["self", "default", "nsfw", "spoiler", "image", ""]);
 
 /**
- * 投稿の画像URLを抽出する（拡張E19 F-E19-3）。`preview.images[0].source.url`（HTMLエンティティ
+ * 投稿の画像URLを抽出する（拡張E19 F-E19-3を踏襲）。`preview.images[0].source.url`（HTMLエンティティ
  * `&amp;` をデコード）を最優先し、無ければ `thumbnail` が `http(s)` の実画像URLのときそれを使う。
  * どちらも無ければ null（記事は既定サムネイル画像にフォールバックする）。
  */
@@ -106,81 +201,134 @@ export function extractRedditImageUrl(post: RedditPostData): string | null {
   return null;
 }
 
-/** Reddit投稿1件を RawCollectionItem に整形する（selftext優先、無ければタイトルで代替）。 */
-export function buildRedditItem(post: RedditPostData): RawCollectionItem {
-  const content = post.selftext && post.selftext.trim().length > 0 ? post.selftext : post.title;
+/** 投稿＋選抜済みコメントから RawCollectionItem を組み立てる純関数。 */
+export function buildRedditItem(post: RedditPostData, comments: RedditCommentData[]): RawCollectionItem {
   return {
-    sourceUrl: buildPostUrl(post.permalink),
+    sourceUrl: buildPostUrl(post),
     title: post.title,
-    content,
+    content: buildRedditThreadDump(post, comments),
     fetchedAt: new Date(post.created_utc * 1000),
     imageUrl: extractRedditImageUrl(post),
   };
 }
 
-/** 許可サブレディットの hot リスティングを取得する。失敗時はnullを返す（例外を投げない）。 */
-async function fetchListing(
-  subreddit: string,
-  token: string,
-  userAgent: string,
-): Promise<RedditListingResponse | null> {
-  return fetchJsonSafe<RedditListingResponse>(
-    listingUrl(subreddit),
-    { headers: { Authorization: `Bearer ${token}`, "User-Agent": userAgent } },
-    { logLabel: "reddit", context: `r/${subreddit}` },
-  );
-}
-
 export type RedditAdapterOptions = {
-  /** テスト・注入用。既定は env `REDDIT_CLIENT_ID`。 */
-  clientId?: string;
-  /** テスト・注入用。既定は env `REDDIT_CLIENT_SECRET`。 */
-  clientSecret?: string;
   /** テスト・注入用。既定は env `REDDIT_USER_AGENT`。 */
   userAgent?: string;
-  /** 取得対象サブレディット。既定は `DEFAULT_ALLOWED_SUBREDDITS`。 */
+  /** 取得対象サブレディット。既定は config の allowedSubreddits。 */
   subreddits?: string[];
+  /** LoL関連判定キーワード。既定は config の reddit relevance keywords。 */
+  keywords?: string[];
+  /** 現在時刻の注入点（テスト用）。既定は実時刻。 */
+  now?: () => Date;
+  minAgeDays?: number;
+  maxAgeDays?: number;
+  minScore?: number;
+  maxThreads?: number;
+  maxComments?: number;
+  /** 連続fetch間のディレイ(ms)。既定は env `REDDIT_REQUEST_DELAY_MS`（既定1000）。 */
+  delayMs?: number;
+  /** ディレイの実処理の注入点（テスト用）。既定は実 setTimeout ベースの sleep。 */
+  sleep?: (ms: number) => Promise<void>;
 };
 
 /**
- * Reddit（Application-only OAuth）から許可サブレディットのhotリスティングを収集する live アダプタ。
- * クレデンシャル未設定時は例外を投げず空配列を返し、スキップした旨をログに一度残す。
+ * Reddit（Arctic Shift REST・キー不要）から「最近の人気スレOP＋上位コメント」を収集する live アダプタ
+ * （拡張E46）。取得失敗（HTTPエラー・不正JSON・ネット断）はすべて例外を投げず空配列にする。
+ * 投稿一覧→各スレのコメント取得の順に直列で行い、連続fetch間にディレイを挟む（同時多重接続を避ける。
+ * 5chアダプタと同方針）。
  */
 export class RedditAdapter implements SourceAdapter {
   readonly sourceType = "reddit" as const;
-  private readonly clientId?: string;
-  private readonly clientSecret?: string;
-  private readonly userAgent?: string;
+  private readonly userAgent: string;
   private readonly subreddits: string[];
+  private readonly keywords: string[];
+  private readonly now: () => Date;
+  private readonly minAgeDays: number;
+  private readonly maxAgeDays: number;
+  private readonly minScore: number;
+  private readonly maxThreads: number;
+  private readonly maxComments: number;
+  private readonly delayMs: number;
+  private readonly sleep: (ms: number) => Promise<void>;
+  /** 実行全体で最初のfetchかどうか（最初のfetch前はディレイ不要のため）。 */
+  private firstFetchDone = false;
 
   constructor(options: RedditAdapterOptions = {}) {
-    this.clientId = options.clientId ?? process.env.REDDIT_CLIENT_ID;
-    this.clientSecret = options.clientSecret ?? process.env.REDDIT_CLIENT_SECRET;
-    this.userAgent = options.userAgent ?? process.env.REDDIT_USER_AGENT;
-    this.subreddits = options.subreddits ?? DEFAULT_ALLOWED_SUBREDDITS;
+    const defaults = getDefaultSourceConfigs().reddit;
+    this.userAgent = options.userAgent ?? process.env.REDDIT_USER_AGENT ?? DEFAULT_USER_AGENT;
+    this.subreddits = options.subreddits ?? defaults.relevance.allowedSubreddits ?? [];
+    this.keywords = options.keywords ?? defaults.relevance.keywords;
+    this.now = options.now ?? (() => new Date());
+    this.minAgeDays = options.minAgeDays ?? envIntLocal("REDDIT_MIN_AGE_DAYS", DEFAULT_MIN_AGE_DAYS);
+    this.maxAgeDays = options.maxAgeDays ?? envIntLocal("REDDIT_MAX_AGE_DAYS", DEFAULT_MAX_AGE_DAYS);
+    this.minScore = options.minScore ?? envIntLocal("REDDIT_MIN_SCORE", DEFAULT_MIN_SCORE);
+    this.maxThreads = options.maxThreads ?? envIntLocal("REDDIT_MAX_THREADS", DEFAULT_MAX_THREADS);
+    this.maxComments = options.maxComments ?? envIntLocal("REDDIT_MAX_COMMENTS", DEFAULT_MAX_COMMENTS);
+    this.delayMs = options.delayMs ?? envIntLocal("REDDIT_REQUEST_DELAY_MS", DEFAULT_REQUEST_DELAY_MS);
+    this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  }
+
+  /** 取得(fetch)の直前に呼ぶ。実行全体で最初の1回だけディレイを省く（他はdelayMs待ってから進める）。 */
+  private async waitBeforeFetch(): Promise<void> {
+    if (this.firstFetchDone) {
+      await this.sleep(this.delayMs);
+    } else {
+      this.firstFetchDone = true;
+    }
+  }
+
+  private async fetchPosts(subreddit: string): Promise<RedditPostData[]> {
+    const { afterIso, beforeIso } = computeFetchWindow(this.now(), this.minAgeDays, this.maxAgeDays);
+    await this.waitBeforeFetch();
+    const json = await fetchJsonSafe<ArcticShiftPostsResponse>(
+      buildPostsSearchUrl(subreddit, afterIso, beforeIso),
+      { headers: { "User-Agent": this.userAgent } },
+      { logLabel: "reddit", context: `r/${subreddit} posts` },
+    );
+    return json?.data ?? [];
+  }
+
+  private async fetchComments(post: RedditPostData): Promise<RedditCommentData[]> {
+    await this.waitBeforeFetch();
+    const json = await fetchJsonSafe<ArcticShiftCommentsResponse>(
+      buildCommentsSearchUrl(post.id),
+      { headers: { "User-Agent": this.userAgent } },
+      { logLabel: "reddit", context: `comments id=${post.id}` },
+    );
+    return json?.data ?? [];
+  }
+
+  private async fetchSubredditItems(subreddit: string): Promise<RawCollectionItem[]> {
+    const posts = await this.fetchPosts(subreddit);
+    const candidates = posts.filter((p) => !p.stickied && !p.over_18);
+    const relevantCount = matchKeywordPosts(candidates, this.keywords).filter(
+      (p) => (p.score ?? 0) >= this.minScore,
+    ).length;
+    const selected = selectRelevantPosts(posts, this.keywords, this.minScore, this.maxThreads);
+
+    const items: RawCollectionItem[] = [];
+    for (const post of selected) {
+      const comments = await this.fetchComments(post);
+      const topComments = selectTopComments(comments, this.maxComments);
+      items.push(buildRedditItem(post, topComments));
+    }
+    console.log(
+      `[reddit] sub=${subreddit} fetched=${posts.length} relevant=${relevantCount} selected=${selected.length} collected=${items.length}`,
+    );
+    return items;
   }
 
   async fetchItems(): Promise<RawCollectionItem[]> {
-    if (!this.clientId || !this.clientSecret || !this.userAgent) {
-      console.log(
-        "[reddit] REDDIT_CLIENT_ID/REDDIT_CLIENT_SECRET/REDDIT_USER_AGENT が未設定のためReddit収集をスキップします",
-      );
+    if (this.subreddits.length === 0) {
+      console.log("[reddit] 対象サブレディットが無いため収集をスキップします");
       return [];
     }
-
-    const token = await fetchAccessToken({
-      clientId: this.clientId,
-      clientSecret: this.clientSecret,
-      userAgent: this.userAgent,
-    });
-    if (!token) return [];
-
-    const items: RawCollectionItem[] = [];
+    // 5chアダプタ同様、サブレディットは完全並列ではなく直列で取得する（同時多重接続を避ける）。
+    const perSubredditResults: RawCollectionItem[][] = [];
     for (const subreddit of this.subreddits) {
-      const listing = await fetchListing(subreddit, token, this.userAgent);
-      if (!listing) continue;
-      for (const post of extractPosts(listing)) items.push(buildRedditItem(post));
+      perSubredditResults.push(await this.fetchSubredditItems(subreddit));
     }
-    return dedupeBySourceUrl(items);
+    return dedupeBySourceUrl(perSubredditResults.flat());
   }
 }
