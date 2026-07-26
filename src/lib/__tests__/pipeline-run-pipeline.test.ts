@@ -326,6 +326,32 @@ describe("runFullPipeline（統合パイプライン）", () => {
     expect(runLog?.publishedCount).toBe(0);
   });
 
+  it("maxPublishPerRun未指定時、generateArticlesForQueueへカテゴリ別上限(maxPerCategory)を渡す(拡張E48)", async () => {
+    let receivedOptions: Parameters<NonNullable<PipelineRunOptions["generateArticles"]>>[1] | undefined;
+    const generateArticlesSpy: NonNullable<PipelineRunOptions["generateArticles"]> = async (_client, options) => {
+      receivedOptions = options;
+      return { succeededCount: 0, failedCount: 0, results: [] };
+    };
+
+    await runPipeline({ now: T0, generateArticles: generateArticlesSpy });
+
+    expect(receivedOptions?.maxPerCategory).toBeGreaterThan(0);
+    expect(receivedOptions?.maxCandidates).toBeUndefined();
+  });
+
+  it("maxPublishPerRunを明示指定した場合は、従来どおり総数上限(maxCandidates)を渡す(後方互換)", async () => {
+    let receivedOptions: Parameters<NonNullable<PipelineRunOptions["generateArticles"]>>[1] | undefined;
+    const generateArticlesSpy: NonNullable<PipelineRunOptions["generateArticles"]> = async (_client, options) => {
+      receivedOptions = options;
+      return { succeededCount: 0, failedCount: 0, results: [] };
+    };
+
+    await runPipeline({ now: T0, maxPublishPerRun: 1, generateArticles: generateArticlesSpy });
+
+    expect(receivedOptions?.maxCandidates).toBe(1);
+    expect(receivedOptions?.maxPerCategory).toBeUndefined();
+  });
+
   it("工程をまたぐ想定外の例外が起きてもクラッシュせず、実行ログに失敗として記録して正常終了する", async () => {
     const report = await runPipeline({
       now: T0,

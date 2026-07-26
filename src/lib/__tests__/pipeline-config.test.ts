@@ -7,6 +7,23 @@ describe("getPipelineConfig", () => {
     expect(config.maxPublishPerRun).toBeGreaterThan(0);
     expect(config.intervalMs).toBeGreaterThan(0);
   });
+
+  it("カテゴリ別公開本数上限(maxPublishPerCategory)の既定値を持つ(拡張E48)", () => {
+    const config = getPipelineConfig();
+    expect(config.maxPublishPerCategory).toBe(2);
+  });
+
+  it("PIPELINE_MAX_PUBLISH_PER_CATEGORY を設定すると上書きされる(拡張E48)", () => {
+    const original = process.env.PIPELINE_MAX_PUBLISH_PER_CATEGORY;
+    process.env.PIPELINE_MAX_PUBLISH_PER_CATEGORY = "3";
+    try {
+      const config = getPipelineConfig();
+      expect(config.maxPublishPerCategory).toBe(3);
+    } finally {
+      if (original === undefined) delete process.env.PIPELINE_MAX_PUBLISH_PER_CATEGORY;
+      else process.env.PIPELINE_MAX_PUBLISH_PER_CATEGORY = original;
+    }
+  });
 });
 
 describe("computeNextRunAt", () => {

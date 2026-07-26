@@ -29,8 +29,17 @@ export type PipelineRunOptions = {
   sourceConfigs?: Record<SourceType, SourceConfig>;
   llmClient?: LLMClient;
   now?: Date;
-  /** 1回の実行で処理する候補数（≒公開本数）の上限。未指定時は設定(PIPELINE_MAX_PUBLISH_PER_RUN)。 */
+  /**
+   * 1回の実行で処理する候補数（≒公開本数）の総数上限（後方互換）。明示的に指定された場合は
+   * こちらを優先し、従来どおり総数上限で generateArticlesForQueue を呼ぶ（maxPerCategory は使わない）。
+   * 未指定時は下の maxPerCategory（カテゴリ=ソース別上限、拡張E48）が主制御になる。
+   */
   maxPublishPerRun?: number;
+  /**
+   * カテゴリ(=ソース種別)別の1回の実行あたり公開本数上限（拡張E48）。未指定時は設定
+   * (PIPELINE_MAX_PUBLISH_PER_CATEGORY)。maxPublishPerRun が明示指定された場合はそちらを優先する。
+   */
+  maxPerCategory?: number;
   /**
    * チャンピオン検出（拡張E31 F-E31-1）用Map。generateArticlesForQueue にそのまま渡す
    * （未指定undefinedならrun開始時に1回だけ実フェッチ、明示的にnullならフェッチ自体をスキップ）。
@@ -92,7 +101,10 @@ async function persistRunLog(report: PipelineRunReport): Promise<void> {
 export async function runFullPipeline(options: PipelineRunOptions = {}): Promise<PipelineRunReport> {
   const startedAt = options.now ?? new Date();
   const pipelineConfig = getPipelineConfig();
-  const maxPublishPerRun = options.maxPublishPerRun ?? pipelineConfig.maxPublishPerRun;
+  // maxPublishPerRun が明示指定された場合のみ総数上限（旧挙動・後方互換）を使い、
+  // それ以外は maxPerCategory（カテゴリ=ソース別上限、拡張E48）を主制御にする。
+  const maxPublishPerRun = options.maxPublishPerRun;
+  const maxPerCategory = options.maxPerCategory ?? pipelineConfig.maxPublishPerCategory;
 
   const runCollection = options.runCollection ?? runCollectionPipeline;
   const rebuildQueue = options.rebuildQueue ?? rebuildCandidateQueue;
@@ -125,10 +137,12 @@ export async function runFullPipeline(options: PipelineRunOptions = {}): Promise
     candidateCount = queueSummary.queuedCount;
 
     const llmClient = options.llmClient ?? getLLMClient();
-    generationSummary = await generateArticles(llmClient, {
-      maxCandidates: maxPublishPerRun,
-      championMap: options.championMap,
-    });
+    generationSummary = await generateArticles(
+      llmClient,
+      maxPublishPerRun != null
+        ? { maxCandidates: maxPublishPerRun, championMap: options.championMap }
+        : { maxPerCategory, championMap: options.championMap },
+    );
     generationSucceeded = generationSummary.succeededCount;
     generationFailed = generationSummary.failedCount;
     publishedCount = generationSummary.results.filter(

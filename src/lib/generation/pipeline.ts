@@ -15,6 +15,7 @@
  */
 import { prisma } from "@/lib/prisma";
 import { listCandidateQueue } from "@/lib/collection/queue";
+import { SOURCE_TYPES } from "@/lib/collection/types";
 import { generateArticleForCandidate, GenerationError, type GenerationCandidate } from "@/lib/generation/generate-article";
 import { getLLMClient, type LLMClient } from "@/lib/generation/llm-client";
 import { generateHookTitle } from "@/lib/generation/title";
@@ -77,6 +78,12 @@ export type GenerationRunOptions = {
    */
   maxCandidates?: number;
   /**
+   * カテゴリ(=ソース種別)別の1回の実行あたり処理数上限（拡張E48）。指定時は `maxCandidates`（総数上限）
+   * より優先され、ソース種別（`SOURCE_TYPES`）ごとに独立して最大 `maxPerCategory` 件ずつ取得・処理する
+   * （あるソースの候補が多くても他ソースの取得件数を圧迫しない）。未指定時は従来どおり `maxCandidates` で動く。
+   */
+  maxPerCategory?: number;
+  /**
    * チャンピオン検出（拡張E31 F-E31-1）に使う「表示名→championId」Map。
    * - 未指定(undefined): run開始時に fetchChampionNameToIdMap() を1回だけ取得して使う
    *   （候補が0件のときは取得しない。取得失敗時はフォールバック表を返すため例外にはならない）。
@@ -97,9 +104,18 @@ export async function generateArticlesForQueue(
   options: GenerationRunOptions = {},
 ): Promise<GenerationRunSummary> {
   // 上限は DB 側の take で絞る（全 queued を取得してから捨てる無駄を避ける）。
-  const candidates = await listCandidateQueue(
-    options.maxCandidates != null ? { take: options.maxCandidates } : {},
-  );
+  // maxPerCategory 指定時は、ソース種別ごとに独立した上限で取得し連結する（拡張E48）。
+  // 未指定時は従来どおり maxCandidates（総数上限、後方互換）で1回の取得に絞る。
+  const candidates =
+    options.maxPerCategory != null
+      ? (
+          await Promise.all(
+            SOURCE_TYPES.map((sourceType) =>
+              listCandidateQueue({ take: options.maxPerCategory, sourceType }),
+            ),
+          )
+        ).flat()
+      : await listCandidateQueue(options.maxCandidates != null ? { take: options.maxCandidates } : {});
   const results: GenerationRunResult[] = [];
 
   // 候補が枯渇しているときは、重複判定プールのクエリも含め何もせず正常終了する（F10:「今回は新規公開なし」）。
