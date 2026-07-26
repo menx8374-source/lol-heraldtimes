@@ -297,7 +297,7 @@ describe("composeArticleBody（反応記事のLLMレス抜粋＋重要レス強�
     ]);
   });
 
-  it("JSON parse失敗時は例外を投げず、全レス・強調なしにフォールバックする", async () => {
+  it("JSON parse失敗時は例外を投げず全レスにフォールバックし、拡張E33の色付き強調最低保証が効く", async () => {
     const stub = new StubLLMClient("これはJSONではない応答です");
     const body = await composeArticleBody(
       { sourceType: "5ch", title: "パース失敗テスト", content: threeResContent },
@@ -305,7 +305,11 @@ describe("composeArticleBody（反応記事のLLMレス抜粋＋重要レス強�
     );
     const reactions = body.filter((b) => b.type === "reaction");
     expect(reactions).toHaveLength(3);
-    expect(reactions.every((b) => b.type === "reaction" && b.emphasis === undefined)).toBe(true);
+    // LLM選定が効かず強調ゼロなので、拡張E33の決定論フォールバックで最も長いレス(2番目)にのみ色が付く
+    expect(reactions[1].type === "reaction" && reactions[1].emphasis).toBe(true);
+    expect(reactions[1].type === "reaction" && reactions[1].emphasisColor).toBe("red");
+    expect(reactions[0].type === "reaction" && reactions[0].emphasis).toBeUndefined();
+    expect(reactions[2].type === "reaction" && reactions[2].emphasis).toBeUndefined();
   });
 
   it("keepが空配列のとき、全レス・強調なしにフォールバックする", async () => {
@@ -338,7 +342,7 @@ describe("composeArticleBody（反応記事のLLMレス抜粋＋重要レス強�
     expect(reactions).toHaveLength(3);
   });
 
-  it("LLM呼び出しが例外を投げても、例外を外に漏らさず全レス・強調なしにフォールバックする", async () => {
+  it("LLM呼び出しが例外を投げても、例外を外に漏らさず全レスにフォールバックし、拡張E33の色付き強調最低保証が効く", async () => {
     const throwing = new ThrowingLLMClient();
     const body = await composeArticleBody(
       { sourceType: "reddit", title: "APIエラーテスト", content: threeResContent },
@@ -346,17 +350,19 @@ describe("composeArticleBody（反応記事のLLMレス抜粋＋重要レス強�
     );
     const reactions = body.filter((b) => b.type === "reaction");
     expect(reactions).toHaveLength(3);
-    expect(reactions.every((b) => b.type === "reaction" && b.emphasis === undefined)).toBe(true);
+    expect(reactions[1].type === "reaction" && reactions[1].emphasis).toBe(true);
+    expect(reactions[1].type === "reaction" && reactions[1].emphasisColor).toBe("red");
   });
 
-  it("mockモード(MockLLMClient)では従来どおり全レス・強調なしになる(回帰なし)", async () => {
+  it("mockモード(MockLLMClient)は全レス・強調なしが元だが、拡張E33の色付き強調最低保証で全黒字にならない", async () => {
     const body = await composeArticleBody(
       { sourceType: "5ch", title: "mock回帰テスト", content: threeResContent },
       new MockLLMClient(),
     );
     const reactions = body.filter((b) => b.type === "reaction");
     expect(reactions).toHaveLength(3);
-    expect(reactions.every((b) => b.type === "reaction" && b.emphasis === undefined)).toBe(true);
+    // 2件以上あるので必ずどれかに色付き強調が付く(全黒字にならない、拡張E33)
+    expect(reactions.some((b) => b.type === "reaction" && b.emphasis === true)).toBe(true);
   });
 });
 
@@ -399,7 +405,7 @@ describe("composeArticleBody（強調レスの色分け、拡張E32 F-E32-2）",
     expect(reactions[1].type === "reaction" && reactions[1].emphasisColor).toBeUndefined();
   });
 
-  it("emphasizeのindexがkeep外(例:{index:2,color:'green'}だがkeepは[0,1]のみ)なら色付き強調自体が付かない", async () => {
+  it("emphasizeのindexがkeep外(例:{index:2,color:'green'}だがkeepは[0,1]のみ)ならLLM選定の色付き強調は付かないが、拡張E33の最低保証で色が付く", async () => {
     const stub = new StubLLMClient(JSON.stringify({ keep: [0, 1], emphasize: [{ index: 2, color: "green" }] }));
     const body = await composeArticleBody(
       { sourceType: "5ch", title: "keep外emphasizeテスト", content: threeResContent },
@@ -407,16 +413,20 @@ describe("composeArticleBody（強調レスの色分け、拡張E32 F-E32-2）",
     );
     const reactions = body.filter((b) => b.type === "reaction");
     expect(reactions).toHaveLength(2);
-    expect(reactions.every((b) => b.type === "reaction" && b.emphasis === undefined)).toBe(true);
+    // LLM選定は無効化されるが、2件以上・強調ゼロなので拡張E33の決定論フォールバックが効く
+    // (長いレス優先で2番目のレスに色が付く)
+    expect(reactions[1].type === "reaction" && reactions[1].emphasis).toBe(true);
+    expect(reactions[1].type === "reaction" && reactions[1].emphasisColor).toBe("red");
+    expect(reactions[0].type === "reaction" && reactions[0].emphasis).toBeUndefined();
   });
 
-  it("mockモードでは従来どおり強調・色分けなし(回帰なし)", async () => {
+  it("mockモードは強調・色分けが元は無いが、拡張E33の色付き強調最低保証で全黒字にならない", async () => {
     const body = await composeArticleBody(
       { sourceType: "5ch", title: "mock色分け回帰テスト", content: threeResContent },
       new MockLLMClient(),
     );
     const reactions = body.filter((b) => b.type === "reaction");
-    expect(reactions.every((b) => b.type === "reaction" && b.emphasisColor === undefined)).toBe(true);
+    expect(reactions.some((b) => b.type === "reaction" && b.emphasisColor !== undefined)).toBe(true);
   });
 });
 
@@ -567,5 +577,71 @@ describe("composeArticleBody（長レスのレス内文抽出、拡張E28 F-E28-
     expect(res.type === "reaction" && res.lines[1].emphasis).toBe("red");
     expect(res.type === "reaction" && res.lines[0].emphasis).toBe("orange");
     expect(res.type === "reaction" && res.emphasis).toBe(true);
+  });
+});
+
+describe("composeArticleBody（色付き強調の最低保証、拡張E33 F-E33-1）", () => {
+  // 8レス・文字数が単調増加(A=1文字〜H=8文字)なので、長いレス優先の並びが一意に決まる。
+  const eightResContent = Array.from({ length: 8 }, (_, i) => `${i + 1}: ${"X".repeat(i + 1)}`).join("\n");
+
+  it("反応レス2件以上・強調ゼロの記事に、決定論的にminColored件の色付き強調が付く(長いレス優先・red→blue→greenの順)", async () => {
+    const stub = new StubLLMClient(
+      JSON.stringify({ keep: Array.from({ length: 8 }, (_, i) => i), emphasize: [] }),
+    );
+    const body = await composeArticleBody({ sourceType: "5ch", title: "色最低保証テスト", content: eightResContent }, stub);
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(8);
+    // minColored = max(1, round(8/4)) = 2件。最も長いレス(8文字目=index7)がred、次点(7文字目=index6)がblue。
+    expect(reactions[7].type === "reaction" && reactions[7].emphasis).toBe(true);
+    expect(reactions[7].type === "reaction" && reactions[7].emphasisColor).toBe("red");
+    expect(reactions[6].type === "reaction" && reactions[6].emphasis).toBe(true);
+    expect(reactions[6].type === "reaction" && reactions[6].emphasisColor).toBe("blue");
+    // それ以外のレスには色が付かない
+    for (const r of reactions.slice(0, 6)) {
+      expect(r.type === "reaction" && r.emphasis).toBeUndefined();
+    }
+  });
+
+  it("既にいずれかのレスに強調が付いている記事は変更されない(LLM選定を尊重)", async () => {
+    const threeResContent = "1: 最初のレス。\n2: 二番目のレス。\n3: 三番目のレス。";
+    const stub = new StubLLMClient(
+      JSON.stringify({ keep: [0, 1, 2], emphasize: [{ index: 0, color: "green" }] }),
+    );
+    const body = await composeArticleBody({ sourceType: "5ch", title: "既存強調尊重テスト", content: threeResContent }, stub);
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions[0].type === "reaction" && reactions[0].emphasis).toBe(true);
+    expect(reactions[0].type === "reaction" && reactions[0].emphasisColor).toBe("green");
+    // フォールバックは発動せず、他のレスに勝手に色は付かない
+    expect(reactions[1].type === "reaction" && reactions[1].emphasis).toBeUndefined();
+    expect(reactions[2].type === "reaction" && reactions[2].emphasis).toBeUndefined();
+  });
+
+  it("反応レス1件の記事には色を強制しない", async () => {
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "単発レステスト", content: "1: 唯一のレスです。" },
+      new MockLLMClient(),
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(1);
+    expect(reactions[0].type === "reaction" && reactions[0].emphasis).toBeUndefined();
+    expect(reactions[0].type === "reaction" && reactions[0].emphasisColor).toBeUndefined();
+  });
+
+  it("mock既定(強調なし)でも2件以上なら色が付き、決定論で毎回同じ結果になる(再現性)", async () => {
+    const content = "1: 最初のレス。\n2: 二番目のレス。\n3: 三番目のレス。";
+    const body1 = await composeArticleBody({ sourceType: "5ch", title: "再現性テスト", content }, new MockLLMClient());
+    const body2 = await composeArticleBody({ sourceType: "5ch", title: "再現性テスト", content }, new MockLLMClient());
+    const colors1 = body1.filter((b) => b.type === "reaction").map((b) => (b.type === "reaction" ? b.emphasisColor : undefined));
+    const colors2 = body2.filter((b) => b.type === "reaction").map((b) => (b.type === "reaction" ? b.emphasisColor : undefined));
+    expect(colors1).toEqual(colors2);
+    expect(colors1.some((c) => c !== undefined)).toBe(true);
+  });
+
+  it("逐語（本文テキスト）は不変。色付き強調が付いてもレス本文・行は書き換わらない", async () => {
+    const content = "1: 最初のレス。\n2: 二番目のレス。\n3: 三番目のレス。";
+    const body = await composeArticleBody({ sourceType: "5ch", title: "逐語不変テスト", content }, new MockLLMClient());
+    const reactions = body.filter((b) => b.type === "reaction");
+    const texts = reactions.flatMap((b) => (b.type === "reaction" ? b.lines.map((l) => l.text) : []));
+    expect(texts).toEqual(["最初のレス。", "二番目のレス。", "三番目のレス。"]);
   });
 });

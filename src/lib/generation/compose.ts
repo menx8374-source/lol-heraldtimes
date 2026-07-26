@@ -194,6 +194,39 @@ async function selectReactionReses(
   }
 }
 
+/** 拡張E33 F-E33-1: 色付き強調の最低保証で使う色の割り当て順（red→blue→green）。 */
+const MIN_COLOR_FALLBACK_COLORS: ArticleBodyEmphasisColor[] = ["red", "blue", "green"];
+
+/** レス1件分の表示本文の総文字数（行テキストの合計）。長いレス優先の判定に使う。 */
+function reactionBlockCharCount(block: ArticleBodyReactionBlock): number {
+  return block.lines.reduce((sum, l) => sum + l.text.length, 0);
+}
+
+/**
+ * 反応ブロックが2件以上あるのにLLM/mockがどのレスにも強調を付けなかった場合、決定論的に
+ * 一部を色付き強調にする最低保証（拡張E33 F-E33-1）。1件でも既にemphasis/emphasisColorが
+ * 付いている記事はLLMの編集判断を尊重しそのまま返す。本文・行・レス選定・逐語テキストは
+ * 一切変更せず、表示上の強調フラグ・色のみを付加する。
+ */
+function applyMinColorFallback(blocks: ArticleBodyReactionBlock[]): ArticleBodyReactionBlock[] {
+  if (blocks.length < 2) return blocks;
+  if (blocks.some((b) => b.emphasis || b.emphasisColor)) return blocks;
+
+  const minColored = Math.max(1, Math.round(blocks.length / 4));
+  const ranked = blocks
+    .map((b, index) => ({ index, charCount: reactionBlockCharCount(b) }))
+    .sort((a, b) => b.charCount - a.charCount || a.index - b.index)
+    .slice(0, minColored);
+
+  const colorByIndex = new Map<number, ArticleBodyEmphasisColor>();
+  ranked.forEach((r, i) => colorByIndex.set(r.index, MIN_COLOR_FALLBACK_COLORS[i % MIN_COLOR_FALLBACK_COLORS.length]));
+
+  return blocks.map((b, index) => {
+    const color = colorByIndex.get(index);
+    return color ? { ...b, emphasis: true, emphasisColor: color } : b;
+  });
+}
+
 /**
  * スレッドの content（逐語）を、まとめ速報のレス（reaction）ブロック配列に組み立てる。
  * レス番号・本文行は逐語のまま保持し、重要行の強調・アンカーの妥当性(既出番号のみ)だけを付加する。
@@ -204,6 +237,8 @@ async function selectReactionReses(
  * 拡張E32: emphasizeに色(red/blue/green)が指定されていれば emphasisColor も付与する（任意・後方互換）。
  * 拡張E27: 本文行にNGワードが含まれる場合は maskNgWords で同数のアスタリスクに伏字化する
  * （逐語は保つがNG語だけ伏字にし、moderateArticleContent の ng_word 保留を避けて公開する）。
+ * 拡張E33: 反応ブロックが2件以上あるのにどのレスにも強調が付かない場合は、決定論フォールバック
+ * （applyMinColorFallback）で最低限の色付き強調を補い、全黒字の記事が出ないようにする。
  */
 async function buildReactionBlocks(
   candidate: GenerationCandidateInput,
@@ -219,7 +254,7 @@ async function buildReactionBlocks(
     ? reses.map((_, i) => i).filter((i) => selection.keepLines.has(i))
     : reses.map((_, i) => i);
 
-  return selectedIndices.map((i) => {
+  const blocks = selectedIndices.map((i) => {
     const res = reses[i];
     // 行indexの指定があれば元 res.lines からその行だけを逐語のまま抽出する（拡張E28 F-E28-2）。
     // 指定なし（null＝全行採用、または選定自体が無いフォールバック）はres.linesをそのまま使う。
@@ -241,8 +276,10 @@ async function buildReactionBlocks(
       ...(anchors.length > 0 ? { anchors } : {}),
       ...(isEmphasized ? { emphasis: true } : {}),
       ...(emphasisColor ? { emphasisColor } : {}),
-    };
+    } satisfies ArticleBodyReactionBlock;
   });
+
+  return applyMinColorFallback(blocks);
 }
 
 /** 1記事あたりの検出クリップembedの上限（過剰な埋め込みを防ぐ、拡張E22）。 */
