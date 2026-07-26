@@ -94,6 +94,40 @@ describe("parseArticleBody", () => {
     ).toThrow(InvalidArticleBodyError);
   });
 
+  it("reactionブロックのemphasis(レス単位の強調フラグ)をパースできる(拡張E25)", () => {
+    const input = [
+      {
+        type: "reaction",
+        number: 1,
+        name: "国内プレイヤーさん",
+        lines: [{ text: "重要な反応" }],
+        emphasis: true,
+      },
+    ];
+    const result = parseArticleBody(input);
+    expect(result[0]).toEqual(input[0]);
+  });
+
+  it("reactionブロックのemphasis省略時は従来どおり(拡張E25、後方互換)", () => {
+    const result = parseArticleBody([
+      { type: "reaction", number: 1, name: "国内プレイヤーさん", lines: [{ text: "普通の反応" }] },
+    ]);
+    expect(result[0]).toEqual({
+      type: "reaction",
+      number: 1,
+      name: "国内プレイヤーさん",
+      lines: [{ text: "普通の反応" }],
+    });
+  });
+
+  it("reactionブロックのemphasisが真偽値でなければエラーを投げる(拡張E25)", () => {
+    expect(() =>
+      parseArticleBody([
+        { type: "reaction", number: 1, name: "国内プレイヤーさん", lines: [{ text: "x" }], emphasis: "yes" },
+      ]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
   it("reactionブロックのlines[].originalで原文併記(海外の反応)をパースできる(拡張E3)", () => {
     const input = [
       {

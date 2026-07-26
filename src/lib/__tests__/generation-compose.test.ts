@@ -1,9 +1,26 @@
 import { describe, expect, it } from "vitest";
 import { composeArticleBody } from "@/lib/generation/compose";
-import { MockLLMClient } from "@/lib/generation/llm-client";
+import { MockLLMClient, type LLMClient, type LLMMessage } from "@/lib/generation/llm-client";
 import { hasStructuredHeadings } from "@/lib/article-body";
 
 const llm = new MockLLMClient();
+
+/** テスト用のスタブLLMClient(拡張E25)。指定した応答文字列(または関数)をそのまま返す。実APIは叩かない。 */
+class StubLLMClient implements LLMClient {
+  public readonly calls: LLMMessage[][] = [];
+  constructor(private readonly response: string | (() => string) | (() => never)) {}
+  async generate(messages: LLMMessage[]): Promise<string> {
+    this.calls.push(messages);
+    return typeof this.response === "function" ? this.response() : this.response;
+  }
+}
+
+/** 常に例外を投げるスタブLLMClient(APIエラー再現用)。 */
+class ThrowingLLMClient implements LLMClient {
+  async generate(): Promise<string> {
+    throw new Error("simulated API error");
+  }
+}
 
 describe("composeArticleBody", () => {
   it("Riot公式(riot)由来は「速報」→「要点整理」→「まとめ」の見出し構成になる", async () => {
@@ -204,5 +221,121 @@ describe("composeArticleBody", () => {
       llm,
     );
     expect(body.some((b) => b.type === "embed")).toBe(false);
+  });
+});
+
+describe("composeArticleBody（反応記事のLLMレス抜粋＋重要レス強調、拡張E25 F-E25-1/F-E25-2）", () => {
+  const threeResContent = "1: 最初のレス。\n2: 二番目のレス。\n3: 三番目のレス。";
+
+  it("LLMがkeep/emphasizeを返したとき、keepのレスだけが逐語で元スレ順に並び、emphasizeのレスに強調フラグが立つ", async () => {
+    const stub = new StubLLMClient(JSON.stringify({ keep: [0, 2], emphasize: [2] }));
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "抜粋テスト", content: threeResContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(2);
+    expect(reactions.map((b) => (b.type === "reaction" ? b.number : -1))).toEqual([1, 3]);
+    // レス本文は逐語のまま(LLMに書き換えさせない)
+    expect(reactions[0].type === "reaction" && reactions[0].lines.map((l) => l.text)).toEqual(["最初のレス。"]);
+    expect(reactions[1].type === "reaction" && reactions[1].lines.map((l) => l.text)).toEqual(["三番目のレス。"]);
+    // emphasize指定(index=2 → レス3)にのみ強調フラグが立つ
+    expect(reactions[0].type === "reaction" && reactions[0].emphasis).toBeUndefined();
+    expect(reactions[1].type === "reaction" && reactions[1].emphasis).toBe(true);
+
+    // LLMへはreaction-selectタスクとしてJSON(reses=index/number/text)が渡っている(逐語のまま伝える)
+    const lastCall = stub.calls[stub.calls.length - 1];
+    const userMessage = lastCall.find((m) => m.role === "user");
+    expect(userMessage).toBeTruthy();
+    const sentTask = JSON.parse(userMessage!.content) as { kind: string; reses: { text: string }[] };
+    expect(sentTask.kind).toBe("reaction-select");
+    expect(sentTask.reses.map((r) => r.text)).toEqual(["最初のレス。", "二番目のレス。", "三番目のレス。"]);
+  });
+
+  it("範囲外・重複・emphasize⊄keepのインデックスが正規化される(実在範囲・keep部分集合)", async () => {
+    // keep: 0を重複、-1と99は範囲外(3レスなのでindexは0-2)。emphasize: 1はkeepに含まれないため除外、2は含まれるため採用。
+    const stub = new StubLLMClient(JSON.stringify({ keep: [0, 0, -1, 99, 2], emphasize: [1, 2] }));
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "正規化テスト", content: threeResContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions.map((b) => (b.type === "reaction" ? b.number : -1))).toEqual([1, 3]);
+    expect(reactions[0].type === "reaction" && reactions[0].emphasis).toBeUndefined();
+    expect(reactions[1].type === "reaction" && reactions[1].emphasis).toBe(true);
+  });
+
+  it("抜粋件数が上限(12件)を超える場合は先頭優先で切る", async () => {
+    const content = Array.from({ length: 15 }, (_, i) => `${i + 1}: レス${i + 1}。`).join("\n");
+    const allIndices = Array.from({ length: 15 }, (_, i) => i);
+    const stub = new StubLLMClient(JSON.stringify({ keep: allIndices, emphasize: [] }));
+    const body = await composeArticleBody({ sourceType: "5ch", title: "上限テスト", content }, stub);
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(12);
+    expect(reactions.map((b) => (b.type === "reaction" ? b.number : -1))).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+    ]);
+  });
+
+  it("JSON parse失敗時は例外を投げず、全レス・強調なしにフォールバックする", async () => {
+    const stub = new StubLLMClient("これはJSONではない応答です");
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "パース失敗テスト", content: threeResContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(3);
+    expect(reactions.every((b) => b.type === "reaction" && b.emphasis === undefined)).toBe(true);
+  });
+
+  it("keepが空配列のとき、全レス・強調なしにフォールバックする", async () => {
+    const stub = new StubLLMClient(JSON.stringify({ keep: [], emphasize: [] }));
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "keep空テスト", content: threeResContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(3);
+  });
+
+  it("keepの要素が全て範囲外(不正)のとき、全レス・強調なしにフォールバックする", async () => {
+    const stub = new StubLLMClient(JSON.stringify({ keep: [99, -1, "x"], emphasize: [] }));
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "keep全不正テスト", content: threeResContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(3);
+  });
+
+  it("空文字の応答のとき、全レス・強調なしにフォールバックする", async () => {
+    const stub = new StubLLMClient("");
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "空応答テスト", content: threeResContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(3);
+  });
+
+  it("LLM呼び出しが例外を投げても、例外を外に漏らさず全レス・強調なしにフォールバックする", async () => {
+    const throwing = new ThrowingLLMClient();
+    const body = await composeArticleBody(
+      { sourceType: "reddit", title: "APIエラーテスト", content: threeResContent },
+      throwing,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(3);
+    expect(reactions.every((b) => b.type === "reaction" && b.emphasis === undefined)).toBe(true);
+  });
+
+  it("mockモード(MockLLMClient)では従来どおり全レス・強調なしになる(回帰なし)", async () => {
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "mock回帰テスト", content: threeResContent },
+      new MockLLMClient(),
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(3);
+    expect(reactions.every((b) => b.type === "reaction" && b.emphasis === undefined)).toBe(true);
   });
 });

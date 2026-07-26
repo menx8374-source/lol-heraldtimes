@@ -209,6 +209,45 @@ describe("ArticleBodyView（埋め込みブロックの実iframe化, 拡張E22�
   });
 });
 
+describe("ArticleBodyView（レス単位の重要レス強調, 拡張E25 F-E25-2）", () => {
+  it("emphasisフラグ付きレスは文字を大きく＋太字のクラスで描画する", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "reaction", number: 1, name: "国内プレイヤーさん", lines: [{ text: "重要な反応" }], emphasis: true },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("重要な反応");
+    expect(html).toContain("text-lg");
+    expect(html).toContain("font-bold");
+    expect(html).toContain("data-res-emphasis");
+  });
+
+  it("emphasisフラグが無いレスは従来どおりの通常クラスで描画する(後方互換)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "reaction", number: 1, name: "国内プレイヤーさん", lines: [{ text: "普通の反応" }] },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("普通の反応");
+    expect(html).not.toContain("data-res-emphasis");
+    expect(html).not.toContain("text-lg");
+  });
+
+  it("行単位の強調(red)とレス単位の強調(emphasis)は併存できる", () => {
+    const blocks: ArticleBodyBlock[] = [
+      {
+        type: "reaction",
+        number: 1,
+        name: "国内プレイヤーさん",
+        lines: [{ text: "神プレイすぎる", emphasis: "red" }],
+        emphasis: true,
+      },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("text-red-600");
+    expect(html).toContain("text-lg");
+    expect(html).toContain("font-bold");
+  });
+});
+
 describe("ResLines（AA・原文併記, 拡張E3）", () => {
   it("AAらしい行は等幅フォント(font-mono)クラスを付与する", () => {
     const blocks: ArticleBodyBlock[] = [

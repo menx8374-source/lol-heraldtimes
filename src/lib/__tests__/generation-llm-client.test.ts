@@ -38,6 +38,22 @@ describe("getLLMClient（mock/live切替、拡張E24 F-E24-1）", () => {
   });
 });
 
+describe("MockLLMClient（reaction-selectタスク、拡張E25 F-E25-1）", () => {
+  it("渡された全レスのindexをkeepに、emphasizeは空でJSON文字列を返す(決定論的モック)", async () => {
+    const client = new MockLLMClient();
+    const task = {
+      kind: "reaction-select" as const,
+      title: "テスト",
+      reses: [
+        { index: 0, number: 1, text: "レス1" },
+        { index: 1, number: 2, text: "レス2" },
+      ],
+    };
+    const raw = await client.generate([{ role: "user", content: JSON.stringify(task) }]);
+    expect(JSON.parse(raw)).toEqual({ keep: [0, 1], emphasize: [] });
+  });
+});
+
 describe("AnthropicLLMClient.generate（信頼境界のエラーハンドリング、実APIは叩かない）", () => {
   it("userメッセージが1件も無い場合はAPIを呼ばずに空文字を返す", async () => {
     process.env.ANTHROPIC_API_KEY = "sk-ant-test-dummy-key";

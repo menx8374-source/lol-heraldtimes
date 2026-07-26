@@ -31,6 +31,12 @@ export type ArticleBodyReactionBlock = {
   lines: ArticleBodyReactionLine[];
   /** `>>N` 形式で他レスに返信している場合の参照先番号（同一記事内に存在する番号のみ）。 */
   anchors?: number[];
+  /**
+   * レス単位の強調フラグ（拡張E25 F-E25-2）。LLMが「話題に関係する重要なレス」として選んだ
+   * レスのうち、特に強調すべきと判定したレスに立つ。行単位の emphasis(red/orange) とは役割が違い、
+   * レス全体を大きく＋太字で目立たせる。任意フラグで未設定時は従来表示（後方互換）。
+   */
+  emphasis?: boolean;
 };
 
 /** 記事内画像ブロック（拡張E3）。url はローカルSVG/データURI/自サイト作成のモック画像のみを想定
@@ -96,7 +102,21 @@ function parseReactionBlock(b: Record<string, unknown>, index: number): ArticleB
     }
     anchors = b.anchors as number[];
   }
-  return { type: "reaction", number: b.number, name: b.name, lines, ...(anchors ? { anchors } : {}) };
+  let emphasis: boolean | undefined;
+  if (b.emphasis !== undefined) {
+    if (typeof b.emphasis !== "boolean") {
+      throw new InvalidArticleBodyError(`本文ブロック[${index}]のemphasisが不正です`);
+    }
+    emphasis = b.emphasis;
+  }
+  return {
+    type: "reaction",
+    number: b.number,
+    name: b.name,
+    lines,
+    ...(anchors ? { anchors } : {}),
+    ...(emphasis ? { emphasis } : {}),
+  };
 }
 
 /**

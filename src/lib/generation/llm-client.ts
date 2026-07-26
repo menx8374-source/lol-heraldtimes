@@ -25,7 +25,12 @@ export type GenerationTask =
   | { kind: "fact-summary"; sentence: string; index: number }
   | { kind: "context"; sourceType: SourceType; title: string }
   | { kind: "closing"; sourceType: SourceType; title: string }
-  | { kind: "clip-intro"; title: string; hint: string };
+  | { kind: "clip-intro"; title: string; hint: string }
+  | {
+      kind: "reaction-select";
+      title: string;
+      reses: { index: number; number: number; text: string }[];
+    };
 
 function renderIntro(task: Extract<GenerationTask, { kind: "intro" }>): string {
   if (task.sourceType === "riot") {
@@ -57,6 +62,15 @@ function renderClipIntro(task: Extract<GenerationTask, { kind: "clip-intro" }>):
   return `「${task.title}」が今、LoLプレイヤーの間で話題になっているクリップだ。${task.hint}という内容で、詳しくは下記の動画・クリップ本編をチェックしてほしい。`;
 }
 
+/**
+ * 反応記事のレス抜粋・強調選定（拡張E25 F-E25-1）のモック応答。決定論的モックは実際の話題関連性
+ * 判定を行わないため、渡された全レスの index を keep に、emphasize は空で返す
+ * （＝mockモードでは compose.ts 側の正規化を経ても「全レス・強調なし」という従来どおりの結果になる）。
+ */
+function renderReactionSelect(task: Extract<GenerationTask, { kind: "reaction-select" }>): string {
+  return JSON.stringify({ keep: task.reses.map((r) => r.index), emphasize: [] });
+}
+
 function renderTask(task: GenerationTask): string {
   switch (task.kind) {
     case "intro":
@@ -69,6 +83,8 @@ function renderTask(task: GenerationTask): string {
       return renderClosing(task);
     case "clip-intro":
       return renderClipIntro(task);
+    case "reaction-select":
+      return renderReactionSelect(task);
   }
 }
 

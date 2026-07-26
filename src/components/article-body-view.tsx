@@ -31,12 +31,17 @@ function ResHeader({ number, name }: { number: number; name: string }) {
  * AA（アスキーアート）らしい行（拡張E3・`isAsciiArtLine`で判定）は等幅フォント＋空白保持で
  * 崩れないように表示する。単純な顔文字（"(^^)/" 等）はAAと判定されず通常テキストのまま表示される。
  * `original`（拡張E3・海外の反応の原文併記）がある行は、日本語訳の前に「原文: ...（英語）」を表示する。
+ * `emphasis`（拡張E25・レス単位の重要レス強調）が true のとき、行単位の色付けとは別に
+ * 文字サイズを大きく＋太字にしてレス全体を目立たせる（行単位のemphasis(red/orange)と併存可能）。
  */
 export function ResLines({
   lines,
+  emphasis,
 }: {
   lines: { text: string; emphasis?: "red" | "orange"; original?: string }[];
+  emphasis?: boolean;
 }) {
+  const sizeClass = emphasis ? " text-base sm:text-lg font-bold" : "";
   return (
     <div className="flex flex-col gap-0.5">
       {lines.map((line, i) => {
@@ -51,6 +56,7 @@ export function ResLines({
             <p
               className={
                 (line.emphasis ? LINE_EMPHASIS_CLASS[line.emphasis] : "text-neutral-800 dark:text-neutral-200") +
+                sizeClass +
                 aaClass
               }
             >
@@ -157,9 +163,9 @@ function ReactionGroupView({ blocks }: { blocks: ArticleBodyReactionBlock[] }) {
       className="flex flex-col divide-y divide-neutral-200 rounded border border-neutral-300 bg-white text-sm sm:text-base dark:divide-neutral-800 dark:border-neutral-700 dark:bg-neutral-900"
     >
       {blocks.map((block, i) => (
-        <div key={i} className="px-3 py-2">
+        <div key={i} className="px-3 py-2" {...(block.emphasis ? { "data-res-emphasis": true } : {})}>
           <ResHeader number={block.number} name={block.name} />
-          <ResLines lines={block.lines} />
+          <ResLines lines={block.lines} emphasis={block.emphasis} />
         </div>
       ))}
     </div>

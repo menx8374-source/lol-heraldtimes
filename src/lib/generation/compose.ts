@@ -10,7 +10,7 @@ import type { ArticleBodyBlock, ArticleBodyEmbedBlock, ArticleBodyReactionBlock 
 import type { SourceType } from "@/lib/collection/types";
 import type { LLMClient, GenerationTask } from "@/lib/generation/llm-client";
 import { splitIntoSentences, excerptForQuote, gistOf } from "@/lib/generation/text-utils";
-import { parseThreadReses, extractAnchors, computeLineEmphasis } from "@/lib/generation/thread-format";
+import { parseThreadReses, extractAnchors, computeLineEmphasis, type ThreadRes } from "@/lib/generation/thread-format";
 import { isAllowedEmbedUrl, embedProviderForUrl } from "@/lib/embed";
 
 export type GenerationCandidateInput = {
@@ -27,27 +27,119 @@ const REACTION_HANDLE: Record<"5ch" | "reddit", string> = {
   reddit: "海外プレイヤーさん",
 };
 
+/** 1記事あたりの反応レス抜粋の上限件数（拡張E25 F-E25-1、超過分は先頭優先で切る）。 */
+const MAX_EXCERPT_RESES = 12;
+
+/** LLMによるレス抜粋・強調選定の正規化結果（0始まりindexの集合）。 */
+type ReactionSelection = { keepIndices: Set<number>; emphasizeIndices: Set<number> };
+
+/**
+ * LLMが返した `{keep, emphasize}` 生JSON値を防御的に検証・正規化する純関数（拡張E25 F-E25-1）。
+ * 範囲外・非整数・重複を除去し、上限件数(MAX_EXCERPT_RESES)超過分は先頭優先で切る。
+ * emphasize は必ず keep の部分集合に丸める。keep が1件も残らない場合は null（＝呼び出し側で
+ * 「全レス・強調なし」にフォールバックさせる）を返す。
+ */
+function normalizeReactionSelection(raw: unknown, resCount: number): ReactionSelection | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const obj = raw as Record<string, unknown>;
+  if (!Array.isArray(obj.keep)) return null;
+
+  const isValidIndex = (n: unknown): n is number =>
+    typeof n === "number" && Number.isInteger(n) && n >= 0 && n < resCount;
+
+  const dedupedKeep: number[] = [];
+  const seenKeep = new Set<number>();
+  for (const n of obj.keep) {
+    if (!isValidIndex(n) || seenKeep.has(n)) continue;
+    seenKeep.add(n);
+    dedupedKeep.push(n);
+  }
+  if (dedupedKeep.length === 0) return null;
+
+  const keepIndices = new Set(dedupedKeep.slice(0, MAX_EXCERPT_RESES));
+
+  const rawEmphasize = Array.isArray(obj.emphasize) ? obj.emphasize : [];
+  const emphasizeIndices = new Set<number>();
+  for (const n of rawEmphasize) {
+    if (isValidIndex(n) && keepIndices.has(n)) emphasizeIndices.add(n);
+  }
+
+  return { keepIndices, emphasizeIndices };
+}
+
+/**
+ * LLMに「話題に関係する重要なレスの抜粋」と「そのうち特に強調すべきレス」を選ばせる（拡張E25 F-E25-1）。
+ * レス本文は書き換えさせず、選定インデックスのみをJSONで返させる。APIエラー・JSON parse失敗・
+ * 検証不通過など、うまく選定できない場合は例外を投げずに null を返す（呼び出し側が全レス・強調なしに
+ * フォールバックする）。
+ */
+async function selectReactionReses(
+  llmClient: LLMClient,
+  title: string,
+  reses: ThreadRes[],
+): Promise<ReactionSelection | null> {
+  if (reses.length === 0) return null;
+  try {
+    const task: GenerationTask = {
+      kind: "reaction-select",
+      title,
+      reses: reses.map((r, index) => ({ index, number: r.number, text: r.lines.join(" ") })),
+    };
+    const raw = await llmClient.generate([
+      {
+        role: "system",
+        content:
+          "あなたはLoLまとめサイトの編集者です。渡されたスレッドのレス一覧(title=記事の話題, " +
+          "reses=各レスのindex/number/text)の中から、記事の話題に関係する重要なレスだけを選んでください。" +
+          "レス本文は書き換えず、渡された中から選ぶだけです。" +
+          '出力はJSONのみとし、{"keep": [index,...], "emphasize": [index,...]} の形式にしてください' +
+          "（説明文・前置き・コードブロックは付けない）。keepは話題に関係する重要なレスのindex、" +
+          "emphasizeはkeepの中でも特に重要なレスのindexです。",
+      },
+      { role: "user", content: JSON.stringify(task) },
+    ]);
+    if (!raw || raw.trim().length === 0) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return normalizeReactionSelection(parsed, reses.length);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * スレッドの content（逐語）を、まとめ速報のレス（reaction）ブロック配列に組み立てる。
  * レス番号・本文行は逐語のまま保持し、重要行の強調・アンカーの妥当性(既出番号のみ)だけを付加する。
+ * 拡張E25 F-E25-1: LLMに話題関連レスの抜粋・重要レスの強調選定を委ね、選定できた場合は
+ * keepインデックスのレスだけを元スレ順で組み、emphasizeインデックスのレスにブロック単位の
+ * 強調フラグを立てる。選定できない場合（mockモード・APIエラー・parse失敗・keep空等）は
+ * 従来どおり全レス・強調なしで組む（本体を止めない）。
  */
-function buildReactionBlocks(
+async function buildReactionBlocks(
   candidate: GenerationCandidateInput,
   sourceType: "5ch" | "reddit",
-): ArticleBodyReactionBlock[] {
+  llmClient: LLMClient,
+): Promise<ArticleBodyReactionBlock[]> {
   const reses = parseThreadReses(candidate.content);
   const name = REACTION_HANDLE[sourceType];
   const knownNumbers = new Set(reses.map((r) => r.number));
 
-  return reses.map((res) => {
+  const selection = await selectReactionReses(llmClient, candidate.title, reses);
+  const selectedIndices = selection
+    ? reses.map((_, i) => i).filter((i) => selection.keepIndices.has(i))
+    : reses.map((_, i) => i);
+
+  return selectedIndices.map((i) => {
+    const res = reses[i];
     const emphasis = computeLineEmphasis(res.lines);
     const anchors = extractAnchors(res.lines).filter((n) => n !== res.number && knownNumbers.has(n));
+    const isEmphasized = selection ? selection.emphasizeIndices.has(i) : false;
     return {
       type: "reaction",
       number: res.number,
       name,
-      lines: res.lines.map((text, i) => (emphasis[i] ? { text, emphasis: emphasis[i] } : { text })),
+      lines: res.lines.map((text, li) => (emphasis[li] ? { text, emphasis: emphasis[li] } : { text })),
       ...(anchors.length > 0 ? { anchors } : {}),
+      ...(isEmphasized ? { emphasis: true } : {}),
     };
   });
 }
@@ -147,14 +239,15 @@ async function composeFactBody(
  * さらにレス本文中に埋め込み許可URL（YouTube/Twitchクリップ）があれば、逐語テキストはそのまま保持しつつ
  * embedブロックを加算する（拡張E22 F-E22-1。0件なら従来どおり何も足さない）。
  */
-function composeReactionBody(
+async function composeReactionBody(
   candidate: GenerationCandidateInput,
   sourceType: "5ch" | "reddit",
-): ArticleBodyBlock[] {
+  llmClient: LLMClient,
+): Promise<ArticleBodyBlock[]> {
   const blocks: ArticleBodyBlock[] = [];
 
   blocks.push({ type: "heading", text: "反応まとめ" });
-  blocks.push(...buildReactionBlocks(candidate, sourceType));
+  blocks.push(...(await buildReactionBlocks(candidate, sourceType, llmClient)));
   blocks.push(...detectClipEmbedBlocks(candidate.content));
 
   return blocks;
@@ -205,5 +298,5 @@ export async function composeArticleBody(
   if (candidate.sourceType === "clip") {
     return composeClipBody(candidate, llmClient);
   }
-  return composeReactionBody(candidate, candidate.sourceType);
+  return composeReactionBody(candidate, candidate.sourceType, llmClient);
 }
