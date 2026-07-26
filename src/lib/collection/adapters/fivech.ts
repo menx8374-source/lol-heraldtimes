@@ -21,6 +21,7 @@
 import type { RawCollectionItem, SourceAdapter } from "@/lib/collection/types";
 import { getDefaultSourceConfigs } from "@/lib/collection/config";
 import { fetchShiftJisTextSafe, dedupeBySourceUrl } from "@/lib/collection/adapters/http";
+import { extractAnchors } from "@/lib/generation/thread-format";
 
 /** 板未設定時の既定（LoLスレが立つことがあるネトゲ実況板の一例。運営者が env で差し替え可能）。 */
 const DEFAULT_BOARDS_RAW = "egg.5ch.net/livegame";
@@ -30,6 +31,19 @@ const DEFAULT_USER_AGENT = "lol-matome-sokuhou-collector/1.0 (bot; +contact via 
 const MAX_THREADS_PER_BOARD = 5;
 /** 1スレあたり取り込むレス数の上限（有界化。転載範囲を絞る意味もある）。 */
 const MAX_RESES_PER_THREAD = 30;
+/** スレ選別の下限レス数（拡張E39 A2）。これ未満の過疎スレは除外する（env `FIVECH_MIN_RES_COUNT` で上書き可）。 */
+const DEFAULT_MIN_RES_COUNT = 20;
+/** subject/dat連続取得の間に入れるディレイ（拡張E39 B1）。同一サーバへの高頻度連続アクセスを避ける
+ * （env `FIVECH_REQUEST_DELAY_MS` で上書き可）。 */
+const DEFAULT_REQUEST_DELAY_MS = 1500;
+
+/** 非負整数のenv値をパースする（不正・未設定はfallback）。 */
+function envIntLocal(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
 
 export type FiveChBoard = { server: string; board: string };
 
@@ -77,14 +91,29 @@ export function parseSubjectText(text: string): SubjectEntry[] {
   return entries;
 }
 
-/** タイトルがLoL関連キーワードに一致するスレのみを残し、上位N件に絞る。 */
-export function filterRelevantThreads(entries: SubjectEntry[], keywords: string[], limit: number): SubjectEntry[] {
+/** タイトルがLoL関連キーワードに一致するスレのみを残す（レス数・件数の絞り込みは行わない）。 */
+export function matchKeywordThreads(entries: SubjectEntry[], keywords: string[]): SubjectEntry[] {
   const lowerKeywords = keywords.map((k) => k.toLowerCase()).filter((k) => k.length > 0);
-  const matched = entries.filter((e) => {
+  return entries.filter((e) => {
     const lowerTitle = e.title.toLowerCase();
     return lowerKeywords.some((k) => lowerTitle.includes(k));
   });
-  return matched.slice(0, Math.max(0, limit));
+}
+
+/**
+ * タイトルがLoL関連キーワードに一致し、かつレス数が `minResCount` 以上のスレを残し（過疎スレ排除。
+ * 拡張E39 A2）、レス数（勢い）降順にソートしたうえで上位 `limit` 件に絞る（subject順のsliceはしない）。
+ * 満了（1000到達）スレも内容が豊富なので上限では除外しない。
+ */
+export function filterRelevantThreads(
+  entries: SubjectEntry[],
+  keywords: string[],
+  limit: number,
+  minResCount: number,
+): SubjectEntry[] {
+  const qualified = matchKeywordThreads(entries, keywords).filter((e) => e.resCount >= minResCount);
+  const sorted = [...qualified].sort((a, b) => b.resCount - a.resCount);
+  return sorted.slice(0, Math.max(0, limit));
 }
 
 /** HTMLエンティティ（`&gt;`/`&lt;`/`&quot;`/`&#39;`/`&#\d+;`/`&amp;`）をデコードする（`&amp;`は最後）。 */
@@ -122,24 +151,66 @@ function extractDatBodyField(line: string): string {
   return parts[3] ?? "";
 }
 
+export type DatRes = { number: number; bodyLines: string[] };
+
+/** dat全体のテキストを全レス `{ number, bodyLines }` にパースする（number＝dat行番号＝レス番号、1始まり）。 */
+export function parseDatReses(datText: string): DatRes[] {
+  const lines = datText.split(/\r?\n/).filter((l) => l.length > 0);
+  return lines.map((line, idx) => ({
+    number: idx + 1,
+    bodyLines: decodeDatBody(extractDatBodyField(line)),
+  }));
+}
+
+/**
+ * 被参照（アンカー）の多いレスを優先して `maxReses` 件以内に選ぶ純関数（拡張E39 A1）。
+ * - 本文が空のレスは候補から除外する。
+ * - レス1（スレ主題/OP）は文脈として常に含める。
+ * - 残り枠は被参照カウント（他レス本文の `>>number` から参照された回数）降順、同数はレス番号昇順で埋める。
+ * - 返り値は元のレス番号のまま**昇順**に整列する（`parseThreadReses` の下流互換のため元番号を維持）。
+ * 逐語は不変（選定のみ・本文は書き換えない）。範囲外/欠番アンカーを含んでいても壊れない。
+ */
+export function selectHighlightReses(reses: DatRes[], maxReses: number): DatRes[] {
+  const valid = reses.filter((r) => r.bodyLines.length > 0);
+  if (valid.length === 0) return [];
+
+  const anchorCounts = new Map<number, number>();
+  for (const r of valid) {
+    for (const anchor of extractAnchors(r.bodyLines)) {
+      anchorCounts.set(anchor, (anchorCounts.get(anchor) ?? 0) + 1);
+    }
+  }
+
+  const op = valid.find((r) => r.number === 1);
+  const rest = valid
+    .filter((r) => r.number !== 1)
+    .sort((a, b) => {
+      const diff = (anchorCounts.get(b.number) ?? 0) - (anchorCounts.get(a.number) ?? 0);
+      return diff !== 0 ? diff : a.number - b.number;
+    });
+
+  const limit = Math.max(0, maxReses);
+  const selected: DatRes[] = [];
+  if (op) selected.push(op);
+  for (const r of rest) {
+    if (selected.length >= limit) break;
+    selected.push(r);
+  }
+  return selected.slice(0, limit).sort((a, b) => a.number - b.number);
+}
+
 /**
  * dat 全体のテキストを、`parseThreadReses` が解釈できる「スレッドダンプ」形式の content 文字列に
- * 組み立てる（`"1: 本文\n\n2: >>1\n本文\n\n…"`）。レス番号＝行番号(1始まり)。取り込むレス数は
- * `maxReses` で上限を設ける。本文が空になったレスは省く。有効なレスが1件も無ければ null。
+ * 組み立てる（`"1: 本文\n\n2: >>1\n本文\n\n…"`）。先頭N固定ではなく `selectHighlightReses` で
+ * 被参照の多いレスを優先抽出する（拡張E39 A1）。取り込むレス数は `maxReses` で上限を設ける。
+ * 選んだレスは元のレス番号のまま昇順で出力する。有効なレスが1件も無ければ null。
  */
 export function buildThreadDumpFromDat(datText: string, maxReses: number): string | null {
-  const lines = datText.split(/\r?\n/).filter((l) => l.length > 0);
-  if (lines.length === 0) return null;
-
-  const blocks: string[] = [];
-  lines.slice(0, Math.max(0, maxReses)).forEach((line, idx) => {
-    const resNumber = idx + 1;
-    const bodyLines = decodeDatBody(extractDatBodyField(line));
-    if (bodyLines.length === 0) return;
-    blocks.push(`${resNumber}: ${bodyLines.join("\n")}`);
-  });
-
-  return blocks.length > 0 ? blocks.join("\n\n") : null;
+  const allReses = parseDatReses(datText);
+  if (allReses.length === 0) return null;
+  const selected = selectHighlightReses(allReses, maxReses);
+  if (selected.length === 0) return null;
+  return selected.map((r) => `${r.number}: ${r.bodyLines.join("\n")}`).join("\n\n");
 }
 
 export type FiveChAdapterOptions = {
@@ -155,11 +226,19 @@ export type FiveChAdapterOptions = {
   maxThreadsPerBoard?: number;
   /** 1スレあたりの取り込みレス数上限。 */
   maxResesPerThread?: number;
+  /** スレ選別のレス数下限（拡張E39 A2）。既定は env `FIVECH_MIN_RES_COUNT`（既定20）。 */
+  minResCount?: number;
+  /** subject/dat連続取得の間のディレイ(ms)（拡張E39 B1）。既定は env `FIVECH_REQUEST_DELAY_MS`（既定1500）。 */
+  delayMs?: number;
+  /** ディレイの実処理の注入点（テスト用）。既定は実 setTimeout ベースの sleep。 */
+  sleep?: (ms: number) => Promise<void>;
 };
 
 /**
  * 5ch の subject.txt→対象スレ絞り込み→dat取得→スレッドダンプ整形、を行う live アダプタ。
  * 板が実質未設定（既定にも解決できない）・取得失敗はすべて例外を投げず空配列＋スキップログにする。
+ * 拡張E39: dat/subjectの連続取得はディレイ付き・直列（板もスレも）で行い、板ごとの取得件数を
+ * console.log でログする（可観測性）。
  */
 export class FiveChAdapter implements SourceAdapter {
   readonly sourceType = "5ch" as const;
@@ -169,6 +248,11 @@ export class FiveChAdapter implements SourceAdapter {
   private readonly keywords: string[];
   private readonly maxThreadsPerBoard: number;
   private readonly maxResesPerThread: number;
+  private readonly minResCount: number;
+  private readonly delayMs: number;
+  private readonly sleep: (ms: number) => Promise<void>;
+  /** 実行全体で最初のfetchかどうか（最初のfetch前はディレイ不要のため）。 */
+  private firstFetchDone = false;
 
   constructor(options: FiveChAdapterOptions = {}) {
     const boardsRaw = process.env.FIVECH_BOARDS;
@@ -178,23 +262,43 @@ export class FiveChAdapter implements SourceAdapter {
     this.keywords = options.keywords ?? getDefaultSourceConfigs()["5ch"].relevance.keywords;
     this.maxThreadsPerBoard = options.maxThreadsPerBoard ?? MAX_THREADS_PER_BOARD;
     this.maxResesPerThread = options.maxResesPerThread ?? MAX_RESES_PER_THREAD;
+    this.minResCount = options.minResCount ?? envIntLocal("FIVECH_MIN_RES_COUNT", DEFAULT_MIN_RES_COUNT);
+    this.delayMs = options.delayMs ?? envIntLocal("FIVECH_REQUEST_DELAY_MS", DEFAULT_REQUEST_DELAY_MS);
+    this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  }
+
+  /** 取得(fetch)の直前に呼ぶ。実行全体で最初の1回だけディレイを省く（他はdelayMs待ってから進める）。 */
+  private async waitBeforeFetch(): Promise<void> {
+    if (this.firstFetchDone) {
+      await this.sleep(this.delayMs);
+    } else {
+      this.firstFetchDone = true;
+    }
   }
 
   private async fetchBoardItems(boardConf: FiveChBoard): Promise<RawCollectionItem[]> {
     const now = this.now();
     const boardLabel = `${boardConf.server}/${boardConf.board}`;
+    await this.waitBeforeFetch();
     const subjectText = await fetchShiftJisTextSafe(
       buildSubjectUrl(boardConf.server, boardConf.board),
       { headers: { "User-Agent": this.userAgent } },
       { logLabel: "5ch", context: `${boardLabel} subject.txt` },
     );
-    if (!subjectText) return [];
+    if (!subjectText) {
+      console.log(`[5ch] board=${boardLabel} skip: subject取得失敗`);
+      return [];
+    }
 
     const entries = parseSubjectText(subjectText);
-    const relevant = filterRelevantThreads(entries, this.keywords, this.maxThreadsPerBoard);
+    const qualifiedCount = matchKeywordThreads(entries, this.keywords).filter(
+      (e) => e.resCount >= this.minResCount,
+    ).length;
+    const relevant = filterRelevantThreads(entries, this.keywords, this.maxThreadsPerBoard, this.minResCount);
 
     const items: RawCollectionItem[] = [];
     for (const entry of relevant) {
+      await this.waitBeforeFetch();
       const datText = await fetchShiftJisTextSafe(
         buildDatUrl(boardConf.server, boardConf.board, entry.threadId),
         { headers: { "User-Agent": this.userAgent } },
@@ -210,6 +314,9 @@ export class FiveChAdapter implements SourceAdapter {
         fetchedAt: now,
       });
     }
+    console.log(
+      `[5ch] board=${boardLabel} subject=${entries.length} relevant=${qualifiedCount} selected=${relevant.length} collected=${items.length}`,
+    );
     return items;
   }
 
@@ -218,7 +325,13 @@ export class FiveChAdapter implements SourceAdapter {
       console.log("[5ch] FIVECH_BOARDS が無効なため5ch収集をスキップします");
       return [];
     }
-    const results = await Promise.all(this.boards.map((b) => this.fetchBoardItems(b)));
-    return dedupeBySourceUrl(results.flat());
+    // 板取得は完全並列(Promise.all)ではなく直列にする（同一サーバへの同時多重接続を避ける。拡張E39 B1）。
+    const perBoardResults: RawCollectionItem[][] = [];
+    for (const board of this.boards) {
+      perBoardResults.push(await this.fetchBoardItems(board));
+    }
+    const collected = dedupeBySourceUrl(perBoardResults.flat());
+    console.log(`[5ch] 収集完了 collected=${collected.length}`);
+    return collected;
   }
 }
