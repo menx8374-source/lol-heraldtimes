@@ -25,7 +25,6 @@ export type GenerationTask =
   | { kind: "fact-summary"; sentence: string; index: number }
   | { kind: "context"; sourceType: SourceType; title: string }
   | { kind: "closing"; sourceType: SourceType; title: string }
-  | { kind: "clip-intro"; title: string; hint: string }
   | {
       kind: "reaction-select";
       title: string;
@@ -57,11 +56,6 @@ function renderClosing(task: Extract<GenerationTask, { kind: "closing" }>): stri
   return `以上、「${task.title}」というスレッドに寄せられた反応を要約してまとめた。今後の展開や追加の反応にも引き続き注目していきたい。`;
 }
 
-/** clip由来（拡張E17）: 「注目クリップ」見出し直後の短い紹介文（1〜2文）。 */
-function renderClipIntro(task: Extract<GenerationTask, { kind: "clip-intro" }>): string {
-  return `「${task.title}」が今、LoLプレイヤーの間で話題になっているクリップだ。${task.hint}という内容で、詳しくは下記の動画・クリップ本編をチェックしてほしい。`;
-}
-
 /**
  * 反応記事のレス抜粋・強調選定（拡張E25 F-E25-1）のモック応答。決定論的モックは実際の話題関連性
  * 判定を行わないため、渡された全レスの index を keep に、emphasize は空で返す
@@ -81,8 +75,6 @@ function renderTask(task: GenerationTask): string {
       return renderContext(task);
     case "closing":
       return renderClosing(task);
-    case "clip-intro":
-      return renderClipIntro(task);
     case "reaction-select":
       return renderReactionSelect(task);
   }

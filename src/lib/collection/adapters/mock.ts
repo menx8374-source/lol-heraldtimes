@@ -7,7 +7,6 @@ import type { RawCollectionItem, SourceAdapter, SourceType } from "@/lib/collect
 import redditFixture from "@/lib/collection/fixtures/reddit.json";
 import fivechFixture from "@/lib/collection/fixtures/5ch.json";
 import riotFixture from "@/lib/collection/fixtures/riot.json";
-import clipFixture from "@/lib/collection/fixtures/clip.json";
 
 type FixtureRow = {
   sourceUrl?: string | null;
@@ -32,7 +31,6 @@ const FIXTURES: Record<SourceType, FixtureRow[]> = {
   reddit: redditFixture,
   "5ch": fivechFixture,
   riot: riotFixture,
-  clip: clipFixture,
 };
 
 /** fixture JSON を読むだけの Mock アダプタ。 */

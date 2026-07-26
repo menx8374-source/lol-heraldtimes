@@ -9,8 +9,6 @@
  * 逐語一致率チェック・引用主従比率チェック・最低文字数(300字)チェックは reaction 形式の記事
  * （5ch/reddit）には適用せず、代わりに「reactionブロックが1件以上あること」を最低条件にする。
  * Riot公式（riot）は従来どおり300字・逐語一致率・引用主従比率チェックを適用する。
- * ⚠ 拡張E17: clip（YouTube/Twitch由来）は「埋め込み紹介」形式（見出し＋短い紹介文＋embedブロック）
- * のため、上記いずれのチェックも適用せず、代わりに「embedブロックが1件以上あること」を最低条件にする。
  * 安全フィルタ（F9: NGワード・個人中傷・出典欠落・重複）は形式によらず必ず適用する（pipeline.ts の
  * moderateArticleContent）。
  */
@@ -62,7 +60,7 @@ export type GeneratedArticle = {
    * 2. なければ、渡された championMap でタイトル+本文からチャンピオンを検出できればその公式スプラッシュ。
    * 3. 反応形式（5ch/reddit）のみ、①②が無ければ candidate.id から決定論的に選んだチャンピオンの
    *    公式スプラッシュ（pickDeterministicChampionSplashUrl）。
-   * 4. reaction以外（riot/clip）で①②が無ければ null（表示側 article-thumbnail.tsx がカテゴリ別/
+   * 4. reaction以外（riot）で①②が無ければ null（表示側 article-thumbnail.tsx がカテゴリ別/
    *    汎用の既定画像にフォールバックする）。
    */
   thumbnailUrl: string | null;
@@ -73,15 +71,12 @@ const CATEGORY_BY_SOURCE: Record<SourceType, CategoryLabel> = {
   reddit: "海外の反応",
   // Riot Data Dragon はパッチ/チャンピオンの公式データそのものなので「パッチ/メタ」に分類する（拡張E19 F-E19-1）。
   riot: "パッチ/メタ",
-  // YouTube/Twitchのプレイクリップはeスポーツ的ハイライトとして扱う（拡張E19 F-E19-2）。
-  clip: "eスポーツ",
 };
 
 const ARTICLE_SOURCE_LABEL: Record<SourceType, string> = {
   "5ch": "5ch",
   reddit: "Reddit",
   riot: "Riot公式",
-  clip: "YouTube/Twitch",
 };
 
 /**
@@ -108,20 +103,12 @@ export async function generateArticleForCandidate(
   // 最低文字数(300字)・逐語一致率・引用主従比率のチェックは対象外にし、代わりに「reactionブロック
   // (レス)が1件以上あること」だけを最低条件にする(F9のNGワード等の安全フィルタは形式によらず
   // pipeline.tsで必ず適用する)。riot(fact形式)のみ従来どおり300字・逐語・引用比率を適用する。
-  // clip形式(埋め込み紹介、拡張E17)は逐語転載ではなく紹介＋埋め込みのため、代わりに
-  // 「embedブロックが1件以上あること」だけを最低条件にする。
   const isReactionFormat = candidate.sourceType === "5ch" || candidate.sourceType === "reddit";
-  const isClipFormat = candidate.sourceType === "clip";
 
   if (isReactionFormat) {
     const reactionCount = body.filter((b) => b.type === "reaction").length;
     if (reactionCount === 0) {
       throw new GenerationError("反応まとめ記事にレス(reactionブロック)が1件もありません");
-    }
-  } else if (isClipFormat) {
-    const embedCount = body.filter((b) => b.type === "embed").length;
-    if (embedCount === 0) {
-      throw new GenerationError("クリップ紹介記事に埋め込み(embedブロック)がありません");
     }
   } else {
     const totalLength = body.reduce((sum, b) => sum + blockText(b).length, 0);
@@ -150,7 +137,7 @@ export async function generateArticleForCandidate(
   // LLM（generateHookTitleLLM）を使わず、収集アダプタが既に組み立てた事実タイトル（candidate.title。
   // 例「【パッチ】26.14 の主な変更点まとめ」）をそのまま採用する。拡張E26で「本文由来の具体要素を含む」
   // チェックを撤廃したため、煽りLLMに通すとラベル＋文字数さえ満たせば本文に無い主張（捏造）でも
-  // 通ってしまう問題があった。反応記事（5ch/reddit）・clip は従来どおり惹きつけタイトルLLMを使う。
+  // 通ってしまう問題があった。反応記事（5ch/reddit）は従来どおり惹きつけタイトルLLMを使う。
   // タイトルのソースはレス番号「N: 」やアンカー行を除いた本文にする（タイトルへの「1: 」混入を防ぐ）。
   const title =
     candidate.sourceType === "riot"
@@ -166,7 +153,7 @@ export async function generateArticleForCandidate(
   }
   // 拡張E37 F-E37-2: 反応記事（5ch/reddit）でimageUrlも本文チャンピオン検出も無い場合のみ、
   // candidate.idから決定論的に選んだチャンピオンの公式スプラッシュにフォールバックする
-  // （記事ごとに絵が固定され、パッチ/eスポーツ記事の挙動は変えない）。
+  // （記事ごとに絵が固定され、パッチ記事の挙動は変えない）。
   if (!thumbnailUrl && isReactionFormat) {
     thumbnailUrl = pickDeterministicChampionSplashUrl(candidate.id);
   }

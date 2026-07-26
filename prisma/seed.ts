@@ -43,11 +43,12 @@ function body(...blocks: ArticleBodyBlock[]): ArticleBodyBlock[] {
 
 // 値は lib/categories.ts の定義済みラベルに型で束縛し、表記ズレを防ぐ（ズレると型エラーになる）。
 // 拡張E19: 「公式ニュース」カテゴリは廃止し、Riot公式由来の記事は「パッチ/メタ」に統合した。
+// 拡張E45: 「eスポーツ」単独ソース（clip）とカテゴリを削除したため、旧eスポーツ枠のサンプル記事
+// （いずれもsources=Riot公式）は「パッチ/メタ」に統合する。
 const CATEGORIES = {
   patch: "パッチ/メタ",
   ch5: "5chの反応",
   overseas: "海外の反応",
-  esports: "eスポーツ",
 } as const satisfies Record<string, CategoryLabel>;
 
 const baseDate = new Date("2026-07-25T09:00:00+09:00");
@@ -246,7 +247,7 @@ const articles: SeedArticle[] = [
   {
     slug: "worlds-2026-group-stage-draw-kekka",
     title: "【速報】World Championship 2026 グループステージ組み合わせ決定",
-    category: CATEGORIES.esports,
+    category: CATEGORIES.patch,
     tags: ["世界大会", "eスポーツ"],
     publishedAt: daysAgo(1, 2),
     viewCount: 5210,
@@ -501,7 +502,7 @@ const articles: SeedArticle[] = [
   {
     slug: "esports-rookie-team-shock-win",
     title: "【衝撃】新人選手擁するチームが強豪撃破、eスポーツ界に激震",
-    category: CATEGORIES.esports,
+    category: CATEGORIES.patch,
     tags: ["eスポーツ", "新人選手"],
     publishedAt: daysAgo(3, 3),
     viewCount: 3340,
@@ -728,7 +729,7 @@ const articles: SeedArticle[] = [
   {
     slug: "esports-mid-season-invitational-preview",
     title: "【展望】ミッドシーズン大会直前、各地域代表の仕上がり具合をチェック",
-    category: CATEGORIES.esports,
+    category: CATEGORIES.patch,
     tags: ["eスポーツ", "大会"],
     publishedAt: daysAgo(8, 5),
     viewCount: 1980,

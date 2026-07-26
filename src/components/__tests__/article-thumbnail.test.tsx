@@ -16,7 +16,6 @@ describe("ArticleThumbnail（拡張E31 テスト4: カテゴリ別既定画像�
       ["パッチ/メタ", "/default-thumb-patch-meta.svg"],
       ["5chの反応", "/default-thumb-5ch.svg"],
       ["海外の反応", "/default-thumb-overseas.svg"],
-      ["eスポーツ", "/default-thumb-esports.svg"],
     ];
     for (const [category, expectedSrc] of cases) {
       const html = renderToStaticMarkup(<ArticleThumbnail thumbnailUrl={null} category={category} />);
@@ -26,9 +25,9 @@ describe("ArticleThumbnail（拡張E31 テスト4: カテゴリ別既定画像�
 
   it("thumbnailUrlが不正なURL(https以外)でもカテゴリ別の既定サムネイルにフォールバックする", () => {
     const html = renderToStaticMarkup(
-      <ArticleThumbnail thumbnailUrl="http://example.com/not-https.jpg" category="eスポーツ" />,
+      <ArticleThumbnail thumbnailUrl="http://example.com/not-https.jpg" category="パッチ/メタ" />,
     );
-    expect(html).toContain('src="/default-thumb-esports.svg"');
+    expect(html).toContain('src="/default-thumb-patch-meta.svg"');
   });
 
   it("カテゴリ不明(未指定/未知の値)のときは従来の汎用既定サムネイルを表示する", () => {
@@ -39,6 +38,13 @@ describe("ArticleThumbnail（拡張E31 テスト4: カテゴリ別既定画像�
       <ArticleThumbnail thumbnailUrl={null} category="未知のカテゴリ" />,
     );
     expect(unknownCategoryHtml).toContain('src="/default-thumb.svg"');
+  });
+
+  it("拡張E45: 削除された旧カテゴリ「eスポーツ」が既存DBに残っていても未知カテゴリとして汎用既定サムネイルにフォールバックする(表示崩れなし)", () => {
+    const html = renderToStaticMarkup(
+      <ArticleThumbnail thumbnailUrl={null} category="eスポーツ" />,
+    );
+    expect(html).toContain('src="/default-thumb.svg"');
   });
 });
 

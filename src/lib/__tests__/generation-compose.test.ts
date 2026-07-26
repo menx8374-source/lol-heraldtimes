@@ -214,40 +214,6 @@ describe("composeArticleBody", () => {
     }
   });
 
-  it("clip由来は「注目クリップ」見出し＋紹介文＋embedブロック(youtube)の埋め込み紹介形式になる", async () => {
-    const body = await composeArticleBody(
-      {
-        sourceType: "clip",
-        title: "LoLハイライト動画",
-        content: "今週のLoL神プレイをまとめました。",
-        sourceUrl: "https://www.youtube.com/watch?v=abc123",
-      },
-      llm,
-    );
-    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
-    expect(headings).toEqual(["注目クリップ"]);
-    expect(body.some((b) => b.type === "paragraph")).toBe(true);
-    const embeds = body.filter((b) => b.type === "embed");
-    expect(embeds).toHaveLength(1);
-    expect(embeds[0].type === "embed" && embeds[0].provider).toBe("youtube");
-    expect(embeds[0].type === "embed" && embeds[0].url).toBe("https://www.youtube.com/watch?v=abc123");
-  });
-
-  it("clip由来のsourceUrlがTwitchクリップの場合はembedのproviderが clip になる", async () => {
-    const body = await composeArticleBody(
-      {
-        sourceType: "clip",
-        title: "ヤスオの神プレイ",
-        content: "配信者によるクリップ。",
-        sourceUrl: "https://clips.twitch.tv/SampleClip",
-      },
-      llm,
-    );
-    const embeds = body.filter((b) => b.type === "embed");
-    expect(embeds).toHaveLength(1);
-    expect(embeds[0].type === "embed" && embeds[0].provider).toBe("clip");
-  });
-
   it("「N: 」形式ではないcontent(fixture未整備等)は全体を1件のレスにフォールバックする", async () => {
     const body = await composeArticleBody(
       { sourceType: "5ch", title: "単発コメントのスレ", content: "壁飛びから連続でキャリーする神プレイに賞賛の声が相次いだ実況スレ。" },

@@ -6,13 +6,12 @@ import {
   isReactionCategory,
 } from "@/lib/categories";
 
-describe("カテゴリ整理（拡張E19 F-E19-1/2）", () => {
-  it("「公式ニュース」「動画・クリップ」は廃止され、4カテゴリのみが残る", () => {
+describe("カテゴリ整理（拡張E19 F-E19-1/2、拡張E45で「eスポーツ」を削除）", () => {
+  it("「公式ニュース」「動画・クリップ」「eスポーツ」は廃止され、3カテゴリのみが残る", () => {
     expect(CATEGORY_LABELS).not.toContain("公式ニュース");
     expect(CATEGORY_LABELS).not.toContain("動画・クリップ");
-    expect(CATEGORY_LABELS.sort()).toEqual(
-      ["パッチ/メタ", "5chの反応", "海外の反応", "eスポーツ"].sort(),
-    );
+    expect(CATEGORY_LABELS).not.toContain("eスポーツ");
+    expect(CATEGORY_LABELS.sort()).toEqual(["パッチ/メタ", "5chの反応", "海外の反応"].sort());
   });
 });
 
@@ -41,9 +40,8 @@ describe("isReactionCategory（拡張E38 テスト2）", () => {
     expect(isReactionCategory("海外の反応")).toBe(true);
   });
 
-  it("「パッチ/メタ」「eスポーツ」「未知」はfalse", () => {
+  it("「パッチ/メタ」「未知」はfalse（拡張E45で「eスポーツ」自体を削除済み）", () => {
     expect(isReactionCategory("パッチ/メタ")).toBe(false);
-    expect(isReactionCategory("eスポーツ")).toBe(false);
     expect(isReactionCategory("未知のカテゴリ")).toBe(false);
   });
 

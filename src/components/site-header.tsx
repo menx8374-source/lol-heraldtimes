@@ -26,7 +26,7 @@ export function SiteHeader() {
             <span className="flex flex-col">
               <span className="text-lg font-bold tracking-tight sm:text-xl">{SITE_NAME}</span>
               <span className="text-xs text-neutral-400">
-                海外・5chの反応 / パッチ情報 / eスポーツをまとめて速報
+                海外・5chの反応 / パッチ情報をまとめて速報
               </span>
             </span>
           </Link>

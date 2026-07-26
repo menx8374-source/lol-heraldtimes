@@ -14,7 +14,7 @@ import type {
 } from "@/lib/article-body";
 import type { SourceType } from "@/lib/collection/types";
 import type { LLMClient, GenerationTask } from "@/lib/generation/llm-client";
-import { splitIntoSentences, excerptForQuote, gistOf } from "@/lib/generation/text-utils";
+import { splitIntoSentences, excerptForQuote } from "@/lib/generation/text-utils";
 import { parseThreadReses, extractAnchors, computeLineEmphasis, type ThreadRes } from "@/lib/generation/thread-format";
 import { isAllowedEmbedUrl, embedProviderForUrl } from "@/lib/embed";
 import { findNgWord } from "@/lib/moderation/ng-words";
@@ -26,7 +26,7 @@ export type GenerationCandidateInput = {
   sourceType: SourceType;
   title: string;
   content: string;
-  /** clip由来の埋め込みブロック構築・riot由来の公式パッチノートリンクにのみ使う出典URL（それ以外のソース種別では未使用）。 */
+  /** riot由来の公式パッチノートリンクにのみ使う出典URL（それ以外のソース種別では未使用）。 */
   sourceUrl?: string;
   /** riot由来（拡張E42）: 公式パッチノートのメイン画像URL（og:image）。安全なhttps URLのみ本文冒頭の画像ブロックに使う。 */
   imageUrl?: string | null;
@@ -467,7 +467,6 @@ const QUOTE_SOURCE_LABEL: Record<SourceType, string> = {
   "5ch": "5chの反応",
   reddit: "Redditの反応",
   riot: "Riot公式",
-  clip: "クリップ紹介",
 };
 
 async function askLLM(llmClient: LLMClient, task: GenerationTask): Promise<string> {
@@ -868,35 +867,6 @@ async function composeReactionBody(
 }
 
 /**
- * clip由来（拡張E17）: 「埋め込み紹介」形式。見出し＋短い紹介文（askLLM）＋embedブロックのみで構成する
- * （逐語転載ではなく紹介＋埋め込みなので、他ソースのような300字下限・逐語一致率・引用比率は課さない。
- * 代わりに generate-article.ts 側で「embedブロックが必ず1件あること」を最低条件にする）。
- */
-async function composeClipBody(
-  candidate: GenerationCandidateInput,
-  llmClient: LLMClient,
-): Promise<ArticleBodyBlock[]> {
-  const blocks: ArticleBodyBlock[] = [];
-  blocks.push({ type: "heading", text: "注目クリップ" });
-  blocks.push({
-    type: "paragraph",
-    text: await askLLM(llmClient, {
-      kind: "clip-intro",
-      title: candidate.title,
-      hint: gistOf(candidate.content, 60),
-    }),
-  });
-
-  const sourceUrl = candidate.sourceUrl ?? "";
-  const provider = sourceUrl ? embedProviderForUrl(sourceUrl) : null;
-  if (provider && isAllowedEmbedUrl(provider, sourceUrl)) {
-    blocks.push({ type: "embed", provider, url: sourceUrl });
-  }
-
-  return blocks;
-}
-
-/**
  * env `PATCH_ARTICLE_MODE` によるriot（パッチ）記事の構成モード切替（拡張E41 F-E41-2）。
  * "summary" のみ従来のE40 3段（LLM要約→決定的抽出→クリーン定型）を使い、それ以外（未設定含む）は
  * 既定の "fact"（事実速報、LLM不使用）にする。後でLLMまとめに戻す可能性があるため、summaryモードの
@@ -910,8 +880,8 @@ function patchArticleMode(): "fact" | "summary" {
  * 記事化候補から構造化された本文ブロック配列を組み立てる（F7）。
  * sourceType が "riot" なら、既定(env `PATCH_ARTICLE_MODE`未設定/"fact")では本文の長短に関わらず
  * 事実速報（拡張E41 F-E41-2）。"summary" なら従来のE40の3段（LLM要約のまとめ記事→決定的抽出→
- * クリーン定型フォールバック、contentが短い汎用文なら速報＋要点整理）。"clip" なら埋め込み紹介形式、
- * それ以外（5ch/reddit）ならまとめ速報レス形式にする。
+ * クリーン定型フォールバック、contentが短い汎用文なら速報＋要点整理）。それ以外（5ch/reddit）なら
+ * まとめ速報レス形式にする。
  */
 export async function composeArticleBody(
   candidate: GenerationCandidateInput,
@@ -940,9 +910,6 @@ export async function composeArticleBody(
     // 本文が無い（短い汎用content）の場合は従来どおり速報＋要点整理（composeFactBody）でよい。
     const sentences = splitIntoSentences(candidate.content);
     return composeFactBody(candidate, sentences, llmClient);
-  }
-  if (candidate.sourceType === "clip") {
-    return composeClipBody(candidate, llmClient);
   }
   return composeReactionBody(candidate, candidate.sourceType, llmClient);
 }

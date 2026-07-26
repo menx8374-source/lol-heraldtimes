@@ -92,35 +92,6 @@ function extractPatchNumberFromTitle(title: string): string {
   return m[0];
 }
 
-describe("generateArticleForCandidate（clip由来=埋め込み紹介形式、拡張E17）", () => {
-  function clipCandidate(overrides: Partial<GenerationCandidate> = {}): GenerationCandidate {
-    return candidate({
-      sourceType: "clip",
-      sourceUrl: "https://www.youtube.com/watch?v=abc123",
-      title: "LoLハイライト動画",
-      content: "今週のLoL神プレイをまとめました。",
-      ...overrides,
-    });
-  }
-
-  it("clip由来はカテゴリ「eスポーツ」になり、embedブロックを含む本文が生成される（拡張E19）", async () => {
-    const result = await generateArticleForCandidate(clipCandidate(), llm);
-    expect(result.category).toBe("eスポーツ");
-    expect(result.body.some((b) => b.type === "embed")).toBe(true);
-    expect(result.body.some((b) => b.type === "heading")).toBe(true);
-    expect(result.sources[0].url).toBe("https://www.youtube.com/watch?v=abc123");
-    // DBに保存する形式(JSON)としても壊れずパースできる
-    expect(() => parseArticleBody(result.body)).not.toThrow();
-  });
-
-  it("clipのcontentが短くても(300字未満)GenerationErrorにならない(埋め込み紹介形式は最低文字数チェック対象外)", async () => {
-    const result = await generateArticleForCandidate(clipCandidate({ content: "短い紹介文。" }), llm);
-    const totalLength = result.body.reduce((sum, b) => sum + blockText(b).length, 0);
-    expect(totalLength).toBeLessThan(MIN_BODY_LENGTH);
-    expect(result.body.some((b) => b.type === "embed")).toBe(true);
-  });
-});
-
 describe("generateArticleForCandidate（サムネイル画像、拡張E19 F-E19-3）", () => {
   it("candidate.imageUrlがhttpsの妥当なURLならGeneratedArticle.thumbnailUrlに反映される", async () => {
     const result = await generateArticleForCandidate(
@@ -342,7 +313,7 @@ describe("generateArticleForCandidate（反応記事の決定論チャンピオ�
     );
   });
 
-  it("非reaction(riot/clip)でチャンピオン未検出のときは従来どおりthumbnailUrlがnullになる(カテゴリSVGに委ねる・回帰なし)", async () => {
+  it("非reaction(riot)でチャンピオン未検出のときは従来どおりthumbnailUrlがnullになる(カテゴリSVGに委ねる・回帰なし)", async () => {
     const riotResult = await generateArticleForCandidate(
       candidate({
         id: "e37-riot",
@@ -355,19 +326,6 @@ describe("generateArticleForCandidate（反応記事の決定論チャンピオ�
       llm,
     );
     expect(riotResult.thumbnailUrl).toBeNull();
-
-    const clipResult = await generateArticleForCandidate(
-      candidate({
-        id: "e37-clip",
-        sourceType: "clip",
-        sourceUrl: "https://www.youtube.com/watch?v=e37clip",
-        title: "LoLハイライト動画",
-        content: "今週のLoL神プレイをまとめました。",
-        imageUrl: null,
-      }),
-      llm,
-    );
-    expect(clipResult.thumbnailUrl).toBeNull();
   });
 });
 
