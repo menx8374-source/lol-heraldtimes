@@ -24,6 +24,7 @@ import { hasAcceptableQuoteRatio } from "@/lib/generation/quote-ratio";
 import { generateHookTitleLLM } from "@/lib/generation/title";
 import { threadBodyText } from "@/lib/generation/thread-format";
 import { isSafeImageUrl } from "@/lib/image-url";
+import { detectChampionSplashUrl, type ChampionNameToIdMap } from "@/lib/generation/champion-thumbnail";
 
 /** 1記事あたりの本文最低文字数（見出し・段落・引用の合計、F7受け入れ基準）。riot(fact形式)のみに適用。 */
 export const MIN_BODY_LENGTH = 300;
@@ -52,8 +53,10 @@ export type GeneratedArticle = {
   body: ArticleBodyBlock[];
   sources: { label: string; url: string }[];
   /**
-   * 記事サムネイル画像URL（拡張E19）。candidate.imageUrl が https の妥当なURLのときのみ設定し、
-   * それ以外（未設定・不正値）は null にする（表示側 article-thumbnail.tsx が既定画像にフォールバックする）。
+   * 記事サムネイル画像URL。優先順（拡張E31 F-E31-2）:
+   * 1. candidate.imageUrl が https の妥当なURLならそれ。
+   * 2. なければ、渡された championMap でタイトル+本文からチャンピオンを検出できればその公式スプラッシュ。
+   * 3. どちらも無ければ null（表示側 article-thumbnail.tsx がカテゴリ別/汎用の既定画像にフォールバックする）。
    */
   thumbnailUrl: string | null;
 };
@@ -81,6 +84,13 @@ const ARTICLE_SOURCE_LABEL: Record<SourceType, string> = {
 export async function generateArticleForCandidate(
   candidate: GenerationCandidate,
   llmClient: LLMClient,
+  /**
+   * チャンピオン検出（拡張E31 F-E31-1）用の「表示名→championId」Map。
+   * 未指定/nullの場合はチャンピオン検出を行わない（candidate.imageUrlのみ判定、従来どおり）。
+   * ネットワーク取得はこの関数の呼び出し側（generation/pipeline.ts）がrun開始時に1回だけ行う想定で、
+   * この関数自体はフェッチしない（テスト容易性のため）。
+   */
+  championMap?: ChampionNameToIdMap | null,
 ): Promise<GeneratedArticle> {
   if (!candidate.sourceUrl || candidate.sourceUrl.trim().length === 0) {
     throw new GenerationError("出典URLが無いため記事を生成できません");
@@ -136,11 +146,16 @@ export async function generateArticleForCandidate(
     content: threadBodyText(candidate.content),
   });
 
+  let thumbnailUrl: string | null = isSafeImageUrl(candidate.imageUrl) ? candidate.imageUrl : null;
+  if (!thumbnailUrl && championMap) {
+    thumbnailUrl = detectChampionSplashUrl(`${candidate.title}\n${candidate.content}`, championMap);
+  }
+
   return {
     title,
     category: CATEGORY_BY_SOURCE[candidate.sourceType],
     body,
     sources: [{ label: ARTICLE_SOURCE_LABEL[candidate.sourceType], url: candidate.sourceUrl }],
-    thumbnailUrl: isSafeImageUrl(candidate.imageUrl) ? candidate.imageUrl : null,
+    thumbnailUrl,
   };
 }

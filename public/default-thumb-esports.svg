@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="640" y2="360" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e11d48" />
+      <stop offset="1" stop-color="#9f1239" />
+    </linearGradient>
+  </defs>
+  <rect width="640" height="360" fill="url(#bg)" />
+  <!-- 盾のシルエット（オリジナル作成のシンプルなアイコン。特定チャンピオン・実在のIP画像ではない） -->
+  <path
+    d="M320 60 L410 95 V190 C410 250 372 296 320 320 C268 296 230 250 230 190 V95 Z"
+    fill="#ffe4e6"
+    opacity="0.3"
+  />
+  <path
+    d="M320 60 L410 95 V190 C410 250 372 296 320 320 C268 296 230 250 230 190 V95 Z"
+    fill="none"
+    stroke="#fecdd3"
+    stroke-width="4"
+    opacity="0.6"
+  />
+  <!-- トロフィーを模したオリジナルアイコン(eスポーツを示す抽象図形) -->
+  <path
+    d="M295 150 h50 v30 c0 20 -12 32 -25 32 c-13 0 -25 -12 -25 -32 Z"
+    fill="none"
+    stroke="#ffe4e6"
+    stroke-width="5"
+    opacity="0.7"
+  />
+  <line x1="320" y1="212" x2="320" y2="225" stroke="#ffe4e6" stroke-width="5" opacity="0.7" />
+  <line x1="300" y1="225" x2="340" y2="225" stroke="#ffe4e6" stroke-width="5" opacity="0.7" />
+  <text x="320" y="250" font-family="sans-serif" font-size="15" fill="#ffe4e6" text-anchor="middle" opacity="0.85">
+    eスポーツ
+  </text>
+  <text x="320" y="300" font-family="sans-serif" font-size="18" font-weight="bold" fill="#fff1f2" text-anchor="middle">
+    へらるど速報@lolまとめ
+  </text>
+</svg>

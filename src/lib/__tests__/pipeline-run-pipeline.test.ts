@@ -5,10 +5,20 @@
  */
 import { describe, expect, it, beforeEach } from "vitest";
 import { prisma } from "@/lib/prisma";
-import { runFullPipeline } from "@/lib/pipeline/run-pipeline";
+import { runFullPipeline, type PipelineRunOptions } from "@/lib/pipeline/run-pipeline";
 import { rebuildCandidateQueue } from "@/lib/collection/queue";
 import { MockLLMClient } from "@/lib/generation/llm-client";
 import type { RawCollectionItem, SourceAdapter, SourceType } from "@/lib/collection/types";
+
+/**
+ * このテストファイルは実APIを叩かない方針のため、championMap は明示的にnull
+ * （チャンピオン検出のフェッチ自体をスキップ）を既定にする（拡張E31）。
+ * チャンピオン検出の配線自体は generation-generate-article.test.ts / champion-thumbnail.test.ts で
+ * スタブMapを使って別途検証する。
+ */
+function runPipeline(options: PipelineRunOptions = {}) {
+  return runFullPipeline({ championMap: null, ...options });
+}
 
 class FakeAdapter implements SourceAdapter {
   constructor(
@@ -67,7 +77,7 @@ describe("runFullPipeline（統合パイプライン）", () => {
       ]),
     ];
 
-    const report = await runFullPipeline({ adapters, llmClient: llm, now: T0 });
+    const report = await runPipeline({ adapters, llmClient: llm, now: T0 });
 
     expect(report.status).toBe("success");
     expect(report.collectedCount).toBeGreaterThan(0);
@@ -99,7 +109,7 @@ describe("runFullPipeline（統合パイプライン）", () => {
       ]),
     ];
 
-    const report = await runFullPipeline({ adapters, llmClient: llm, now: T0 });
+    const report = await runPipeline({ adapters, llmClient: llm, now: T0 });
     expect(report.publishedCount).toBeGreaterThan(0);
 
     const published = await prisma.article.findFirst({ where: { status: "published" } });
@@ -117,11 +127,35 @@ describe("runFullPipeline（統合パイプライン）", () => {
       ]),
     ];
 
-    const report = await runFullPipeline({ adapters, llmClient: llm, now: T0 });
+    const report = await runPipeline({ adapters, llmClient: llm, now: T0 });
     expect(report.publishedCount).toBeGreaterThan(0);
 
     const published = await prisma.article.findFirst({ where: { status: "published" } });
     expect(published?.thumbnailUrl).toBeNull();
+  });
+
+  it("championMapを渡すとimageUrl無しでもチャンピオン検出でスプラッシュURLがthumbnailUrlになる(拡張E31 F-E31-1/2)", async () => {
+    const adapters = [
+      new FakeAdapter("5ch", [
+        item({
+          sourceUrl: "https://leagueoflegends.5ch.net/test/read.cgi/game/2000000099/",
+          title: "【LoL】リサンドラが強すぎると話題のスレ",
+          content: "1: リサンドラの氷結スキルが強すぎて対処法が無い。\n2: 確かにリサンドラは今パッチ最強クラス。",
+        }),
+      ]),
+    ];
+    const report = await runPipeline({
+      adapters,
+      llmClient: llm,
+      now: T0,
+      championMap: new Map([["リサンドラ", "Lissandra"]]),
+    });
+    expect(report.publishedCount).toBeGreaterThan(0);
+
+    const published = await prisma.article.findFirst({ where: { status: "published" } });
+    expect(published?.thumbnailUrl).toBe(
+      "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Lissandra_0.jpg",
+    );
   });
 
   it("1回の実行で公開する記事本数の上限を超えて一度に公開しない", async () => {
@@ -145,7 +179,7 @@ describe("runFullPipeline（統合パイプライン）", () => {
       ]),
     ];
 
-    const report = await runFullPipeline({ adapters, llmClient: llm, now: T0, maxPublishPerRun: 1 });
+    const report = await runPipeline({ adapters, llmClient: llm, now: T0, maxPublishPerRun: 1 });
 
     expect(report.candidateCount).toBeGreaterThanOrEqual(2);
     expect(report.publishedCount).toBeLessThanOrEqual(1);
@@ -161,7 +195,7 @@ describe("runFullPipeline（統合パイプライン）", () => {
       content: "本パッチではミッドレーンの複数チャンピオンにバランス調整が入った。",
     });
 
-    const report1 = await runFullPipeline({
+    const report1 = await runPipeline({
       adapters: [new FakeAdapter("riot", [first])],
       llmClient: llm,
       now: T0,
@@ -175,7 +209,7 @@ describe("runFullPipeline（統合パイプライン）", () => {
       title: "World Championship 2026 グループステージ組み合わせ発表",
       content: "各地域を代表するチームのグループステージ組み合わせが決定した。",
     });
-    const report2 = await runFullPipeline({
+    const report2 = await runPipeline({
       adapters: [new FakeAdapter("riot", [first, second])],
       llmClient: llm,
       now: new Date(T0.getTime() + hours(5)),
@@ -185,7 +219,7 @@ describe("runFullPipeline（統合パイプライン）", () => {
     expect(afterRun2).toBe(afterRun1 + 1); // 既公開記事は重複公開されない
 
     // 3回目: 新規ソースアイテムなし(候補枯渇) → エラーにならず0件公開で正常終了する
-    const report3 = await runFullPipeline({
+    const report3 = await runPipeline({
       adapters: [new FakeAdapter("riot", [first, second])],
       llmClient: llm,
       now: new Date(T0.getTime() + hours(10)),
@@ -211,7 +245,7 @@ describe("runFullPipeline（統合パイプライン）", () => {
       }),
     ];
 
-    const report = await runFullPipeline({ adapters, llmClient: llm, now: T0 });
+    const report = await runPipeline({ adapters, llmClient: llm, now: T0 });
 
     expect(report.status).toBe("success"); // 全体は正常終了する
     const riotSummary = report.sourceSummaries.find((s) => s.sourceType === "riot");
@@ -240,7 +274,7 @@ describe("runFullPipeline（統合パイプライン）", () => {
       ]),
     ];
 
-    const report = await runFullPipeline({ adapters, llmClient: llm, now: T0 });
+    const report = await runPipeline({ adapters, llmClient: llm, now: T0 });
 
     expect(report.generationSucceeded).toBe(1);
     expect(report.generationFailed).toBe(1);
@@ -272,7 +306,7 @@ describe("runFullPipeline（統合パイプライン）", () => {
       }),
     ];
 
-    const report = await runFullPipeline({ adapters, llmClient: llm, now: T0 });
+    const report = await runPipeline({ adapters, llmClient: llm, now: T0 });
 
     expect(report.status).toBe("success"); // クラッシュせず正常終了
     expect(report.collectedCount).toBe(0);
@@ -289,7 +323,7 @@ describe("runFullPipeline（統合パイプライン）", () => {
   });
 
   it("工程をまたぐ想定外の例外が起きてもクラッシュせず、実行ログに失敗として記録して正常終了する", async () => {
-    const report = await runFullPipeline({
+    const report = await runPipeline({
       now: T0,
       runCollection: async () => {
         throw new Error("想定外のDB異常(テスト用)");

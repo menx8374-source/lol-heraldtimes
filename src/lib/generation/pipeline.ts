@@ -22,6 +22,7 @@ import { threadBodyText } from "@/lib/generation/thread-format";
 import { parseArticleBody } from "@/lib/article-body";
 import { bodyBlocksToText } from "@/lib/search";
 import { moderateArticleContent } from "@/lib/moderation/moderate";
+import { fetchChampionNameToIdMap, type ChampionNameToIdMap } from "@/lib/generation/champion-thumbnail";
 
 /** 重複判定の比較対象にする既存公開記事の上限件数（記事数増加時のコスト有界化。related-articles.ts と同じ考え方）。 */
 const DUPLICATE_CHECK_POOL = 200;
@@ -75,6 +76,15 @@ export type GenerationRunOptions = {
    * 上限を超えた残りの候補はDBの状態(queued)を変更しないため、次回実行時に再度処理対象になる。
    */
   maxCandidates?: number;
+  /**
+   * チャンピオン検出（拡張E31 F-E31-1）に使う「表示名→championId」Map。
+   * - 未指定(undefined): run開始時に fetchChampionNameToIdMap() を1回だけ取得して使う
+   *   （候補が0件のときは取得しない。取得失敗時はフォールバック表を返すため例外にはならない）。
+   * - 明示的に null: フェッチ自体を行わずチャンピオン検出をスキップする
+   *   （実APIを叩きたくないテスト等で使う。candidate.imageUrlのみ判定、従来どおりの挙動になる）。
+   * - Mapを直接渡す: そのMapをそのまま使う（テストでのスタブ差し替え用）。
+   */
+  championMap?: ChampionNameToIdMap | null;
 };
 
 /**
@@ -100,6 +110,11 @@ export async function generateArticlesForQueue(
   // 重複判定の比較プールはこの実行中に公開された記事も随時追加し、同一実行内での重複も検出する。
   const contentPool = await loadPublishedContentPool();
 
+  // チャンピオン検出用Mapはrun開始時に1回だけ取得し、記事ごとにはフェッチしない（拡張E31 F-E31-1）。
+  // 明示的にnullが渡された場合はフェッチ自体を行わずチャンピオン検出をスキップする。
+  const championMap: ChampionNameToIdMap | undefined =
+    options.championMap === null ? undefined : options.championMap ?? (await fetchChampionNameToIdMap());
+
   for (const item of candidates) {
     const candidate: GenerationCandidate = {
       id: item.id,
@@ -111,7 +126,7 @@ export async function generateArticlesForQueue(
     };
 
     try {
-      const generated = await generateArticleForCandidate(candidate, llmClient);
+      const generated = await generateArticleForCandidate(candidate, llmClient, championMap);
       const slug = slugForCandidate(item.id);
       const bodyText = bodyBlocksToText(generated.body);
 

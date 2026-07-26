@@ -25,6 +25,7 @@ export function PickupCarousel({ articles }: { articles: ArticleSummary[] }) {
             <div className="relative">
               <ArticleThumbnail
                 thumbnailUrl={article.thumbnailUrl}
+                category={article.category}
                 className="h-20 w-full rounded-md sm:h-24"
               />
               {article.pinned && (

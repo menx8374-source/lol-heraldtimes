@@ -18,6 +18,7 @@ import { getAllAdapters } from "@/lib/collection/adapters";
 import { getDefaultSourceConfigs } from "@/lib/collection/config";
 import type { SourceAdapter, SourceConfig, SourceType } from "@/lib/collection/types";
 import { generateArticlesForQueue, type GenerationRunSummary } from "@/lib/generation/pipeline";
+import type { ChampionNameToIdMap } from "@/lib/generation/champion-thumbnail";
 import { getLLMClient, type LLMClient } from "@/lib/generation/llm-client";
 import { getPipelineConfig } from "@/lib/pipeline/config";
 import { promoteScheduledArticles } from "@/lib/generation/scheduled-publish";
@@ -30,6 +31,11 @@ export type PipelineRunOptions = {
   now?: Date;
   /** 1回の実行で処理する候補数（≒公開本数）の上限。未指定時は設定(PIPELINE_MAX_PUBLISH_PER_RUN)。 */
   maxPublishPerRun?: number;
+  /**
+   * チャンピオン検出（拡張E31 F-E31-1）用Map。generateArticlesForQueue にそのまま渡す
+   * （未指定undefinedならrun開始時に1回だけ実フェッチ、明示的にnullならフェッチ自体をスキップ）。
+   */
+  championMap?: ChampionNameToIdMap | null;
 
   // 以下はテスト用の差し替えフック（想定外の例外に対する安全網を検証するため）。
   // 通常運用では指定不要（既定で実工程を呼ぶ）。
@@ -119,7 +125,10 @@ export async function runFullPipeline(options: PipelineRunOptions = {}): Promise
     candidateCount = queueSummary.queuedCount;
 
     const llmClient = options.llmClient ?? getLLMClient();
-    generationSummary = await generateArticles(llmClient, { maxCandidates: maxPublishPerRun });
+    generationSummary = await generateArticles(llmClient, {
+      maxCandidates: maxPublishPerRun,
+      championMap: options.championMap,
+    });
     generationSucceeded = generationSummary.succeededCount;
     generationFailed = generationSummary.failedCount;
     publishedCount = generationSummary.results.filter(

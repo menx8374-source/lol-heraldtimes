@@ -101,6 +101,88 @@ describe("generateArticleForCandidate（サムネイル画像、拡張E19 F-E19-
   });
 });
 
+describe("generateArticleForCandidate（チャンピオン検出→スプラッシュ、拡張E31 テスト3）", () => {
+  // 実APIを叩かないよう、championMapはスタブを渡す(fetchChampionNameToIdMapは呼ばない)。
+  const championMap = new Map([
+    ["リサンドラ", "Lissandra"],
+    ["リリア", "Lillia"],
+  ]);
+
+  it("candidate.imageUrlが安全なURLならソース画像が優先され、チャンピオン検出は行われない", async () => {
+    const result = await generateArticleForCandidate(
+      candidate({
+        title: "リサンドラが強すぎると話題のスレ",
+        content: "1: リサンドラの氷結スキルが強すぎる。",
+        sourceType: "5ch",
+        sourceUrl: "https://leagueoflegends.5ch.net/test/read.cgi/game/3/",
+        imageUrl: "https://external.example.com/reddit-image.jpg",
+      }),
+      llm,
+      championMap,
+    );
+    expect(result.thumbnailUrl).toBe("https://external.example.com/reddit-image.jpg");
+  });
+
+  it("ソース画像が無く、タイトル+本文からチャンピオンを検出できればスプラッシュURLになる", async () => {
+    const result = await generateArticleForCandidate(
+      candidate({
+        title: "リサンドラが強すぎると話題のスレ",
+        content: "1: リサンドラの氷結スキルが強すぎて対処法が無い。\n2: 確かに今パッチ最強クラス。",
+        sourceType: "5ch",
+        sourceUrl: "https://leagueoflegends.5ch.net/test/read.cgi/game/4/",
+        imageUrl: null,
+      }),
+      llm,
+      championMap,
+    );
+    expect(result.thumbnailUrl).toBe(
+      "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Lissandra_0.jpg",
+    );
+  });
+
+  it("ソース画像もチャンピオン検出も無ければthumbnailUrlはnullになる", async () => {
+    const result = await generateArticleForCandidate(
+      candidate({
+        title: "パッチノートが公開",
+        content: "1: 今回のパッチはアイテム調整が中心。",
+        sourceType: "5ch",
+        sourceUrl: "https://leagueoflegends.5ch.net/test/read.cgi/game/5/",
+        imageUrl: null,
+      }),
+      llm,
+      championMap,
+    );
+    expect(result.thumbnailUrl).toBeNull();
+  });
+
+  it("championMapを渡さない(未指定/null)場合は従来どおりチャンピオン検出を行わない", async () => {
+    const noMapArg = await generateArticleForCandidate(
+      candidate({
+        title: "リサンドラが強すぎると話題のスレ",
+        content: "1: リサンドラの氷結スキルが強すぎる。",
+        sourceType: "5ch",
+        sourceUrl: "https://leagueoflegends.5ch.net/test/read.cgi/game/6/",
+        imageUrl: null,
+      }),
+      llm,
+    );
+    expect(noMapArg.thumbnailUrl).toBeNull();
+
+    const nullMap = await generateArticleForCandidate(
+      candidate({
+        title: "リサンドラが強すぎると話題のスレ",
+        content: "1: リサンドラの氷結スキルが強すぎる。",
+        sourceType: "5ch",
+        sourceUrl: "https://leagueoflegends.5ch.net/test/read.cgi/game/7/",
+        imageUrl: null,
+      }),
+      llm,
+      null,
+    );
+    expect(nullMap.thumbnailUrl).toBeNull();
+  });
+});
+
 describe("generateArticleForCandidate（失敗パス）", () => {
   it("出典URLが無い候補はGenerationErrorになる", async () => {
     await expect(generateArticleForCandidate(candidate({ sourceUrl: "" }), llm)).rejects.toBeInstanceOf(
