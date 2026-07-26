@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { isAllowedEmbedUrl, EMBED_PROVIDER_LABELS } from "@/lib/embed";
+import {
+  isAllowedEmbedUrl,
+  EMBED_PROVIDER_LABELS,
+  extractYoutubeVideoId,
+  extractTwitchClipSlug,
+  embedIframeSrc,
+} from "@/lib/embed";
 
 describe("isAllowedEmbedUrl（埋め込みURLのホワイトリスト検証, 拡張E3）", () => {
   it("twitter/x.comの正規ドメインはhttpsなら許可", () => {
@@ -43,5 +49,62 @@ describe("isAllowedEmbedUrl（埋め込みURLのホワイトリスト検証, 拡
     expect(EMBED_PROVIDER_LABELS.twitter).toBeTruthy();
     expect(EMBED_PROVIDER_LABELS.youtube).toBeTruthy();
     expect(EMBED_PROVIDER_LABELS.clip).toBeTruthy();
+  });
+});
+
+describe("extractYoutubeVideoId（動画ID抽出, 拡張E22）", () => {
+  it("watch?v=・youtu.be・shorts の正規URLから11文字の動画IDを抽出する", () => {
+    expect(extractYoutubeVideoId("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ");
+    expect(extractYoutubeVideoId("https://youtu.be/dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ");
+    expect(extractYoutubeVideoId("https://www.youtube.com/shorts/dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ");
+  });
+
+  it("IDが11文字ちょうどでない場合はnull（形式検証、v未指定・短すぎる場合も含む）", () => {
+    expect(extractYoutubeVideoId("https://youtu.be/short")).toBeNull();
+    expect(extractYoutubeVideoId("https://www.youtube.com/watch?v=abc_123")).toBeNull();
+    expect(extractYoutubeVideoId("https://www.youtube.com/watch")).toBeNull();
+  });
+
+  it("許可外ホスト・URL不正はnull", () => {
+    expect(extractYoutubeVideoId("https://evil.example/watch?v=dQw4w9WgXcQ")).toBeNull();
+    expect(extractYoutubeVideoId("not a url")).toBeNull();
+  });
+});
+
+describe("extractTwitchClipSlug（クリップslug抽出, 拡張E22）", () => {
+  it("clips.twitch.tv・twitch.tv/*/clip/ の正規URLからslugを抽出する", () => {
+    expect(extractTwitchClipSlug("https://clips.twitch.tv/SampleClip-123")).toBe("SampleClip-123");
+    expect(extractTwitchClipSlug("https://www.twitch.tv/somestreamer/clip/SampleClip-123")).toBe(
+      "SampleClip-123",
+    );
+  });
+
+  it("slugが空、または許可外ホストの場合はnull", () => {
+    expect(extractTwitchClipSlug("https://clips.twitch.tv/")).toBeNull();
+    expect(extractTwitchClipSlug("https://eviltwitch.tv/SampleClip")).toBeNull();
+    expect(extractTwitchClipSlug("not a url")).toBeNull();
+  });
+});
+
+describe("embedIframeSrc（iframe用src組み立て, 拡張E22）", () => {
+  it("youtubeは youtube-nocookie.com/embed/{ID} を返す", () => {
+    expect(embedIframeSrc("youtube", "https://youtu.be/dQw4w9WgXcQ", "localhost")).toBe(
+      "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ",
+    );
+  });
+
+  it("clipは clips.twitch.tv/embed?clip={SLUG}&parent={siteHost} を返す", () => {
+    expect(embedIframeSrc("clip", "https://clips.twitch.tv/SampleClip", "lolheraldtimes.com")).toBe(
+      "https://clips.twitch.tv/embed?clip=SampleClip&parent=lolheraldtimes.com",
+    );
+  });
+
+  it("ID/slug抽出に失敗した場合はnull", () => {
+    expect(embedIframeSrc("youtube", "https://youtu.be/bad", "localhost")).toBeNull();
+    expect(embedIframeSrc("clip", "https://clips.twitch.tv/", "localhost")).toBeNull();
+  });
+
+  it("twitterは実iframe対象外のため常にnull", () => {
+    expect(embedIframeSrc("twitter", "https://x.com/example/status/123", "localhost")).toBeNull();
   });
 });

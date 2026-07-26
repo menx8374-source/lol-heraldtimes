@@ -128,4 +128,81 @@ describe("composeArticleBody", () => {
     expect(reactionBlocks).toHaveLength(1);
     expect(reactionBlocks[0].type === "reaction" && reactionBlocks[0].number).toBe(1);
   });
+
+  it("反応記事(5ch)の本文にYouTube URLが含まれるとembedブロックが1件追加される(拡張E22 F-E22-1)", async () => {
+    const body = await composeArticleBody(
+      {
+        sourceType: "5ch",
+        title: "神プレイスレ",
+        content: "1: これ見て https://youtu.be/dQw4w9WgXcQ 神プレイすぎる\n2: マジで草生えた",
+      },
+      llm,
+    );
+    const embeds = body.filter((b) => b.type === "embed");
+    expect(embeds).toHaveLength(1);
+    expect(embeds[0].type === "embed" && embeds[0].provider).toBe("youtube");
+    expect(embeds[0].type === "embed" && embeds[0].url).toBe("https://youtu.be/dQw4w9WgXcQ");
+    // 逐語テキストはそのまま保持されている(embedは加算のみ)
+    const reactionBlocks = body.filter((b) => b.type === "reaction");
+    expect(
+      reactionBlocks[0].type === "reaction" &&
+        reactionBlocks[0].lines.some((l) => l.text.includes("https://youtu.be/dQw4w9WgXcQ")),
+    ).toBe(true);
+  });
+
+  it("反応記事(reddit)の本文にTwitchクリップURLが含まれるとembedブロック(provider=clip)が追加される", async () => {
+    const body = await composeArticleBody(
+      {
+        sourceType: "reddit",
+        title: "Clip discussion",
+        content: "1: check this out https://clips.twitch.tv/SampleClip amazing play",
+      },
+      llm,
+    );
+    const embeds = body.filter((b) => b.type === "embed");
+    expect(embeds).toHaveLength(1);
+    expect(embeds[0].type === "embed" && embeds[0].provider).toBe("clip");
+  });
+
+  it("クリップURLを含まない反応記事にはembedが増えない(回帰なし)", async () => {
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "普通のスレ", content: "1: 普通の反応だけで特にURLは無い\n2: そうだね" },
+      llm,
+    );
+    expect(body.some((b) => b.type === "embed")).toBe(false);
+  });
+
+  it("同一URLが重複して含まれる場合は重複排除され1件になる", async () => {
+    const url = "https://youtu.be/dQw4w9WgXcQ";
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "重複URLスレ", content: `1: これ見て ${url}\n2: これも同じやつ ${url}` },
+      llm,
+    );
+    const embeds = body.filter((b) => b.type === "embed");
+    expect(embeds).toHaveLength(1);
+  });
+
+  it("クリップURLが4件以上あっても最大3件までしかembedを追加しない", async () => {
+    const content = [
+      "1: https://youtu.be/dQw4w9WgXcQ",
+      "2: https://youtu.be/AbCdEfGhIjK",
+      "3: https://clips.twitch.tv/ClipOne",
+      "4: https://clips.twitch.tv/ClipTwo",
+    ].join("\n");
+    const body = await composeArticleBody({ sourceType: "5ch", title: "大量URLスレ", content }, llm);
+    const embeds = body.filter((b) => b.type === "embed");
+    expect(embeds).toHaveLength(3);
+  });
+
+  it("許可外ドメインのURL(twitter/x.com)が本文にあってもembedを追加しない(youtube/clipのみ検出対象)", async () => {
+    const body = await composeArticleBody(
+      {
+        sourceType: "5ch",
+        title: "Xリンクスレ",
+        content: "1: これ参照 https://x.com/example/status/123",
+      },
+      llm,
+    );
+    expect(body.some((b) => b.type === "embed")).toBe(false);
+  });
 });

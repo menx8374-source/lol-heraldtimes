@@ -160,6 +160,55 @@ describe("ArticleBodyView（埋め込みブロック, 拡張E3）", () => {
   });
 });
 
+describe("ArticleBodyView（埋め込みブロックの実iframe化, 拡張E22）", () => {
+  it("正規のYouTube動画IDを持つURLは youtube-nocookie.com/embed のiframeとして描画する", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "embed", provider: "youtube", url: "https://youtu.be/dQw4w9WgXcQ", caption: "神プレイ集" },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("<iframe");
+    expect(html).toContain("https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ");
+    expect(html).toContain("神プレイ集");
+    expect(html).not.toContain("<script");
+  });
+
+  it("正規のTwitchクリップURLは clips.twitch.tv/embed のiframeとして描画する", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "embed", provider: "clip", url: "https://clips.twitch.tv/SampleClip" },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("<iframe");
+    expect(html).toContain("https://clips.twitch.tv/embed?clip=SampleClip");
+  });
+
+  it("動画IDの抽出に失敗するURL(不正な形式)は従来のプレースホルダーカードにフォールバックする", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "embed", provider: "youtube", url: "https://www.youtube.com/watch?v=abc", caption: "サンプル動画" },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).not.toContain("<iframe");
+    expect(html).toContain("本番接続時に表示されます");
+  });
+
+  it("twitterの埋め込みは実iframe対象外のため常にプレースホルダーカードのまま", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "embed", provider: "twitter", url: "https://x.com/example/status/123" },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).not.toContain("<iframe");
+  });
+
+  it("iframeにはloading=lazy・allowfullscreen・referrerpolicyを設定する(dangerouslySetInnerHTMLは使わない)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "embed", provider: "youtube", url: "https://youtu.be/dQw4w9WgXcQ" },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain('loading="lazy"');
+    expect(html).toContain('allowFullScreen=""');
+    expect(html).toContain('referrerPolicy="strict-origin-when-cross-origin"');
+  });
+});
+
 describe("ResLines（AA・原文併記, 拡張E3）", () => {
   it("AAらしい行は等幅フォント(font-mono)クラスを付与する", () => {
     const blocks: ArticleBodyBlock[] = [

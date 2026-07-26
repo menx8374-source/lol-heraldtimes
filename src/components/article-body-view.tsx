@@ -6,7 +6,8 @@ import {
 } from "@/lib/article-body";
 import { AdSlot } from "@/components/ad-slot";
 import { isAsciiArtLine } from "@/lib/aa";
-import { isAllowedEmbedUrl, EMBED_PROVIDER_LABELS, type EmbedProvider } from "@/lib/embed";
+import { isAllowedEmbedUrl, embedIframeSrc, EMBED_PROVIDER_LABELS, type EmbedProvider } from "@/lib/embed";
+import { getSiteUrl } from "@/lib/site";
 
 /** 強調(赤/オレンジ)を持つレス本文行のテキストカラー。未指定は通常色。 */
 const LINE_EMPHASIS_CLASS: Record<"red" | "orange", string> = {
@@ -86,13 +87,39 @@ function ImageBlockView({ block }: { block: Extract<ArticleBodyBlock, { type: "i
 const EMBED_PROVIDER_ICON: Record<EmbedProvider, string> = { twitter: "X", youtube: "▶", clip: "🎬" };
 
 /**
- * SNS/動画の埋め込みブロック（拡張E3）。実際のiframe・スクリプトは一切読み込まず、
- * providerが分かるプレースホルダーカード＋元URLへのリンクのみを表示する
+ * SNS/動画の埋め込みブロック（拡張E3、拡張E22で実再生対応）。
+ * provider が youtube/clip のときは、embed.ts の厳格なID/slug抽出関数で組み立てた src
+ * （youtube-nocookie.com / clips.twitch.tv の許可ドメインのみ）で実際に再生可能なiframeを描画する。
+ * 生URLをそのままsrcに使うことはなく、抽出に失敗した場合（不正なID等）は従来の
+ * プレースホルダーカードにフォールバックする。twitter は実iframe対象外のため常にカード表示のまま
  * （著作権・CSP・SSRF回避のため。dangerouslySetInnerHTMLは使わない）。
  * parseArticleBody時点でホワイトリスト検証済みだが、表示前にも再検証し不正値は描画しない（二重防御）。
  */
 function EmbedBlockView({ block }: { block: Extract<ArticleBodyBlock, { type: "embed" }> }) {
   if (!isAllowedEmbedUrl(block.provider, block.url)) return null;
+
+  // iframe化可能なproviderの列挙は embedIframeSrc（twitter等は null を返す）に一元化し、
+  // ここでは戻り値の有無だけで実iframeとカードを分岐する（真実源を1箇所に保つ）。
+  const src = embedIframeSrc(block.provider, block.url, new URL(getSiteUrl()).hostname);
+  if (src) {
+    return (
+      <div className="flex flex-col gap-1">
+        <div className="aspect-video w-full overflow-hidden rounded border border-neutral-300 dark:border-neutral-700">
+          <iframe
+            src={src}
+            loading="lazy"
+            allow="autoplay; encrypted-media; picture-in-picture; web-share"
+            allowFullScreen
+            referrerPolicy="strict-origin-when-cross-origin"
+            title={EMBED_PROVIDER_LABELS[block.provider]}
+            className="h-full w-full border-0"
+          />
+        </div>
+        {block.caption && <p className="text-sm text-neutral-600 dark:text-neutral-400">{block.caption}</p>}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-1 rounded border border-dashed border-neutral-400 bg-neutral-50 p-3 text-sm dark:border-neutral-600 dark:bg-neutral-900">
       <div className="flex items-center gap-2 font-bold text-neutral-700 dark:text-neutral-300">

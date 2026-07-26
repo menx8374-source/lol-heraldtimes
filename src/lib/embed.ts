@@ -72,3 +72,88 @@ export function isAllowedEmbedUrl(provider: EmbedProvider, url: string): boolean
   const allowedHosts = EMBED_ALLOWED_HOSTS[provider] ?? [];
   return allowedHosts.some((allowed) => isHostAllowed(host, allowed));
 }
+
+/**
+ * 実iframe埋め込み（拡張E22）: URLからID/slugを抽出しiframe用srcを組み立てる純関数群。
+ * いずれも embedProviderForUrl + isAllowedEmbedUrl の許可判定を必ず経由したうえで、
+ * 抽出したID/slugを英数・ハイフン・アンダースコアの厳格な形式検証にかける。
+ * 検証に落ちた場合（許可外ホスト・URL不正・ID形式違反）はすべて null を返す（＝埋め込まない）。
+ */
+
+/** YouTube動画IDの形式（英数・ハイフン・アンダースコアの11文字。YouTube公式仕様に準拠）。 */
+const YOUTUBE_VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+
+/** Twitchクリップslugの形式（英数・ハイフン・アンダースコア、1文字以上）。 */
+const TWITCH_CLIP_SLUG_RE = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * 指定providerとしての許可判定（embedProviderForUrl + isAllowedEmbedUrl）を通過した URL を返す。
+ * いずれかに落ちれば null。抽出関数の共通前処理をここに集約し、各抽出関数での再パース重複を避ける。
+ */
+function parseAllowedEmbedUrl(provider: EmbedProvider, url: string): URL | null {
+  if (embedProviderForUrl(url) !== provider || !isAllowedEmbedUrl(provider, url)) return null;
+  try {
+    return new URL(url);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * YouTubeのURL（`youtube.com/watch?v=ID`・`youtu.be/ID`・`youtube.com/shorts/ID`）から
+ * 動画IDを抽出する。provider判定・許可URL検証に落ちる、またはID形式が不正な場合は null。
+ */
+export function extractYoutubeVideoId(url: string): string | null {
+  const parsed = parseAllowedEmbedUrl("youtube", url);
+  if (!parsed) return null;
+  const host = parsed.hostname.toLowerCase();
+  let id: string | null = null;
+  if (host === "youtu.be") {
+    id = parsed.pathname.slice(1).split("/")[0] || null;
+  } else if (parsed.pathname === "/watch") {
+    id = parsed.searchParams.get("v");
+  } else if (parsed.pathname.startsWith("/shorts/")) {
+    id = parsed.pathname.slice("/shorts/".length).split("/")[0] || null;
+  }
+  if (!id || !YOUTUBE_VIDEO_ID_RE.test(id)) return null;
+  return id;
+}
+
+/**
+ * TwitchクリップのURL（`clips.twitch.tv/SLUG`・`twitch.tv/*\/clip/SLUG`）からslugを抽出する。
+ * provider判定・許可URL検証に落ちる、またはslug形式が不正な場合は null。
+ */
+export function extractTwitchClipSlug(url: string): string | null {
+  const parsed = parseAllowedEmbedUrl("clip", url);
+  if (!parsed) return null;
+  const host = parsed.hostname.toLowerCase();
+  let slug: string | null = null;
+  if (host === "clips.twitch.tv") {
+    slug = parsed.pathname.slice(1).split("/")[0] || null;
+  } else {
+    const match = parsed.pathname.match(/\/clip\/([^/]+)/);
+    slug = match ? match[1] : null;
+  }
+  if (!slug || !TWITCH_CLIP_SLUG_RE.test(slug)) return null;
+  return slug;
+}
+
+/**
+ * 埋め込みブロックの provider/url から実iframe用の src を組み立てる純関数（拡張E22）。
+ * YouTube は `youtube-nocookie.com/embed/{ID}`（プライバシー強化ドメイン）、
+ * Twitchクリップは `clips.twitch.tv/embed?clip={SLUG}&parent={siteHost}` を返す。
+ * `siteHost` は埋め込みを表示するページの閲覧ドメイン（`getSiteUrl()` 由来）で、Twitchの
+ * parent検証に必須。ID/slug抽出に失敗した場合、および twitter provider（実iframe対象外）は null。
+ */
+export function embedIframeSrc(provider: EmbedProvider, url: string, siteHost: string): string | null {
+  if (provider === "youtube") {
+    const id = extractYoutubeVideoId(url);
+    return id ? `https://www.youtube-nocookie.com/embed/${id}` : null;
+  }
+  if (provider === "clip") {
+    const slug = extractTwitchClipSlug(url);
+    if (!slug) return null;
+    return `https://clips.twitch.tv/embed?clip=${encodeURIComponent(slug)}&parent=${encodeURIComponent(siteHost)}`;
+  }
+  return null;
+}

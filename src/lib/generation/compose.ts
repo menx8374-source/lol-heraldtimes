@@ -6,7 +6,7 @@
  *   記事フォーマット改修。同日の追加改修でAI導入/まとめ段落を除去しさらにシンプル化）。
  * - Riot公式（riot）: 「事実の速報＋要点整理」構成（従来どおり、引用ブロックは主従関係を保つ）。
  */
-import type { ArticleBodyBlock, ArticleBodyReactionBlock } from "@/lib/article-body";
+import type { ArticleBodyBlock, ArticleBodyEmbedBlock, ArticleBodyReactionBlock } from "@/lib/article-body";
 import type { SourceType } from "@/lib/collection/types";
 import type { LLMClient, GenerationTask } from "@/lib/generation/llm-client";
 import { splitIntoSentences, excerptForQuote, gistOf } from "@/lib/generation/text-utils";
@@ -50,6 +50,40 @@ function buildReactionBlocks(
       ...(anchors.length > 0 ? { anchors } : {}),
     };
   });
+}
+
+/** 1記事あたりの検出クリップembedの上限（過剰な埋め込みを防ぐ、拡張E22）。 */
+const MAX_DETECTED_EMBEDS = 3;
+
+/** 本文テキスト中のURLらしき部分を検出する簡易正規表現（空白・全角句読点・閉じ括弧類までを1URLとみなす）。 */
+const URL_IN_TEXT_RE = /https?:\/\/[^\s<>"'）】」』、。！？]+/g;
+
+/** 文末に紛れ込みがちな半角句読点を取り除く（例: "https://youtu.be/ID." → "https://youtu.be/ID"）。 */
+function stripTrailingPunctuation(url: string): string {
+  return url.replace(/[.,!?;:]+$/, "");
+}
+
+/**
+ * 反応記事（5ch/reddit）の本文テキストから、埋め込み許可URL（YouTube/Twitchクリップ）を検出し
+ * embedブロックを組み立てる（F-E22-1）。provider判定・許可URL検証は embedProviderForUrl +
+ * isAllowedEmbedUrl を必ず経由する（新たにホスト判定は書かない）。twitter(X)は本スプリントの
+ * 実iframe対象外のため検出しない。重複排除・最大 MAX_DETECTED_EMBEDS 件まで。0件なら空配列。
+ */
+function detectClipEmbedBlocks(content: string): ArticleBodyEmbedBlock[] {
+  const found = content.match(URL_IN_TEXT_RE) ?? [];
+  const seen = new Set<string>();
+  const blocks: ArticleBodyEmbedBlock[] = [];
+  for (const raw of found) {
+    if (blocks.length >= MAX_DETECTED_EMBEDS) break;
+    const url = stripTrailingPunctuation(raw);
+    if (seen.has(url)) continue;
+    const provider = embedProviderForUrl(url);
+    if (provider !== "youtube" && provider !== "clip") continue;
+    if (!isAllowedEmbedUrl(provider, url)) continue;
+    seen.add(url);
+    blocks.push({ type: "embed", provider, url });
+  }
+  return blocks;
 }
 
 /** 引用ブロックの出典ラベル（ArticleSourceのlabelとは別に、本文中の引用元表記に使う）。 */
@@ -110,6 +144,8 @@ async function composeFactBody(
  * 掲示板/Reddit（5ch/reddit）由来: 「まとめ速報レス形式」で本文ブロックを組み立てる。
  * AI要約段落は付けず、「反応まとめ」見出し＋スレッドのレス群を逐語のまま並べた reaction ブロックのみで
  * 構成する（2026-07-25 ユーザー決定: レスの羅列中心のシンプルなまとめ構成への改修）。
+ * さらにレス本文中に埋め込み許可URL（YouTube/Twitchクリップ）があれば、逐語テキストはそのまま保持しつつ
+ * embedブロックを加算する（拡張E22 F-E22-1。0件なら従来どおり何も足さない）。
  */
 function composeReactionBody(
   candidate: GenerationCandidateInput,
@@ -119,6 +155,7 @@ function composeReactionBody(
 
   blocks.push({ type: "heading", text: "反応まとめ" });
   blocks.push(...buildReactionBlocks(candidate, sourceType));
+  blocks.push(...detectClipEmbedBlocks(candidate.content));
 
   return blocks;
 }
