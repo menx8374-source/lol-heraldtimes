@@ -343,15 +343,24 @@ async function askLLM(llmClient: LLMClient, task: GenerationTask): Promise<strin
  */
 type PatchSummary = { buffed: string[]; nerfed: string[]; other: string[] };
 
-/** パッチノート要約LLMへのsystem指示。捏造禁止・出力形式(JSON)をここで固定する。 */
+/**
+ * パッチノート要約LLMへのsystem指示。捏造禁止・出力形式(JSON)をここで固定する。
+ * 拡張E35 F-E35-2: 渡す本文がページ全体のダンプ（ナビ・日付・eスポーツ告知・関連記事・Wiki導線等の
+ * ノイズを多く含む）であることを明示し、それらを無視してチャンピオン/アイテムの数値変更だけを
+ * 拾わせることでノイズ断片の誤要約・破綻を防ぐ。
+ */
 const PATCH_SUMMARY_SYSTEM_PROMPT =
-  "あなたはLoLまとめサイトの編集者です。次に渡す公式パッチノート本文(全文)から、実際に本文に" +
-  "書かれている変更点だけを日本語で簡潔に要約してください。本文に記載の無い数値・調整・チャンピオン名を" +
-  "作ってはいけません(捏造禁止)。可能な場合は「チャンピオン名: 変更前 ⇒ 変更後」のように簡潔にまとめて" +
-  "ください。出力はJSONのみとし、" +
+  "あなたはLoLまとめサイトの編集者です。次に渡す本文は公式パッチノートページ全体のテキストダンプで、" +
+  "ナビゲーションメニュー・見出しメタ情報・日付やタイムスタンプ・eスポーツ大会の告知・関連記事へのリンク・" +
+  "Wikiへの導線など、パッチの変更内容とは無関係なノイズを多く含みます。それらのノイズは無視し、" +
+  "チャンピオン名や能力・ステータスの数値変更（強化・弱体化・アイテム調整）だけを本文中から拾って" +
+  "日本語で簡潔に要約してください。本文に記載の無い数値・調整・チャンピオン名を作ってはいけません" +
+  "(捏造禁止)。可能な場合は「チャンピオン名: 変更前 ⇒ 変更後」のように簡潔にまとめてください。" +
+  "出力はJSONのみとし、" +
   '{"buffed": ["強化されたチャンピオンの要約", ...], "nerfed": ["弱体化されたチャンピオンの要約", ...], ' +
   '"other": ["アイテムやその他の変更の要約", ...]} の形式にしてください。' +
-  "該当する変更が本文に無いカテゴリは空配列にしてください（無理に埋めない）。" +
+  "変更内容が明確に読み取れないカテゴリは無理に埋めず空配列にしてください" +
+  "（ノイズの断片を変更点として拾わないこと。捏造禁止）。" +
   "説明文・前置き・コードブロックは付けないでください。";
 
 /** LLMが返した配列値を検証済みの文字列配列に正規化する（空文字・非文字列は除く）。 */
@@ -419,6 +428,57 @@ async function composePatchSummaryBody(
   } catch {
     return null;
   }
+}
+
+/**
+ * candidate の title / sourceUrl から表示用のパッチ番号（例 "26.14"）らしき文字列を抽出する
+ * （拡張E35 F-E35-3）。buildPatchItem のタイトルは「【パッチ】26.14 の主な変更点まとめ」のように
+ * 常に "数字.数字" 形式の番号を含むためそれを優先し、見つからなければ出典URL（buildPatchNoteUrl形式:
+ * .../league-of-legends-patch-26-14-notes）からも抽出を試みる。どちらからも取れない場合は null
+ * （呼び出し側が汎用ラベルにフォールバックする）。
+ */
+function extractPatchNumberLabel(candidate: GenerationCandidateInput): string | null {
+  const fromTitle = candidate.title.match(/\d+\.\d+/);
+  if (fromTitle) return fromTitle[0];
+  const fromUrl = candidate.sourceUrl?.match(/patch-(\d+)-(\d+)-notes/);
+  if (fromUrl) return `${fromUrl[1]}.${fromUrl[2]}`;
+  return null;
+}
+
+/**
+ * composePatchSummaryBody が要約できなかった（LLM要約失敗）ときの、ノイズ断片・逐文リライトを
+ * 含まないクリーンな簡易パッチ記事（拡張E35 F-E35-3）。パッチノート本文（ページ全体ダンプでノイズ込み）
+ * を composeFactBody に渡すと "14 Notes" 等のページ内ノイズ断片や「情報が不足…」等のLLM破綻文が
+ * 引用として並んでしまうため、composeFactBodyへは一切フォールバックせず、見出し＋定型段落＋出典URLの
+ * みで構成する（本文に無い具体的な変更点は書かない＝捏造禁止）。
+ */
+function composeCleanPatchFallbackBody(candidate: GenerationCandidateInput): ArticleBodyBlock[] {
+  const patchNumber = extractPatchNumberLabel(candidate);
+  const label = patchNumber ? `パッチ${patchNumber}` : "今回のパッチ";
+  const sourceUrl = candidate.sourceUrl?.trim();
+  return [
+    { type: "heading", text: `${label}の変更点` },
+    {
+      type: "paragraph",
+      text:
+        `${label}が公開されました。今回のアップデートでは、複数のチャンピオンやアイテムの` +
+        "バランス調整が行われています。強化・弱体化された具体的なチャンピオン名や数値の変更内容は、" +
+        "自動要約では正確に抽出できなかったため、詳細は下記の公式パッチノートで直接ご確認ください。",
+    },
+    {
+      type: "paragraph",
+      text:
+        "パッチノートには対戦バランスに関わるチャンピオンの能力値やコストの調整に加え、必要に応じて" +
+        "バグ修正や新機能・イベントの告知が含まれることもあります。プレイに影響する変更を見逃さないよう、" +
+        "対戦前に公式サイトの発表内容へ一度目を通しておくことをおすすめします。",
+    },
+    {
+      type: "paragraph",
+      text: sourceUrl
+        ? `出典: ${sourceUrl}`
+        : "出典: Riot Games 公式サイトのパッチノートページをご確認ください。",
+    },
+  ];
 }
 
 /** Riot公式（riot）由来: 「速報＋要点整理」構成（従来どおり）。 */
@@ -516,12 +576,16 @@ export async function composeArticleBody(
   llmClient: LLMClient,
 ): Promise<ArticleBodyBlock[]> {
   if (candidate.sourceType === "riot") {
-    // content が実パッチノート本文（汎用の短いcontentではない）とみなせるときのみLLM要約を試み、
-    // 失敗（mock・APIエラー・解析失敗等）した場合は従来の速報＋要点整理にフォールバックする。
+    // content が実パッチノート本文（汎用の短いcontentではない）とみなせるときのみLLM要約を試みる。
     if (candidate.content.length >= PATCH_NOTES_MIN_LENGTH) {
       const patchSummaryBody = await composePatchSummaryBody(candidate, llmClient);
       if (patchSummaryBody) return patchSummaryBody;
+      // 要約失敗（mock・APIエラー・解析失敗・全カテゴリ空等）した場合、パッチノート本文
+      // （ページ全体ダンプでノイズ込み）は composeFactBody（逐文リライト）には渡さず、
+      // ノイズ断片・破綻文を含まないクリーンな簡易パッチ記事にする（拡張E35 F-E35-3）。
+      return composeCleanPatchFallbackBody(candidate);
     }
+    // 本文が無い（短い汎用content）の場合は従来どおり速報＋要点整理（composeFactBody）でよい。
     const sentences = splitIntoSentences(candidate.content);
     return composeFactBody(candidate, sentences, llmClient);
   }

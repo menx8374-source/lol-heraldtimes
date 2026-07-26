@@ -644,49 +644,65 @@ describe("composeArticleBody（riot公式パッチノートのまとめ記事生
     expect(body.some((b) => b.type === "heading")).toBe(true);
   });
 
-  it("content が実パッチノート本文だが mock LLM(MockLLMClient)のときは従来の汎用パッチ記事にフォールバックする", async () => {
+  // 拡張E35 F-E35-3: 要約失敗時は composeFactBody（ノイズ本文の逐文リライト、破綻文の原因）には
+  // 落とさず、見出し＋定型段落＋出典のみのクリーンな簡易パッチ記事にする。
+  function expectCleanFallback(body: Awaited<ReturnType<typeof composeArticleBody>>) {
+    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
+    // 「速報」「要点整理」等の旧composeFactBody見出しにはならない(破綻文の温床だったフォーマットを回避)
+    expect(headings).not.toEqual(["速報", "要点整理", "まとめ"]);
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toContain("の変更点");
+    // quoteブロック(ページ内ノイズ断片の引用)は含まれない
+    expect(body.some((b) => b.type === "quote")).toBe(false);
+    // ページ内ノイズの断片("14 Notes"・"000Z"等)やLLM破綻文の温床になる逐語コピーはない
+    const bodyText = body.map(blockText).join("");
+    expect(bodyText).not.toContain("14 Notes");
+    expect(bodyText).not.toContain("リライトできません");
+    // 本文最低文字数(300字、generate-article.tsの受け入れ基準)を満たす
+    const totalLength = body.reduce((sum, b) => sum + blockText(b).length, 0);
+    expect(totalLength).toBeGreaterThanOrEqual(300);
+  }
+
+  it("content が実パッチノート本文だが mock LLM(MockLLMClient)のときはクリーンな簡易パッチ記事(composeFactBody非経由)になる", async () => {
     const body = await composeArticleBody(
       { sourceType: "riot", title: "パッチ14.6ノート公開", content: patchNotesContent },
       new MockLLMClient(),
     );
-    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
-    expect(headings).toEqual(["速報", "要点整理", "まとめ"]);
+    expectCleanFallback(body);
+    expect(body.filter((b) => b.type === "heading")[0].text).toBe("パッチ14.6の変更点");
   });
 
-  it("content が実パッチノート本文だがLLMが不正なJSON(要約失敗)を返す場合は従来の汎用パッチ記事にフォールバックする", async () => {
+  it("content が実パッチノート本文だがLLMが不正なJSON(要約失敗)を返す場合はクリーンな簡易パッチ記事になる", async () => {
     const stub = new StubLLMClient("これはJSONではない応答です");
     const body = await composeArticleBody(
       { sourceType: "riot", title: "パッチ14.6ノート公開", content: patchNotesContent },
       stub,
     );
-    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
-    expect(headings).toEqual(["速報", "要点整理", "まとめ"]);
+    expectCleanFallback(body);
   });
 
-  it("content が実パッチノート本文だがLLMが空文字を返す場合は従来の汎用パッチ記事にフォールバックする", async () => {
+  it("content が実パッチノート本文だがLLMが空文字を返す場合はクリーンな簡易パッチ記事になる", async () => {
     const stub = new StubLLMClient("");
     const body = await composeArticleBody(
       { sourceType: "riot", title: "パッチ14.6ノート公開", content: patchNotesContent },
       stub,
     );
-    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
-    expect(headings).toEqual(["速報", "要点整理", "まとめ"]);
+    expectCleanFallback(body);
   });
 
-  it("content が実パッチノート本文だが全カテゴリ空({buffed:[],nerfed:[],other:[]})の場合は従来の汎用パッチ記事にフォールバックする", async () => {
+  it("content が実パッチノート本文だが全カテゴリ空({buffed:[],nerfed:[],other:[]})の場合はクリーンな簡易パッチ記事になる", async () => {
     const stub = new StubLLMClient(JSON.stringify({ buffed: [], nerfed: [], other: [] }));
     const body = await composeArticleBody(
       { sourceType: "riot", title: "パッチ14.6ノート公開", content: patchNotesContent },
       stub,
     );
-    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
-    expect(headings).toEqual(["速報", "要点整理", "まとめ"]);
+    expectCleanFallback(body);
   });
 
-  it("content が実パッチノート本文だがパッチ要約のLLM呼び出しが例外を投げる場合は、例外を外に漏らさず従来の汎用パッチ記事にフォールバックする", async () => {
-    // パッチ要約タスク(kindフィールドを持たないJSON)のときだけ例外を投げ、それ以外(GenerationTaskの
-    // 通常タスク=フォールバック後のcomposeFactBodyが使うaskLLM)はMockLLMClientと同じ挙動にする
-    // スタブ(実際のAPIエラーで要約だけ失敗し、フォールバック自体は正常に完了する状況の再現)。
+  it("content が実パッチノート本文だがパッチ要約のLLM呼び出しが例外を投げる場合は、例外を外に漏らさずクリーンな簡易パッチ記事になる", async () => {
+    // パッチ要約タスク(kindフィールドを持たないJSON)のときだけ例外を投げるスタブ
+    // (実際のAPIエラーで要約だけ失敗する状況の再現。フォールバックはcomposeFactBodyを経由しないため
+    // 通常タスク用のMockLLMClient委譲は不要だが、他の呼び出しがあっても問題ないことも確認する)。
     class ThrowingOnlyForPatchSummary implements LLMClient {
       private readonly mock = new MockLLMClient();
       async generate(messages: LLMMessage[]): Promise<string> {
@@ -701,8 +717,18 @@ describe("composeArticleBody（riot公式パッチノートのまとめ記事生
       { sourceType: "riot", title: "パッチ14.6ノート公開", content: patchNotesContent },
       new ThrowingOnlyForPatchSummary(),
     );
-    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
-    expect(headings).toEqual(["速報", "要点整理", "まとめ"]);
+    expectCleanFallback(body);
+  });
+
+  it("出典URL(sourceUrl)を伴う候補が要約失敗した場合、クリーン記事本文に出典URLが含まれる", async () => {
+    const sourceUrl = "https://www.leagueoflegends.com/ja-jp/news/game-updates/league-of-legends-patch-26-14-notes";
+    const body = await composeArticleBody(
+      { sourceType: "riot", title: "パッチ14.6ノート公開", content: patchNotesContent, sourceUrl },
+      new MockLLMClient(),
+    );
+    expectCleanFallback(body);
+    const bodyText = body.map(blockText).join("");
+    expect(bodyText).toContain(sourceUrl);
   });
 
   it("content が汎用(パッチ本文無し、PATCH_NOTES_MIN_LENGTH未満)の場合は、LLMが有効な要約JSONを返してもLLM要約を試みず従来どおりの速報＋要点整理になる(回帰なし)", async () => {

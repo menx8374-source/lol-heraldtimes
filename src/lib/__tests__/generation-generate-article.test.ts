@@ -219,13 +219,19 @@ describe("generateArticleForCandidate（riot公式パッチノートのまとめ
     expect(result.sources[0].url).toBe(candidate().sourceUrl);
   });
 
-  it("実パッチノート本文だがLLMが要約できない(mock)場合でも、GenerationErrorにならず従来の速報記事が生成される", async () => {
+  it("実パッチノート本文だがLLMが要約できない(mock)場合でも、GenerationErrorにならずクリーンな簡易パッチ記事が生成される(拡張E35 F-E35-3、composeFactBody非経由)", async () => {
     const result = await generateArticleForCandidate(
       candidate({ content: patchNotesContent, title: "パッチ14.6ノート公開" }),
       llm,
     );
     const headings = result.body.filter((b) => b.type === "heading").map((b) => b.text);
-    expect(headings).toEqual(["速報", "要点整理", "まとめ"]);
+    // composeFactBody(速報/要点整理/まとめ)には落ちず、見出し1件のクリーンな簡易記事になる
+    expect(headings).not.toEqual(["速報", "要点整理", "まとめ"]);
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toContain("の変更点");
+    expect(result.body.some((b) => b.type === "quote")).toBe(false);
+    const totalLength = result.body.reduce((sum, b) => sum + blockText(b).length, 0);
+    expect(totalLength).toBeGreaterThanOrEqual(MIN_BODY_LENGTH);
     expect(result.sources[0].url).toBe(candidate().sourceUrl);
   });
 });

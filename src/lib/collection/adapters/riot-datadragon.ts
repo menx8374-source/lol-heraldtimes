@@ -28,8 +28,13 @@ const VERSIONS_URL = "https://ddragon.leagueoflegends.com/api/versions.json";
  */
 export const PATCH_NOTES_MIN_LENGTH = 300;
 
-/** トークン節約のため、抽出したパッチノート本文テキストはこの文字数で切り詰める（拡張E34）。 */
-export const PATCH_NOTES_MAX_LENGTH = 15000;
+/**
+ * トークン節約のため、抽出したパッチノート本文テキストはこの文字数で切り詰める（拡張E34）。
+ * 拡張E35 F-E35-1: 15000字では実際の変更内容（本体）が途中で切れてしまうことがあったため、
+ * 60000字まで拡大した。Haikuは200k文脈でありパッチノート本文取得は新パッチ検知時のみ（月2回程度）と
+ * 呼び出し頻度が低いため、コスト増は許容範囲。
+ */
+export const PATCH_NOTES_MAX_LENGTH = 60000;
 
 /** Data Dragon の JSON を取得する。HTTPエラー・パース失敗・ネットワーク断はnullを返す（例外を投げない）。 */
 function fetchJson<T>(url: string): Promise<T | null> {
@@ -54,21 +59,57 @@ function decodeHtmlEntities(text: string): string {
 }
 
 /**
+ * 3件以上連続する「極端に短い(2文字以下)行」の並びをまとめて間引く（拡張E35 F-E35-1、best-effort）。
+ * ナビメニューのアイコンラベルや区切り記号の連続等のボイラープレートを想定した簡易ヒューリスティックで、
+ * 単発で現れる短い行（能力キー "Q" 等）は本文の可能性があるため残す。
+ */
+function dropShortFragmentRuns(lines: string[]): string[] {
+  const result: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].length <= 2) {
+      let j = i;
+      while (j < lines.length && lines[j].length <= 2) j++;
+      if (j - i >= 3) {
+        i = j; // 3件以上連続する短い断片はまとめて捨てる
+        continue;
+      }
+    }
+    result.push(lines[i]);
+    i++;
+  }
+  return result;
+}
+
+/** 直前の行と完全一致する行を間引く（ナビメニュー等で同じラベルが繰り返されるボイラープレート対策）。 */
+function dedupeConsecutiveLines(lines: string[]): string[] {
+  const result: string[] = [];
+  for (const line of lines) {
+    if (result.length > 0 && result[result.length - 1] === line) continue;
+    result.push(line);
+  }
+  return result;
+}
+
+/**
  * HTMLからタグ・script/styleを除去し、エンティティを復号したプレーンテキストを取り出す
  * （新規npm依存なし・正規表現ベース。拡張E34 F-E34-1）。空行は詰めて読みやすくする。
+ * 拡張E35 F-E35-1: ナビ・ヘッダー・フッター・サイドバー（<nav>/<header>/<footer>/<aside>）は
+ * タグ除去前に要素ごと丸ごと落とし、本文に無関係なボイラープレートテキストの混入を減らす
+ * （best-effort。完全な本文抽出は狙わず、後段のLLMプロンプト強化と合わせてノイズを許容する方針）。
  */
 function stripHtmlToText(html: string): string {
-  const withoutScripts = html
+  const withoutBoilerplateBlocks = html.replace(/<(nav|header|footer|aside)\b[^>]*>[\s\S]*?<\/\1>/gi, " ");
+  const withoutScripts = withoutBoilerplateBlocks
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ");
   const withoutTags = withoutScripts.replace(/<[^>]+>/g, "\n");
   const decoded = decodeHtmlEntities(withoutTags);
-  return decoded
+  const lines = decoded
     .split("\n")
     .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .join("\n")
-    .trim();
+    .filter((line) => line.length > 0);
+  return dedupeConsecutiveLines(dropShortFragmentRuns(lines)).join("\n").trim();
 }
 
 /**

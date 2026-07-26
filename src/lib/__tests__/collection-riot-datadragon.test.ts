@@ -133,6 +133,54 @@ describe("fetchPatchNotesText", () => {
     expect(text).not.toBeNull();
     expect(text!.length).toBe(PATCH_NOTES_MAX_LENGTH);
   });
+
+  it("PATCH_NOTES_MAX_LENGTHが拡大されており、旧上限(15000字)超だが新上限未満の本文は切り詰められず全文入りきる(拡張E35 F-E35-1)", async () => {
+    expect(PATCH_NOTES_MAX_LENGTH).toBeGreaterThan(15000);
+    const paragraph = "本パッチの実際の変更内容テキスト。".repeat(2000); // 15000字超・新上限未満
+    expect(paragraph.length).toBeGreaterThan(15000);
+    expect(paragraph.length).toBeLessThan(PATCH_NOTES_MAX_LENGTH);
+    vi.stubGlobal("fetch", vi.fn(async () => textResponse(`<p>${paragraph}</p>`)));
+    const text = await fetchPatchNotesText("14.6.1");
+    expect(text).not.toBeNull();
+    expect(text).toContain(paragraph);
+  });
+
+  it("nav/header/footer/asideのボイラープレートが除去され、本文相当のテキストは残る(拡張E35 F-E35-1)", async () => {
+    const paragraph = "本パッチではヤスオが強化され、ゼドが弱体化された。".repeat(15); // 300字超
+    const html =
+      "<html><body>" +
+      "<header><nav><a href='/'>ニュース</a><a href='/esports'>eスポーツ</a><a href='/wiki'>Wiki</a></nav></header>" +
+      `<main><h1>パッチノート</h1><p>${paragraph}</p></main>` +
+      "<aside><h3>関連記事</h3><a href='/x'>関連記事タイトルその1</a><a href='/y'>関連記事タイトルその2</a></aside>" +
+      "<footer><nav><a href='/terms'>利用規約</a><a href='/privacy'>プライバシー</a></nav></footer>" +
+      "</body></html>";
+    vi.stubGlobal("fetch", vi.fn(async () => textResponse(html)));
+    const text = await fetchPatchNotesText("14.6.1");
+    expect(text).not.toBeNull();
+    // 本文相当のテキストは残る
+    expect(text).toContain(paragraph);
+    expect(text).toContain("パッチノート");
+    // nav/header/footer/aside内のテキストはページから丸ごと落ちている
+    expect(text).not.toContain("ニュース");
+    expect(text).not.toContain("eスポーツ");
+    expect(text).not.toContain("Wiki");
+    expect(text).not.toContain("関連記事");
+    expect(text).not.toContain("利用規約");
+    expect(text).not.toContain("プライバシー");
+  });
+
+  it("極端に短い断片(2文字以下)が3件以上連続するボイラープレートは間引かれる(best-effort)", async () => {
+    const paragraph = "本パッチではヤスオが強化され、ゼドが弱体化された。".repeat(15); // 300字超
+    // ナビ的な短い断片の連続(タグに包まれていなくても、行としては短い断片が連続するケース)
+    const html =
+      `<div>Q<br/>W<br/>E<br/>R<br/></div><p>${paragraph}</p>`;
+    vi.stubGlobal("fetch", vi.fn(async () => textResponse(html)));
+    const text = await fetchPatchNotesText("14.6.1");
+    expect(text).not.toBeNull();
+    expect(text).toContain(paragraph);
+    // 4件連続する1文字断片(Q/W/E/R)は間引かれ、本文には残らない
+    expect(text).not.toMatch(/^Q$/m);
+  });
 });
 
 describe("RiotDataDragonAdapter.fetchItems", () => {
