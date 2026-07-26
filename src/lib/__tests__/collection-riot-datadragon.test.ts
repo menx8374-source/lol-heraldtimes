@@ -3,6 +3,8 @@ import {
   RiotDataDragonAdapter,
   buildPatchItem,
   buildPatchNoteUrl,
+  extractOgImageUrl,
+  fetchPatchNotesData,
   fetchPatchNotesText,
   PATCH_NOTES_MIN_LENGTH,
   PATCH_NOTES_MAX_LENGTH,
@@ -74,6 +76,54 @@ describe("純関数: buildPatchNoteUrl / buildPatchItem", () => {
     const withoutArg = buildPatchItem("14.6.1", new Date());
     expect(withNull.content).toBe(withoutArg.content);
     expect(withNull.title).toBe(withoutArg.title);
+  });
+
+  it("imageUrlが渡されるとRawCollectionItem.imageUrlに格納される(拡張E42 F-E42-1)", () => {
+    const imageUrl = "https://cmsassets.rgpub.io/sanity/images/patch-14-6-banner.jpg";
+    const item = buildPatchItem("14.6.1", new Date(), "実際のパッチノート本文。".repeat(30), imageUrl);
+    expect(item.imageUrl).toBe(imageUrl);
+  });
+
+  it("imageUrlが未指定/nullの場合はimageUrlが設定されない(回帰なし、拡張E42 F-E42-1)", () => {
+    const withoutImage = buildPatchItem("14.6.1", new Date(), "実際のパッチノート本文。".repeat(30));
+    expect(withoutImage.imageUrl).toBeFalsy();
+    const withNullImage = buildPatchItem("14.6.1", new Date(), "実際のパッチノート本文。".repeat(30), null);
+    expect(withNullImage.imageUrl).toBeFalsy();
+  });
+});
+
+describe("extractOgImageUrl（拡張E42 F-E42-1）", () => {
+  it("og:imageタグからcontentのURLを取り出す(&amp;を&に復号する)", () => {
+    const html =
+      '<html><head><meta property="og:image" content="https://cmsassets.rgpub.io/sanity/images/banner-1920x1087.jpg?w=1920&amp;auto=format" /></head></html>';
+    expect(extractOgImageUrl(html)).toBe(
+      "https://cmsassets.rgpub.io/sanity/images/banner-1920x1087.jpg?w=1920&auto=format",
+    );
+  });
+
+  it("属性の順序が違って(content先・property後)も取り出せる", () => {
+    const html = '<meta content="https://example.com/banner.jpg" property="og:image">';
+    expect(extractOgImageUrl(html)).toBe("https://example.com/banner.jpg");
+  });
+
+  it("シングルクォート属性でも取り出せる", () => {
+    const html = "<meta property='og:image' content='https://example.com/banner.jpg'>";
+    expect(extractOgImageUrl(html)).toBe("https://example.com/banner.jpg");
+  });
+
+  it("og:imageタグが無ければnullを返す", () => {
+    const html = '<html><head><meta property="og:title" content="タイトル" /></head></html>';
+    expect(extractOgImageUrl(html)).toBeNull();
+  });
+
+  it("og:imageのcontentがhttps以外(http)ならnullを返す", () => {
+    const html = '<meta property="og:image" content="http://example.com/banner.jpg">';
+    expect(extractOgImageUrl(html)).toBeNull();
+  });
+
+  it("og:imageのcontentが空/欠落ならnullを返す", () => {
+    const html = '<meta property="og:image">';
+    expect(extractOgImageUrl(html)).toBeNull();
   });
 });
 
@@ -183,6 +233,50 @@ describe("fetchPatchNotesText", () => {
   });
 });
 
+describe("fetchPatchNotesData（本文とog:imageを1回のfetchで取得, 拡張E42 F-E42-1）", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("本文が十分な長さ(PATCH_NOTES_MIN_LENGTH以上)のとき、textとimageUrlの両方を返す", async () => {
+    const paragraph = "本パッチではヤスオが強化され、ゼドが弱体化された。".repeat(15);
+    const html =
+      `<html><head><meta property="og:image" content="https://cmsassets.rgpub.io/sanity/images/banner.jpg?a=1&amp;b=2" /></head>` +
+      `<body><p>${paragraph}</p></body></html>`;
+    vi.stubGlobal("fetch", vi.fn(async () => textResponse(html)));
+    const data = await fetchPatchNotesData("14.6.1");
+    expect(data).not.toBeNull();
+    expect(data!.text).toContain(paragraph);
+    expect(data!.imageUrl).toBe("https://cmsassets.rgpub.io/sanity/images/banner.jpg?a=1&b=2");
+  });
+
+  it("og:imageタグが無ければimageUrlはnullになる(本文は取得できる)", async () => {
+    const paragraph = "本パッチではヤスオが強化され、ゼドが弱体化された。".repeat(15);
+    vi.stubGlobal("fetch", vi.fn(async () => textResponse(`<p>${paragraph}</p>`)));
+    const data = await fetchPatchNotesData("14.6.1");
+    expect(data).not.toBeNull();
+    expect(data!.imageUrl).toBeNull();
+  });
+
+  it("本文が短すぎる場合はnull(imageUrlも含めて取得できない扱い)を返す", async () => {
+    const html = '<meta property="og:image" content="https://example.com/banner.jpg"><div id="root"></div>';
+    vi.stubGlobal("fetch", vi.fn(async () => textResponse(html)));
+    await expect(fetchPatchNotesData("14.6.1")).resolves.toBeNull();
+  });
+
+  it("HTTPエラー・ネットワーク断の場合はnullを返す(例外を投げない)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => textResponse("", 500)));
+    await expect(fetchPatchNotesData("14.6.1")).resolves.toBeNull();
+  });
+
+  it("fetchPatchNotesTextはfetchPatchNotesDataのtextのみを返す薄いラッパである(回帰なし)", async () => {
+    const paragraph = "本パッチではヤスオが強化され、ゼドが弱体化された。".repeat(15);
+    vi.stubGlobal("fetch", vi.fn(async () => textResponse(`<p>${paragraph}</p>`)));
+    const text = await fetchPatchNotesText("14.6.1");
+    expect(text).toContain(paragraph);
+  });
+});
+
 describe("RiotDataDragonAdapter.fetchItems", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -224,6 +318,27 @@ describe("RiotDataDragonAdapter.fetchItems", () => {
     expect(items).toHaveLength(1);
     expect(items[0].title).toBe("【パッチ】14.6 の主な変更点まとめ");
     expect(items[0].content).toContain(paragraph);
+  });
+
+  it("公式パッチノート本文の取得に成功しog:imageもある場合、RawCollectionItem.imageUrlに設定される(拡張E42 F-E42-1)", async () => {
+    const paragraph = "ヤスオが強化され、ゼドが弱体化されるなどの変更が入った。".repeat(15);
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === VERSIONS_URL) return jsonResponse(["14.6.1", "14.5.1"]);
+      if (url === PATCH_NOTE_URL) {
+        return textResponse(
+          `<meta property="og:image" content="https://cmsassets.rgpub.io/sanity/images/banner.jpg">` +
+            `<p>${paragraph}</p>`,
+        );
+      }
+      throw new Error(`unexpected url: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new RiotDataDragonAdapter({ now: () => new Date("2026-07-25T00:00:00Z") });
+    const items = await adapter.fetchItems();
+
+    expect(items).toHaveLength(1);
+    expect(items[0].imageUrl).toBe("https://cmsassets.rgpub.io/sanity/images/banner.jpg");
   });
 
   it("公式パッチノート本文の取得に失敗した場合は従来の汎用contentにフォールバックする(例外を投げない)", async () => {

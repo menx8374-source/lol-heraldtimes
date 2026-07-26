@@ -43,12 +43,13 @@ async function withPatchMode<T>(mode: "fact" | "summary", fn: () => Promise<T>):
 }
 
 describe("composeArticleBody", () => {
-  it("Riot公式(riot)由来は既定(PATCH_ARTICLE_MODE未設定)で事実速報(見出し「パッチ<番号>が公開」＋事実段落＋出典)になる（拡張E41 F-E41-2）", async () => {
+  it("Riot公式(riot)由来は既定(PATCH_ARTICLE_MODE未設定)で事実速報(見出し「パッチ<番号>が公開」＋事実段落＋公式リンクボタン)になる（拡張E41 F-E41-2、拡張E42 F-E42-4）", async () => {
     const body = await composeArticleBody(
       {
         sourceType: "riot",
         title: "パッチ14.6ノート公開",
         content: "本パッチではジャングルモンスターの経験値量が全体的に引き下げられ、序盤のレベル差がつきにくくなる調整が入った。",
+        sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/game-updates/league-of-legends-patch-14-6-notes",
       },
       llm,
     );
@@ -60,6 +61,69 @@ describe("composeArticleBody", () => {
     const bodyText = body.map(blockText).join("");
     expect(bodyText).not.toContain("自動要約では");
     expect(bodyText).toContain("14.6");
+    // imageUrl未指定なら画像ブロックは省略され、末尾は公式リンクボタン(linkButton)になる（拡張E42）
+    expect(body.some((b) => b.type === "image")).toBe(false);
+    const linkButtons = body.filter((b) => b.type === "linkButton");
+    expect(linkButtons).toHaveLength(1);
+    expect(linkButtons[0].type === "linkButton" && linkButtons[0].url).toBe(
+      "https://www.leagueoflegends.com/ja-jp/news/game-updates/league-of-legends-patch-14-6-notes",
+    );
+    expect(linkButtons[0].type === "linkButton" && linkButtons[0].label).toContain("14.6");
+    expect(body[body.length - 1].type).toBe("linkButton");
+  });
+
+  it("imageUrl(安全なhttps)が渡されると本文先頭がimageブロックになり、見出し→段落→linkButtonの順で続く（拡張E42 F-E42-4）", async () => {
+    const body = await composeArticleBody(
+      {
+        sourceType: "riot",
+        title: "パッチ14.6ノート公開",
+        content: "本パッチではジャングルモンスターの経験値量が全体的に引き下げられ、序盤のレベル差がつきにくくなる調整が入った。",
+        sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/game-updates/league-of-legends-patch-14-6-notes",
+        imageUrl: "https://cmsassets.rgpub.io/sanity/images/patch-14-6-banner-1920x1087.jpg",
+      },
+      llm,
+    );
+    expect(body[0].type).toBe("image");
+    expect(body[0].type === "image" && body[0].url).toBe(
+      "https://cmsassets.rgpub.io/sanity/images/patch-14-6-banner-1920x1087.jpg",
+    );
+    expect(body[0].type === "image" && body[0].alt).toContain("14.6");
+    expect(body[0].type === "image" && body[0].credit).toContain("Riot Games");
+    expect(body[1]).toEqual({ type: "heading", text: "パッチ14.6が公開" });
+    expect(body.some((b) => b.type === "paragraph")).toBe(true);
+    expect(body[body.length - 1].type).toBe("linkButton");
+
+    // 本文blockText合計がMIN_BODY_LENGTH(300)以上で、generate-articleでGenerationErrorにならない
+    const totalLength = body.reduce((sum, b) => sum + blockText(b).length, 0);
+    expect(totalLength).toBeGreaterThanOrEqual(300);
+  });
+
+  it("imageUrlが不安全(http等)なら画像ブロックを省略する（拡張E42）", async () => {
+    const body = await composeArticleBody(
+      {
+        sourceType: "riot",
+        title: "パッチ14.6ノート公開",
+        content: "本パッチではジャングルモンスターの経験値量が全体的に引き下げられ、序盤のレベル差がつきにくくなる調整が入った。",
+        sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/game-updates/league-of-legends-patch-14-6-notes",
+        imageUrl: "http://cmsassets.rgpub.io/sanity/images/insecure.jpg",
+      },
+      llm,
+    );
+    expect(body.some((b) => b.type === "image")).toBe(false);
+  });
+
+  it("imageUrlが無い場合でも本文blockText合計がMIN_BODY_LENGTH(300)以上を満たす（拡張E42 F-E42-4）", async () => {
+    const body = await composeArticleBody(
+      {
+        sourceType: "riot",
+        title: "パッチ14.6ノート公開",
+        content: "本パッチではジャングルモンスターの経験値量が全体的に引き下げられ、序盤のレベル差がつきにくくなる調整が入った。",
+        sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/game-updates/league-of-legends-patch-14-6-notes",
+      },
+      llm,
+    );
+    const totalLength = body.reduce((sum, b) => sum + blockText(b).length, 0);
+    expect(totalLength).toBeGreaterThanOrEqual(300);
   });
 
   it("PATCH_ARTICLE_MODE=summaryのとき、riot由来(短い汎用content)は従来どおり「速報」→「要点整理」→「まとめ」の見出し構成になる(回帰なし)", async () => {

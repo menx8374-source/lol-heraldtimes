@@ -104,6 +104,24 @@ function ImageBlockView({ block }: { block: Extract<ArticleBodyBlock, { type: "i
   );
 }
 
+/** 大きく目立つボタン風の外部リンクブロック（拡張E42）。パッチ記事の公式パッチノートリンク等に使う。
+ * ラベルのみを表示しURL文字列は出さない（すっきりした見た目にする）。ダーク/ライト両対応、
+ * ホバーで少し暗くなる程度。外部リンクのため target="_blank" + rel="noopener noreferrer"。 */
+function LinkButtonBlockView({ block }: { block: Extract<ArticleBodyBlock, { type: "linkButton" }> }) {
+  return (
+    <div className="my-1 flex justify-center">
+      <a
+        href={block.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-block rounded-lg bg-sky-700 px-8 py-3 text-center text-base font-bold text-white shadow transition-colors hover:bg-sky-800 dark:bg-sky-600 dark:hover:bg-sky-500"
+      >
+        {block.label}
+      </a>
+    </div>
+  );
+}
+
 const EMBED_PROVIDER_ICON: Record<EmbedProvider, string> = { twitter: "X", youtube: "▶", clip: "🎬" };
 
 /**
@@ -245,6 +263,9 @@ export function ArticleBodyView({ blocks }: { blocks: ArticleBodyBlock[] }) {
         }
         if (block.type === "embed") {
           return <EmbedBlockView key={index} block={block} />;
+        }
+        if (block.type === "linkButton") {
+          return <LinkButtonBlockView key={index} block={block} />;
         }
         return (
           <p key={index} className="text-sm leading-relaxed sm:text-base">

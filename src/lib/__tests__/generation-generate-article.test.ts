@@ -148,6 +148,36 @@ describe("generateArticleForCandidate（サムネイル画像、拡張E19 F-E19-
   });
 });
 
+describe("generateArticleForCandidate（riotパッチ記事の公式バナー画像＋公式リンクボタン、拡張E42 F-E42-4/5）", () => {
+  const patchImageUrl = "https://cmsassets.rgpub.io/sanity/images/patch-14-6-banner-1920x1087.jpg";
+
+  it("imageUrl有りのriot記事は事実タイトルのまま生成でき、本文先頭がimageブロック・末尾がlinkButton、サムネがそのimageUrlになる", async () => {
+    const result = await generateArticleForCandidate(
+      candidate({ sourceType: "riot", imageUrl: patchImageUrl }),
+      llm,
+    );
+    expect(result.title).toBe(candidate().title); // riotは事実タイトルのまま(E40/E41、回帰なし)
+    expect(result.thumbnailUrl).toBe(patchImageUrl);
+    expect(result.body[0].type).toBe("image");
+    expect(result.body[0].type === "image" && result.body[0].url).toBe(patchImageUrl);
+    expect(result.body[result.body.length - 1].type).toBe("linkButton");
+    const totalLength = result.body.reduce((sum, b) => sum + blockText(b).length, 0);
+    expect(totalLength).toBeGreaterThanOrEqual(MIN_BODY_LENGTH);
+    // DBに保存する形式(JSON)としても壊れずパースできる
+    expect(() => parseArticleBody(result.body)).not.toThrow();
+  });
+
+  it("PATCH_ARTICLE_MODE=summaryのときはimageUrl有りでも本文構成が変わらない(画像・リンクボタンはfactモードのみ、回帰なし)", async () => {
+    const result = await withPatchMode("summary", () =>
+      generateArticleForCandidate(candidate({ sourceType: "riot", imageUrl: patchImageUrl }), llm),
+    );
+    expect(result.body.some((b) => b.type === "image")).toBe(false);
+    expect(result.body.some((b) => b.type === "linkButton")).toBe(false);
+    // サムネはfactモードと同様candidate.imageUrl優先のまま(回帰なし)
+    expect(result.thumbnailUrl).toBe(patchImageUrl);
+  });
+});
+
 describe("generateArticleForCandidate（チャンピオン検出→スプラッシュ、拡張E31 テスト3）", () => {
   // 実APIを叩かないよう、championMapはスタブを渡す(fetchChampionNameToIdMapは呼ばない)。
   const championMap = new Map([

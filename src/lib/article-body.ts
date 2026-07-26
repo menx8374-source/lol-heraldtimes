@@ -12,6 +12,9 @@
  * どちらも「実際の著作物を取り込まない」方針で、画像はローカルSVG/データURI/自サイト作成の
  * モック画像のみ許可し、埋め込みは実iframeを読み込まずプレースホルダーカードのみを表示する
  * （URLは provider ごとの正規ドメインのホワイトリストで検証、dangerouslySetInnerHTML は使わない）。
+ *
+ * ⚠ 拡張E42: `linkButton`（大きく目立つボタン風の外部リンク）ブロックを追加。パッチ記事で
+ * 公式パッチノートへ誘導するために使う。url は https のみ許可する。
  */
 import { isAllowedEmbedUrl, isEmbedProvider, type EmbedProvider } from "@/lib/embed";
 import { isSafeLocalAssetPath } from "@/lib/image-url";
@@ -58,13 +61,18 @@ export type ArticleBodyImageBlock = { type: "image"; url: string; alt: string; c
  * provider ごとの正規ドメインのホワイトリスト検証を行う。 */
 export type ArticleBodyEmbedBlock = { type: "embed"; provider: EmbedProvider; url: string; caption?: string };
 
+/** 大きく目立つボタン風の外部リンクブロック（拡張E42）。パッチ記事の公式パッチノートリンク等に使う。
+ * `url` は https のみ許可（`javascript:` 等は弾く）。`label` を表示しURL文字列自体は出さない。 */
+export type ArticleBodyLinkButtonBlock = { type: "linkButton"; url: string; label: string };
+
 export type ArticleBodyBlock =
   | { type: "heading"; text: string }
   | { type: "paragraph"; text: string }
   | { type: "quote"; text: string; source?: string }
   | ArticleBodyReactionBlock
   | ArticleBodyImageBlock
-  | ArticleBodyEmbedBlock;
+  | ArticleBodyEmbedBlock
+  | ArticleBodyLinkButtonBlock;
 
 export class InvalidArticleBodyError extends Error {
   constructor(message: string) {
@@ -168,6 +176,24 @@ function parseImageBlock(b: Record<string, unknown>, index: number): ArticleBody
   return { type: "image", url: b.url, alt: b.alt, ...(b.credit ? { credit: b.credit as string } : {}) };
 }
 
+/**
+ * linkButton ブロックの url として許可するスキームか（純関数、拡張E42）。https のみ許可し、
+ * `javascript:` `http:` 等の危険/非セキュアスキームは弾く（画像ブロックの isSafeImageUrl と同様の方針）。
+ */
+function isSafeLinkButtonUrl(url: string): boolean {
+  return /^https:\/\//i.test(url);
+}
+
+function parseLinkButtonBlock(b: Record<string, unknown>, index: number): ArticleBodyLinkButtonBlock {
+  if (typeof b.url !== "string" || b.url.trim().length === 0 || !isSafeLinkButtonUrl(b.url)) {
+    throw new InvalidArticleBodyError(`本文ブロック[${index}]のlinkButton urlが不正です（https必須）`);
+  }
+  if (typeof b.label !== "string" || b.label.trim().length === 0) {
+    throw new InvalidArticleBodyError(`本文ブロック[${index}]のlinkButton labelが空です`);
+  }
+  return { type: "linkButton", url: b.url, label: b.label };
+}
+
 function parseEmbedBlock(b: Record<string, unknown>, index: number): ArticleBodyEmbedBlock {
   if (!isEmbedProvider(b.provider)) {
     throw new InvalidArticleBodyError(`本文ブロック[${index}]の埋め込みproviderが不正です: ${String(b.provider)}`);
@@ -206,6 +232,9 @@ export function parseArticleBody(value: unknown): ArticleBodyBlock[] {
     }
     if (b.type === "embed") {
       return parseEmbedBlock(b, index);
+    }
+    if (b.type === "linkButton") {
+      return parseLinkButtonBlock(b, index);
     }
     if (typeof b.type !== "string" || !TEXT_TYPES.has(b.type)) {
       throw new InvalidArticleBodyError(
@@ -282,6 +311,9 @@ export function blockText(block: ArticleBodyBlock): string {
   }
   if (block.type === "embed") {
     return [block.caption, block.url].filter((s): s is string => Boolean(s)).join("\n");
+  }
+  if (block.type === "linkButton") {
+    return [block.label, block.url].join("\n");
   }
   return block.text;
 }

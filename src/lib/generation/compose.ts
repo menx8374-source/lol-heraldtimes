@@ -20,13 +20,16 @@ import { isAllowedEmbedUrl, embedProviderForUrl } from "@/lib/embed";
 import { findNgWord } from "@/lib/moderation/ng-words";
 import { PATCH_NOTES_MIN_LENGTH } from "@/lib/collection/adapters/riot-datadragon";
 import { CHAMPIONS } from "@/lib/generation/title";
+import { isSafeImageUrl } from "@/lib/image-url";
 
 export type GenerationCandidateInput = {
   sourceType: SourceType;
   title: string;
   content: string;
-  /** clip由来の埋め込みブロック構築にのみ使う出典URL（それ以外のソース種別では未使用）。 */
+  /** clip由来の埋め込みブロック構築・riot由来の公式パッチノートリンクにのみ使う出典URL（それ以外のソース種別では未使用）。 */
   sourceUrl?: string;
+  /** riot由来（拡張E42）: 公式パッチノートのメイン画像URL（og:image）。安全なhttps URLのみ本文冒頭の画像ブロックに使う。 */
+  imageUrl?: string | null;
 };
 
 /** レス投稿者の匿名化ハンドル（実名・個人特定情報は出さない）。ソース種別ごとに固定。 */
@@ -493,44 +496,67 @@ function extractPatchNumberLabel(candidate: GenerationCandidateInput): string | 
   return null;
 }
 
+/** 出典URLがボタンリンクに使える安全なhttps URLか（javascript:等の危険スキームを弾く）。 */
+function isHttpsUrl(url: string): boolean {
+  return /^https:\/\//i.test(url);
+}
+
 /**
  * riot（パッチ）記事を「事実速報」として組み立てる（拡張E41 F-E41-2、既定モード）。
- * LLMを使わず（factモードはLLM非依存・呼び出し増なし）、見出し「パッチ<番号>が公開」＋一般的な
- * 事実段落＋出典URLのみで構成する。謝罪文言（「自動要約では抽出できなかった」等）は入れず、
- * 具体的な数値・チャンピオン名も書かない（本文の長短に関わらず一般的な事実のみ＝捏造禁止）。
+ * LLMを使わず（factモードはLLM非依存・呼び出し増なし）、次の構成にする（拡張E42 F-E42-4）:
+ * 1. `candidate.imageUrl` が安全なhttps画像URLなら先頭に公式パッチノートのメイン画像ブロック
+ *    （出典クレジット併記＝hotlink表示、ローカル保存はしない）。
+ * 2. 見出し「パッチ<番号>が公開」。
+ * 3. 一般的な事実段落（具体的な数値・チャンピオン名は書かない＝捏造禁止）。
+ * 4. 出典URLが安全なhttpsなら大きく目立つ公式リンクボタン（linkButton）。
+ * 謝罪文言（「自動要約では抽出できなかった」等）は入れない。
  */
 function composePatchFactFlashBody(candidate: GenerationCandidateInput): ArticleBodyBlock[] {
   const patchNumber = extractPatchNumberLabel(candidate);
   const label = patchNumber ? `パッチ${patchNumber}` : "新しいパッチ";
   const sourceUrl = candidate.sourceUrl?.trim();
-  return [
-    { type: "heading", text: `${label}が公開` },
-    {
+  const blocks: ArticleBodyBlock[] = [];
+
+  if (isSafeImageUrl(candidate.imageUrl)) {
+    blocks.push({
+      type: "image",
+      url: candidate.imageUrl,
+      alt: `${label} 公式パッチノートのメイン画像`,
+      credit: "画像: Riot Games 公式パッチノートより",
+    });
+  }
+
+  blocks.push({ type: "heading", text: `${label}が公開` });
+  blocks.push({
+    type: "paragraph",
+    text:
+      `リーグ・オブ・レジェンドの${label}が公開されました。チャンピオンやアイテムのバランス調整が` +
+      "行われています。詳しい変更内容は公式パッチノートをご確認ください。",
+  });
+  blocks.push({
+    type: "paragraph",
+    text:
+      "パッチノートでは、チャンピオンやアイテムの数値調整のほか、必要に応じてバグ修正や新機能・" +
+      "イベントの告知が行われることもあります。対戦に影響のある変更を見逃さないよう、プレイ前に" +
+      "公式サイトの発表内容へ一度目を通しておくとよいでしょう。",
+  });
+  blocks.push({
+    type: "paragraph",
+    text:
+      "パッチの適用によって環境（メタ）が変化することもあるため、ランク戦などの対戦に挑む前に、" +
+      "今回のアップデート内容を把握しておくことをおすすめします。",
+  });
+
+  if (sourceUrl && isHttpsUrl(sourceUrl)) {
+    blocks.push({ type: "linkButton", url: sourceUrl, label: `▶ ${label} 公式パッチノートを読む` });
+  } else {
+    blocks.push({
       type: "paragraph",
-      text:
-        `リーグ・オブ・レジェンドの${label}が公開されました。チャンピオンやアイテムのバランス調整が` +
-        "行われています。詳しい変更内容は公式パッチノートをご確認ください。",
-    },
-    {
-      type: "paragraph",
-      text:
-        "パッチノートでは、チャンピオンやアイテムの数値調整のほか、必要に応じてバグ修正や新機能・" +
-        "イベントの告知が行われることもあります。対戦に影響のある変更を見逃さないよう、プレイ前に" +
-        "公式サイトの発表内容へ一度目を通しておくとよいでしょう。",
-    },
-    {
-      type: "paragraph",
-      text:
-        "パッチの適用によって環境（メタ）が変化することもあるため、ランク戦などの対戦に挑む前に、" +
-        "今回のアップデート内容を把握しておくことをおすすめします。",
-    },
-    {
-      type: "paragraph",
-      text: sourceUrl
-        ? `出典: ${sourceUrl}`
-        : "出典: Riot Games 公式サイトのパッチノートページをご確認ください。",
-    },
-  ];
+      text: "出典: Riot Games 公式サイトのパッチノートページをご確認ください。",
+    });
+  }
+
+  return blocks;
 }
 
 /**

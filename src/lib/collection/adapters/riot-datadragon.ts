@@ -113,12 +113,32 @@ function stripHtmlToText(html: string): string {
 }
 
 /**
- * 最新パッチの公式パッチノートページ本文テキストを取得する（拡張E34 F-E34-1）。
- * 取得失敗（HTTPエラー・ネット断・タイムアウト）・本文が短すぎる（JSレンダリング等で本文が
- * 取れていない、PATCH_NOTES_MIN_LENGTH未満）場合は null を返す（例外は投げない）。
- * トークン節約のため PATCH_NOTES_MAX_LENGTH で切り詰める。
+ * HTMLの `<meta property="og:image" content="...">` からメイン画像URLを抽出する純関数（拡張E42 F-E42-1）。
+ * `content` 値は既存 `decodeHtmlEntities` で `&amp;` 等を復号する（公式ページのog:imageは署名クエリに
+ * `&amp;` を含むことが確認済み）。https のもののみ採用し、それ以外（http/未検出/不正な値）は null を返す
+ * （例外は投げない）。
  */
-export async function fetchPatchNotesText(version: string): Promise<string | null> {
+export function extractOgImageUrl(html: string): string | null {
+  const match = html.match(/<meta[^>]+property=["']og:image["'][^>]*>/i);
+  if (!match) return null;
+  const contentMatch = match[0].match(/content=["']([^"']+)["']/i);
+  if (!contentMatch) return null;
+  const url = decodeHtmlEntities(contentMatch[1]).trim();
+  if (!/^https:\/\//i.test(url)) return null;
+  return url;
+}
+
+/**
+ * 最新パッチの公式パッチノートページから本文テキストと og:image（メイン画像URL）の両方を、
+ * 二重fetchを避けて1回のfetchで取得する（拡張E42 F-E42-1）。取得失敗（HTTPエラー・ネット断・
+ * タイムアウト）・本文が短すぎる（JSレンダリング等で本文が取れていない、PATCH_NOTES_MIN_LENGTH未満）
+ * 場合は null を返す（例外は投げない）。本文はトークン節約のため PATCH_NOTES_MAX_LENGTH で切り詰める。
+ * 画像は本文とは独立に判定し（本文が閾値未満でも og:image 自体は取得できることがあるが、本文が
+ * 無ければ呼び出し側は従来どおりフォールバックするため、本文が短すぎる場合は imageUrl も含めて null にする）。
+ */
+export async function fetchPatchNotesData(
+  version: string,
+): Promise<{ text: string; imageUrl: string | null } | null> {
   const url = buildPatchNoteUrl(version);
   // 公式サイトが空/既定UAのbotアクセスを弾くことがあるため、ブラウザ相当のUAを付ける（拡張E34c）。
   const html = await fetchTextSafe(
@@ -135,7 +155,18 @@ export async function fetchPatchNotesText(version: string): Promise<string | nul
   if (!html) return null;
   const text = stripHtmlToText(html);
   if (text.length < PATCH_NOTES_MIN_LENGTH) return null;
-  return text.length > PATCH_NOTES_MAX_LENGTH ? text.slice(0, PATCH_NOTES_MAX_LENGTH) : text;
+  const truncated = text.length > PATCH_NOTES_MAX_LENGTH ? text.slice(0, PATCH_NOTES_MAX_LENGTH) : text;
+  return { text: truncated, imageUrl: extractOgImageUrl(html) };
+}
+
+/**
+ * 最新パッチの公式パッチノートページ本文テキストを取得する（拡張E34 F-E34-1）。
+ * 取得失敗・本文が短すぎる場合は null を返す（例外は投げない）。内部では `fetchPatchNotesData` の
+ * 薄いラッパ（拡張E42 F-E42-1）。
+ */
+export async function fetchPatchNotesText(version: string): Promise<string | null> {
+  const data = await fetchPatchNotesData(version);
+  return data ? data.text : null;
 }
 
 /** バージョン文字列（例 "14.6.1"）から「major.minor」部分を取り出す（パッチ単位の一意性に使う）。 */
@@ -170,8 +201,15 @@ export function buildPatchNoteUrl(version: string): string {
  * `patchNotesText` に PATCH_NOTES_MIN_LENGTH 以上の本文が渡された場合（拡張E34 F-E34-1）は、
  * それを content にそのまま格納し、タイトルも「まとめ」と分かる形にする（compose.ts側のLLM要約の
  * 材料になる）。未指定/短すぎる場合は従来どおりの汎用事実速報になる（バランス数値等は含めない）。
+ * `imageUrl`（拡張E42 F-E42-1）が渡された場合は `RawCollectionItem.imageUrl` に格納する
+ * （記事本文冒頭の公式バナー画像・カードサムネの材料になる。未指定なら従来どおり未設定）。
  */
-export function buildPatchItem(version: string, now: Date, patchNotesText?: string | null): RawCollectionItem {
+export function buildPatchItem(
+  version: string,
+  now: Date,
+  patchNotesText?: string | null,
+  imageUrl?: string | null,
+): RawCollectionItem {
   // タイトル表示はユーザーが認識する公式番号（例 26.14）を使う（DDragonの16.14ではなく。拡張E34c）。
   const patchLabel = publicPatchNumber(version);
   const hasPatchNotes = typeof patchNotesText === "string" && patchNotesText.length >= PATCH_NOTES_MIN_LENGTH;
@@ -184,6 +222,7 @@ export function buildPatchItem(version: string, now: Date, patchNotesText?: stri
       ? (patchNotesText as string)
       : `Riot Games の Data Dragon にて、パッチ ${patchLabel}（内部バージョン ${version}）のゲームデータが公開された。最新バージョンのチャンピオン・アイテム等のデータが利用可能になっている。`,
     fetchedAt: now,
+    ...(imageUrl ? { imageUrl } : {}),
   };
 }
 
@@ -209,10 +248,11 @@ export class RiotDataDragonAdapter implements SourceAdapter {
     if (!versions || versions.length === 0) return [];
     const latestVersion = versions[0];
 
-    // 公式パッチノート本文を取得できれば content に格納する（拡張E34 F-E34-1）。
-    // 取得失敗・本文が短すぎる場合は null が返り、buildPatchItem が従来の汎用contentにフォールバックする。
-    const patchNotesText = await fetchPatchNotesText(latestVersion);
+    // 公式パッチノート本文＋公式バナー画像URLを取得できれば content/imageUrl に格納する
+    // （拡張E34 F-E34-1、拡張E42 F-E42-1）。取得失敗・本文が短すぎる場合は null が返り、
+    // buildPatchItem が従来の汎用contentにフォールバックする（画像も未設定になる）。
+    const patchNotesData = await fetchPatchNotesData(latestVersion);
 
-    return [buildPatchItem(latestVersion, now, patchNotesText)];
+    return [buildPatchItem(latestVersion, now, patchNotesData?.text, patchNotesData?.imageUrl)];
   }
 }

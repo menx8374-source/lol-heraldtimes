@@ -297,6 +297,36 @@ describe("parseArticleBody", () => {
       parseArticleBody([{ type: "embed", provider: "twitter", url: "http://twitter.com/x/status/1" }]),
     ).toThrow(InvalidArticleBodyError);
   });
+
+  it("linkButtonブロックをパースできる(url/label, 拡張E42)", () => {
+    const input = [
+      {
+        type: "linkButton",
+        url: "https://www.leagueoflegends.com/ja-jp/news/game-updates/league-of-legends-patch-26-14-notes",
+        label: "▶ パッチ26.14 公式パッチノートを読む",
+      },
+    ];
+    const result = parseArticleBody(input);
+    expect(result[0]).toEqual(input[0]);
+  });
+
+  it("linkButtonブロックのurlがhttpならエラーを投げる(拡張E42、https必須)", () => {
+    expect(() =>
+      parseArticleBody([{ type: "linkButton", url: "http://example.com/patch-notes", label: "公式サイトへ" }]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
+  it("linkButtonブロックのurlがjavascript:スキームならエラーを投げる(拡張E42)", () => {
+    expect(() =>
+      parseArticleBody([{ type: "linkButton", url: "javascript:alert(1)", label: "危険リンク" }]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
+  it("linkButtonブロックのlabelが空ならエラーを投げる(拡張E42)", () => {
+    expect(() =>
+      parseArticleBody([{ type: "linkButton", url: "https://example.com/", label: "" }]),
+    ).toThrow(InvalidArticleBodyError);
+  });
 });
 
 describe("blockText", () => {
@@ -338,6 +368,12 @@ describe("blockText", () => {
     expect(
       blockText({ type: "embed", provider: "youtube", url: "https://youtu.be/abc", caption: "サンプル動画" }),
     ).toBe("サンプル動画\nhttps://youtu.be/abc");
+  });
+
+  it("linkButtonはlabel＋urlを改行連結して返す(拡張E42、検索・文字数計算・安全フィルタ対象に含める)", () => {
+    expect(
+      blockText({ type: "linkButton", url: "https://example.com/patch-notes", label: "公式パッチノートを読む" }),
+    ).toBe("公式パッチノートを読む\nhttps://example.com/patch-notes");
   });
 });
 

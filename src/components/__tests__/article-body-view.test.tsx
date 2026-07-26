@@ -135,6 +135,34 @@ describe("ArticleBodyView（画像ブロック, 拡張E3）", () => {
   });
 });
 
+describe("ArticleBodyView（linkButtonブロック, 拡張E42）", () => {
+  it("<a>にhref/target=_blank/rel=noopener noreferrerを設定し、labelを表示する(URL文字列自体は出さない)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "linkButton", url: "https://www.leagueoflegends.com/patch-notes", label: "▶ パッチ26.14 公式パッチノートを読む" },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain('href="https://www.leagueoflegends.com/patch-notes"');
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="noopener noreferrer"');
+    expect(html).toContain("▶ パッチ26.14 公式パッチノートを読む");
+    // URLの文字列自体は表示テキストとしては出さない(hrefのみ)
+    expect(html.replace('href="https://www.leagueoflegends.com/patch-notes"', "")).not.toContain(
+      "https://www.leagueoflegends.com/patch-notes",
+    );
+  });
+
+  it("画像ブロックは従来どおり<img>で描画される(linkButtonと混在しても回帰なし)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "image", url: "https://example.com/banner.jpg", alt: "バナー画像" },
+      { type: "linkButton", url: "https://example.com/notes", label: "公式サイトへ" },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain('src="https://example.com/banner.jpg"');
+    expect(html).toContain("公式サイトへ");
+    expect(html.indexOf("<img")).toBeLessThan(html.indexOf("公式サイトへ"));
+  });
+});
+
 describe("ArticleBodyView（埋め込みブロック, 拡張E3）", () => {
   it("正当なprovider/urlはプレースホルダーカードとして表示し、元URLへのリンクと注記を含む", () => {
     const blocks: ArticleBodyBlock[] = [
