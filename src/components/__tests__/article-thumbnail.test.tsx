@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ArticleThumbnail } from "@/components/article-thumbnail";
+import { pickDeterministicChampionSplashUrl } from "@/lib/generation/champion-splash";
 
 describe("ArticleThumbnail（拡張E31 テスト4: カテゴリ別既定画像フォールバック）", () => {
   it("thumbnailUrlが有効なURLならそれをそのまま表示する", () => {
@@ -38,5 +39,52 @@ describe("ArticleThumbnail（拡張E31 テスト4: カテゴリ別既定画像�
       <ArticleThumbnail thumbnailUrl={null} category="未知のカテゴリ" />,
     );
     expect(unknownCategoryHtml).toContain('src="/default-thumb.svg"');
+  });
+});
+
+describe("ArticleThumbnail（拡張E38 テスト3: 反応記事サムネの表示側フォールバック）", () => {
+  it("thumbnailUrl=null + 反応カテゴリ + slug指定 → チャンピオンスプラッシュ(_0.jpg)を表示する（カテゴリSVGではない）", () => {
+    const slug = "reaction-article-slug-1";
+    const html = renderToStaticMarkup(
+      <ArticleThumbnail thumbnailUrl={null} category="5chの反応" slug={slug} />,
+    );
+    const expectedSrc = pickDeterministicChampionSplashUrl(slug);
+    expect(expectedSrc).toMatch(/splash\/[A-Za-z]+_0\.jpg$/);
+    expect(html).toContain(`src="${expectedSrc}"`);
+    expect(html).not.toContain("/default-thumb-5ch.svg");
+  });
+
+  it("同じslugなら常に同じsrcになる（決定論）", () => {
+    const slug = "reaction-article-slug-2";
+    const html1 = renderToStaticMarkup(
+      <ArticleThumbnail thumbnailUrl={null} category="海外の反応" slug={slug} />,
+    );
+    const html2 = renderToStaticMarkup(
+      <ArticleThumbnail thumbnailUrl={null} category="海外の反応" slug={slug} />,
+    );
+    expect(html1).toBe(html2);
+  });
+
+  it("thumbnailUrl=null + 非反応カテゴリ(パッチ/メタ) + slug指定 → 従来どおりカテゴリSVG", () => {
+    const html = renderToStaticMarkup(
+      <ArticleThumbnail thumbnailUrl={null} category="パッチ/メタ" slug="some-slug" />,
+    );
+    expect(html).toContain('src="/default-thumb-patch-meta.svg"');
+  });
+
+  it("thumbnailUrl=有効なURL + 反応カテゴリ → 保存済みthumbnailUrlを優先する（回帰なし）", () => {
+    const html = renderToStaticMarkup(
+      <ArticleThumbnail
+        thumbnailUrl="https://example.com/saved.jpg"
+        category="5chの反応"
+        slug="some-slug"
+      />,
+    );
+    expect(html).toContain('src="https://example.com/saved.jpg"');
+  });
+
+  it("thumbnailUrl=null + 反応カテゴリ + slug未指定 → 安全側でカテゴリSVGにフォールバックする", () => {
+    const html = renderToStaticMarkup(<ArticleThumbnail thumbnailUrl={null} category="5chの反応" />);
+    expect(html).toContain('src="/default-thumb-5ch.svg"');
   });
 });

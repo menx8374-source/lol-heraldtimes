@@ -11,6 +11,8 @@ import { GET as getFeed } from "@/app/feed.xml/route";
 import { generateMetadata as generateArticleMetadata } from "@/app/articles/[slug]/page";
 import { generateMetadata as generateCategoryMetadata } from "@/app/category/[slug]/page";
 import { metadata as rootMetadata } from "@/app/layout";
+import { pickDeterministicChampionSplashUrl } from "@/lib/generation/champion-splash";
+import { getSiteUrl } from "@/lib/site";
 
 async function resetDb() {
   await prisma.articleSource.deleteMany();
@@ -202,6 +204,36 @@ describe("ページごとのタイトル固有性（F13）", () => {
 
     expect(rootTitle).toBeTruthy();
     expect(rootTitle).not.toBe(metaArticle.title);
+  });
+});
+
+describe("記事OG画像のフォールバック（拡張E38 テスト4: 反応記事サムネの表示側フォールバック）", () => {
+  it("反応カテゴリ + thumbnailUrl未設定 → slugから決定論的に選んだチャンピオンスプラッシュの絶対URLになる", async () => {
+    const meta = await generateArticleMetadata({
+      params: Promise.resolve({ slug: "published-article-b" }), // category: 5chの反応, thumbnailUrl未設定
+    });
+    const expectedImage = pickDeterministicChampionSplashUrl("published-article-b");
+    expect(meta.openGraph?.images).toEqual([{ url: expectedImage }]);
+    expect(expectedImage).toMatch(/^https:\/\/ddragon\.leagueoflegends\.com\/.+_0\.jpg$/);
+  });
+
+  it("非反応カテゴリ + thumbnailUrl未設定 → 従来どおりサイト既定のOGP画像になる", async () => {
+    const meta = await generateArticleMetadata({
+      params: Promise.resolve({ slug: "published-article-a" }), // category: パッチ/メタ, thumbnailUrl未設定
+    });
+    const siteUrl = getSiteUrl();
+    expect(meta.openGraph?.images).toEqual([{ url: `${siteUrl}/og-default.svg` }]);
+  });
+
+  it("thumbnailUrlが保存済みならカテゴリによらずそれを優先する（回帰なし）", async () => {
+    await prisma.article.update({
+      where: { slug: "published-article-b" },
+      data: { thumbnailUrl: "https://example.com/saved-thumb.jpg" },
+    });
+    const meta = await generateArticleMetadata({
+      params: Promise.resolve({ slug: "published-article-b" }),
+    });
+    expect(meta.openGraph?.images).toEqual([{ url: "https://example.com/saved-thumb.jpg" }]);
   });
 });
 

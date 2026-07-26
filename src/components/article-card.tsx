@@ -18,6 +18,7 @@ export function ArticleCard({ article }: { article: ArticleSummary }) {
       <ArticleThumbnail
         thumbnailUrl={article.thumbnailUrl}
         category={article.category}
+        slug={article.slug}
         className="h-16 w-16 shrink-0 rounded-md sm:h-24 sm:w-40 md:h-28 md:w-48"
       />
       <div className="min-w-0 flex-1">

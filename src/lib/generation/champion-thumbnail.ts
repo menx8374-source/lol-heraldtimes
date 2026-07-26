@@ -10,6 +10,7 @@
  * 実際の呼び出し頻度の抑制は呼び出し側の責務とする。
  */
 import { fetchJsonSafe } from "@/lib/collection/adapters/http";
+import { buildChampionSplashUrl, pickDeterministicChampionSplashUrl } from "@/lib/generation/champion-splash";
 
 const VERSIONS_URL = "https://ddragon.leagueoflegends.com/api/versions.json";
 const CHAMPION_JSON_LOCALE = "ja_JP";
@@ -20,13 +21,10 @@ type DDragonChampionJson = { data: Record<string, DDragonChampionEntry> };
 /** 表示名（日本語/英語）→ championId の対応表。 */
 export type ChampionNameToIdMap = ReadonlyMap<string, string>;
 
-/**
- * チャンピオンの公式スプラッシュ画像URL（1枚目, `_0`）を組み立てる。
- * 単純なURLテンプレートで、キー不要の公開CDN（拡張E20で一度削除したが本スプリントで再定義）。
- */
-export function buildChampionSplashUrl(championId: string): string {
-  return `https://ddragon.leagueoflegends.com/cdn/img/champion/splash/${championId}_0.jpg`;
-}
+// buildChampionSplashUrl・pickDeterministicChampionSplashUrl は拡張E38 F-E38-1で
+// http非依存の純粋モジュール @/lib/generation/champion-splash に切り出した。
+// 既存の import 元（generate-article.ts 等）がパス変更不要なようここで re-export する。
+export { buildChampionSplashUrl, pickDeterministicChampionSplashUrl };
 
 /**
  * ID不規則なチャンピオンを中心とした、表示名(日本語) → championId のフォールバック表。
@@ -235,60 +233,6 @@ export async function fetchChampionNameToIdMap(): Promise<ChampionNameToIdMap> {
     map.set(champ.id, champ.id); // 英語表記(id)そのものの本文でも検出できるようにする
   }
   return map;
-}
-
-/**
- * 決定論的フォールバック（拡張E37 F-E37-1）用の、見栄えのする代表チャンピオンID固定プール。
- * いずれも `_0`（1枚目）の公式スプラッシュが確実に存在するchampionId。
- */
-const CURATED_SPLASH_CHAMPION_IDS: readonly string[] = [
-  "Ahri",
-  "Yasuo",
-  "Jinx",
-  "LeeSin",
-  "Lux",
-  "Ezreal",
-  "Zed",
-  "Katarina",
-  "MissFortune",
-  "Thresh",
-  "Garen",
-  "Darius",
-  "Vayne",
-  "Kaisa",
-  "Yone",
-  "Sett",
-  "Viego",
-  "Jhin",
-  "Akali",
-  "Riven",
-  "Irelia",
-  "Lucian",
-  "Kindred",
-  "Aphelios",
-];
-
-/**
- * key（記事の安定キー。candidate.id を渡す想定）から決定論的にプール内indexを選ぶ。
- * `Math.random`・`Date.now` は使わない（同じkeyなら常に同じindexになる）。
- */
-function deterministicIndex(key: string, poolLength: number): number {
-  let sum = 0;
-  for (let i = 0; i < key.length; i++) {
-    sum += key.charCodeAt(i);
-  }
-  return sum % poolLength;
-}
-
-/**
- * 反応記事（5ch/reddit）でチャンピオンが未検出のときの決定論フォールバック（拡張E37 F-E37-1）。
- * key（candidate.id）ごとに固定プールから1体を安定して選び、公式スプラッシュURLを返す。
- * 同じkeyなら常に同じチャンピオン、異なるkeyならプール内で分散する。
- * 実ネット非依存（URL文字列を組み立てるだけ）。
- */
-export function pickDeterministicChampionSplashUrl(key: string): string {
-  const index = deterministicIndex(key, CURATED_SPLASH_CHAMPION_IDS.length);
-  return buildChampionSplashUrl(CURATED_SPLASH_CHAMPION_IDS[index]);
 }
 
 /**

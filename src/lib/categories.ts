@@ -44,3 +44,16 @@ export function categorySlugFor(category: string): string | undefined {
 export function categoryLabelForSlug(slug: string): CategoryLabel | undefined {
   return SLUG_TO_CATEGORY_LABEL[slug];
 }
+
+/**
+ * 反応記事（掲示板/SNSの反応をまとめた記事）のカテゴリラベル一覧（拡張E38 F-E38-2）。
+ * `CATEGORY_GRADIENTS` のラベルを唯一の source of truth とし、反応カテゴリ判定のための
+ * マジック文字列の散在を防ぐ。
+ */
+export const REACTION_CATEGORY_LABELS: readonly CategoryLabel[] = ["5chの反応", "海外の反応"];
+
+/** category が反応カテゴリ（5chの反応/海外の反応）かどうかを判定する。 */
+export function isReactionCategory(category: string | null | undefined): boolean {
+  if (!category) return false;
+  return (REACTION_CATEGORY_LABELS as readonly string[]).includes(category);
+}

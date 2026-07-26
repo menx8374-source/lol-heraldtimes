@@ -6,7 +6,8 @@ import {
   incrementViewCount,
   listRelatedArticles,
 } from "@/lib/articles";
-import { categorySlugFor } from "@/lib/categories";
+import { categorySlugFor, isReactionCategory } from "@/lib/categories";
+import { pickDeterministicChampionSplashUrl } from "@/lib/generation/champion-splash";
 import { buildArticleDescription, toSafeJsonLd } from "@/lib/seo";
 import { getSiteUrl, SITE_NAME } from "@/lib/site";
 import { ArticleBodyView } from "@/components/article-body-view";
@@ -25,10 +26,26 @@ type Props = {
   params: Promise<{ slug: string }>;
 };
 
-/** thumbnailUrl（未設定時はサイト既定のOGP画像）から絶対URLの画像URLを作る。 */
-function resolveOgImageUrl(siteUrl: string, thumbnailUrl: string | null): string {
-  if (!thumbnailUrl) return `${siteUrl}/og-default.svg`;
-  return thumbnailUrl.startsWith("http") ? thumbnailUrl : `${siteUrl}${thumbnailUrl}`;
+/**
+ * thumbnailUrl から絶対URLのOGP画像URLを作る（拡張E38 F-E38-4）。
+ * thumbnailUrl が無く、かつ反応カテゴリ（5chの反応/海外の反応）のときは、E37より前に
+ * 生成された既存記事も再生成なしでチャンピオンアートのOG画像になるよう、slugから決定論的に
+ * 選んだチャンピオンの公式スプラッシュ（既にhttps絶対URL）を返す。それ以外（非反応カテゴリ・
+ * slug無し）は従来どおりサイト既定のOGP画像。
+ */
+function resolveOgImageUrl(
+  siteUrl: string,
+  thumbnailUrl: string | null,
+  category: string,
+  slug: string,
+): string {
+  if (thumbnailUrl) {
+    return thumbnailUrl.startsWith("http") ? thumbnailUrl : `${siteUrl}${thumbnailUrl}`;
+  }
+  if (isReactionCategory(category) && slug) {
+    return pickDeterministicChampionSplashUrl(slug);
+  }
+  return `${siteUrl}/og-default.svg`;
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -41,7 +58,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const siteUrl = getSiteUrl();
   const url = `${siteUrl}/articles/${article.slug}`;
   const description = buildArticleDescription(article.body);
-  const imageUrl = resolveOgImageUrl(siteUrl, article.thumbnailUrl);
+  const imageUrl = resolveOgImageUrl(siteUrl, article.thumbnailUrl, article.category, article.slug);
 
   return {
     title: article.title,
@@ -82,7 +99,7 @@ export default async function ArticlePage({ params }: Props) {
     datePublished: article.publishedAt.toISOString(),
     articleSection: article.category,
     mainEntityOfPage: { "@type": "WebPage", "@id": articleUrl },
-    image: [resolveOgImageUrl(siteUrl, article.thumbnailUrl)],
+    image: [resolveOgImageUrl(siteUrl, article.thumbnailUrl, article.category, article.slug)],
     publisher: { "@type": "Organization", name: SITE_NAME },
   };
 

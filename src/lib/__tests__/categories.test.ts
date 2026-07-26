@@ -3,6 +3,7 @@ import {
   CATEGORY_LABELS,
   categoryLabelForSlug,
   categorySlugFor,
+  isReactionCategory,
 } from "@/lib/categories";
 
 describe("カテゴリ整理（拡張E19 F-E19-1/2）", () => {
@@ -31,5 +32,23 @@ describe("categorySlugFor / categoryLabelForSlug", () => {
 
   it("未知のスラッグは undefined を返す", () => {
     expect(categoryLabelForSlug("unknown-slug")).toBeUndefined();
+  });
+});
+
+describe("isReactionCategory（拡張E38 テスト2）", () => {
+  it("「5chの反応」「海外の反応」はtrue", () => {
+    expect(isReactionCategory("5chの反応")).toBe(true);
+    expect(isReactionCategory("海外の反応")).toBe(true);
+  });
+
+  it("「パッチ/メタ」「eスポーツ」「未知」はfalse", () => {
+    expect(isReactionCategory("パッチ/メタ")).toBe(false);
+    expect(isReactionCategory("eスポーツ")).toBe(false);
+    expect(isReactionCategory("未知のカテゴリ")).toBe(false);
+  });
+
+  it("null/undefinedはfalse", () => {
+    expect(isReactionCategory(null)).toBe(false);
+    expect(isReactionCategory(undefined)).toBe(false);
   });
 });
