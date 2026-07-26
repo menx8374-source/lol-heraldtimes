@@ -183,6 +183,53 @@ describe("generateArticleForCandidate（チャンピオン検出→スプラッ�
   });
 });
 
+describe("generateArticleForCandidate（riot公式パッチノートのまとめ記事、拡張E34 F-E34-2）", () => {
+  const patchNotesContent = "実際のパッチノート本文らしいテキスト。".repeat(30);
+  const validSummaryJson = JSON.stringify({
+    buffed: [
+      "ヤスオ: 基本攻撃力が4から8に引き上げられ、序盤のレーン戦の主導権を握りやすくなり、対面のマッチアップで有利に立ち回りやすくなった。",
+      "アーリ: Qのクールダウンが1秒短縮され、連続でスキルを使いやすくなり、コンボの継続力が上がった。",
+    ],
+    nerfed: [
+      "ゼド: シールドスキルの吸収量が20から15に引き下げられ、ダイブ後の生存力がやや下がった。",
+      "カタリナ: リセット可能な条件が厳しくなり、連続でキルを取ることが難しくなった。",
+    ],
+    other: [
+      "インフィニティエッジ: 価格が3400から3300に引き下げられ、序盤から購入しやすくなった。",
+      "ジャングルモンスターの経験値量が全体的に引き下げられ、序盤のレベル差がつきにくくなった。",
+    ],
+  });
+
+  class StubLLMClient implements LLMClient {
+    constructor(private readonly response: string) {}
+    async generate(): Promise<string> {
+      return this.response;
+    }
+  }
+
+  it("実パッチノート本文＋要約できるLLMのとき、まとめ体裁の記事が生成され出典URLが付与される", async () => {
+    const stub = new StubLLMClient(validSummaryJson);
+    const result = await generateArticleForCandidate(
+      candidate({ content: patchNotesContent, title: "パッチ14.6ノート公開" }),
+      stub,
+    );
+    const headings = result.body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headings).toEqual(["主な強化チャンピオン", "主な弱体チャンピオン", "アイテム・その他の変更"]);
+    expect(result.category).toBe("パッチ/メタ");
+    expect(result.sources[0].url).toBe(candidate().sourceUrl);
+  });
+
+  it("実パッチノート本文だがLLMが要約できない(mock)場合でも、GenerationErrorにならず従来の速報記事が生成される", async () => {
+    const result = await generateArticleForCandidate(
+      candidate({ content: patchNotesContent, title: "パッチ14.6ノート公開" }),
+      llm,
+    );
+    const headings = result.body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headings).toEqual(["速報", "要点整理", "まとめ"]);
+    expect(result.sources[0].url).toBe(candidate().sourceUrl);
+  });
+});
+
 describe("generateArticleForCandidate（失敗パス）", () => {
   it("出典URLが無い候補はGenerationErrorになる", async () => {
     await expect(generateArticleForCandidate(candidate({ sourceUrl: "" }), llm)).rejects.toBeInstanceOf(

@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { composeArticleBody } from "@/lib/generation/compose";
 import { MockLLMClient, type LLMClient, type LLMMessage } from "@/lib/generation/llm-client";
-import { hasStructuredHeadings } from "@/lib/article-body";
+import { hasStructuredHeadings, blockText } from "@/lib/article-body";
 import { moderateArticleContent } from "@/lib/moderation/moderate";
 import { findNgWord } from "@/lib/moderation/ng-words";
 import { bodyBlocksToText } from "@/lib/search";
+import { computeVerbatimMatchRatio } from "@/lib/generation/verbatim";
 
 const llm = new MockLLMClient();
 
@@ -577,6 +578,171 @@ describe("composeArticleBody（長レスのレス内文抽出、拡張E28 F-E28-
     expect(res.type === "reaction" && res.lines[1].emphasis).toBe("red");
     expect(res.type === "reaction" && res.lines[0].emphasis).toBe("orange");
     expect(res.type === "reaction" && res.emphasis).toBe(true);
+  });
+});
+
+describe("composeArticleBody（riot公式パッチノートのまとめ記事生成、拡張E34 F-E34-2）", () => {
+  // PATCH_NOTES_MIN_LENGTH(300字)以上の「実パッチノート本文らしいcontent」(汎用の短いcontentとは別物)。
+  const patchNotesContent = "実際のパッチノート本文らしいテキスト。".repeat(30);
+
+  const validSummaryJson = JSON.stringify({
+    buffed: [
+      "ヤスオ: 基本攻撃力が4から8に引き上げられ、序盤のレーン戦の主導権を握りやすくなり、対面のマッチアップで有利に立ち回りやすくなった。",
+      "アーリ: Qのクールダウンが1秒短縮され、連続でスキルを使いやすくなり、コンボの継続力が上がった。",
+    ],
+    nerfed: [
+      "ゼド: シールドスキルの吸収量が20から15に引き下げられ、ダイブ後の生存力がやや下がった。",
+      "カタリナ: リセット可能な条件が厳しくなり、連続でキルを取ることが難しくなった。",
+    ],
+    other: [
+      "インフィニティエッジ: 価格が3400から3300に引き下げられ、序盤から購入しやすくなった。",
+      "ジャングルモンスターの経験値量が全体的に引き下げられ、序盤のレベル差がつきにくくなった。",
+    ],
+  });
+
+  it("content が実パッチノート本文のとき、スタブLLMの要約が「まとめ体裁」本文(見出し＋要約)になる", async () => {
+    const stub = new StubLLMClient(validSummaryJson);
+    const body = await composeArticleBody(
+      { sourceType: "riot", title: "パッチ14.6ノート公開", content: patchNotesContent },
+      stub,
+    );
+    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headings).toEqual(["主な強化チャンピオン", "主な弱体チャンピオン", "アイテム・その他の変更"]);
+    // 見出し「速報」「要点整理」等の従来フォーマットにはならない(まとめ体裁への切り替わりを確認)
+    expect(headings).not.toContain("速報");
+    // 本文に要約テキストがそのまま含まれる(捏造ではなくLLMの要約結果を使っている)
+    const paragraphs = body.filter((b) => b.type === "paragraph").map((b) => b.text);
+    expect(paragraphs).toEqual([
+      "ヤスオ: 基本攻撃力が4から8に引き上げられ、序盤のレーン戦の主導権を握りやすくなり、対面のマッチアップで有利に立ち回りやすくなった。",
+      "アーリ: Qのクールダウンが1秒短縮され、連続でスキルを使いやすくなり、コンボの継続力が上がった。",
+      "ゼド: シールドスキルの吸収量が20から15に引き下げられ、ダイブ後の生存力がやや下がった。",
+      "カタリナ: リセット可能な条件が厳しくなり、連続でキルを取ることが難しくなった。",
+      "インフィニティエッジ: 価格が3400から3300に引き下げられ、序盤から購入しやすくなった。",
+      "ジャングルモンスターの経験値量が全体的に引き下げられ、序盤のレベル差がつきにくくなった。",
+    ]);
+    // quoteブロックは使わない(まとめ体裁は見出し＋要約段落のみ)
+    expect(body.some((b) => b.type === "quote")).toBe(false);
+
+    // 本文最低文字数(300字)・逐語一致率・引用比率(generate-article.ts の受け入れ基準)を満たす
+    const totalLength = body.reduce((sum, b) => sum + blockText(b).length, 0);
+    expect(totalLength).toBeGreaterThanOrEqual(300);
+    const generatedText = body.map(blockText).join("");
+    expect(computeVerbatimMatchRatio(generatedText, patchNotesContent)).toBeLessThanOrEqual(0.5);
+  });
+
+  it("出典URL(sourceUrl)を伴う候補から生成しても、生成本文自体には変化がなく既存の出典付与(generate-article.ts)と組み合わせられる", async () => {
+    const stub = new StubLLMClient(validSummaryJson);
+    const body = await composeArticleBody(
+      {
+        sourceType: "riot",
+        title: "パッチ14.6ノート公開",
+        content: patchNotesContent,
+        sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/game-updates/patch-14-6-notes/",
+      },
+      stub,
+    );
+    expect(body.some((b) => b.type === "heading")).toBe(true);
+  });
+
+  it("content が実パッチノート本文だが mock LLM(MockLLMClient)のときは従来の汎用パッチ記事にフォールバックする", async () => {
+    const body = await composeArticleBody(
+      { sourceType: "riot", title: "パッチ14.6ノート公開", content: patchNotesContent },
+      new MockLLMClient(),
+    );
+    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headings).toEqual(["速報", "要点整理", "まとめ"]);
+  });
+
+  it("content が実パッチノート本文だがLLMが不正なJSON(要約失敗)を返す場合は従来の汎用パッチ記事にフォールバックする", async () => {
+    const stub = new StubLLMClient("これはJSONではない応答です");
+    const body = await composeArticleBody(
+      { sourceType: "riot", title: "パッチ14.6ノート公開", content: patchNotesContent },
+      stub,
+    );
+    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headings).toEqual(["速報", "要点整理", "まとめ"]);
+  });
+
+  it("content が実パッチノート本文だがLLMが空文字を返す場合は従来の汎用パッチ記事にフォールバックする", async () => {
+    const stub = new StubLLMClient("");
+    const body = await composeArticleBody(
+      { sourceType: "riot", title: "パッチ14.6ノート公開", content: patchNotesContent },
+      stub,
+    );
+    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headings).toEqual(["速報", "要点整理", "まとめ"]);
+  });
+
+  it("content が実パッチノート本文だが全カテゴリ空({buffed:[],nerfed:[],other:[]})の場合は従来の汎用パッチ記事にフォールバックする", async () => {
+    const stub = new StubLLMClient(JSON.stringify({ buffed: [], nerfed: [], other: [] }));
+    const body = await composeArticleBody(
+      { sourceType: "riot", title: "パッチ14.6ノート公開", content: patchNotesContent },
+      stub,
+    );
+    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headings).toEqual(["速報", "要点整理", "まとめ"]);
+  });
+
+  it("content が実パッチノート本文だがパッチ要約のLLM呼び出しが例外を投げる場合は、例外を外に漏らさず従来の汎用パッチ記事にフォールバックする", async () => {
+    // パッチ要約タスク(kindフィールドを持たないJSON)のときだけ例外を投げ、それ以外(GenerationTaskの
+    // 通常タスク=フォールバック後のcomposeFactBodyが使うaskLLM)はMockLLMClientと同じ挙動にする
+    // スタブ(実際のAPIエラーで要約だけ失敗し、フォールバック自体は正常に完了する状況の再現)。
+    class ThrowingOnlyForPatchSummary implements LLMClient {
+      private readonly mock = new MockLLMClient();
+      async generate(messages: LLMMessage[]): Promise<string> {
+        const last = messages[messages.length - 1];
+        if (last && !last.content.includes('"kind"')) {
+          throw new Error("simulated patch-summary API error");
+        }
+        return this.mock.generate(messages);
+      }
+    }
+    const body = await composeArticleBody(
+      { sourceType: "riot", title: "パッチ14.6ノート公開", content: patchNotesContent },
+      new ThrowingOnlyForPatchSummary(),
+    );
+    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headings).toEqual(["速報", "要点整理", "まとめ"]);
+  });
+
+  it("content が汎用(パッチ本文無し、PATCH_NOTES_MIN_LENGTH未満)の場合は、LLMが有効な要約JSONを返してもLLM要約を試みず従来どおりの速報＋要点整理になる(回帰なし)", async () => {
+    const stub = new StubLLMClient(validSummaryJson);
+    const body = await composeArticleBody(
+      {
+        sourceType: "riot",
+        title: "パッチ14.6ノート公開",
+        content: "本パッチではジャングルモンスターの経験値量が全体的に引き下げられ、序盤のレベル差がつきにくくなる調整が入った。",
+      },
+      stub,
+    );
+    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headings).toEqual(["速報", "要点整理", "まとめ"]);
+  });
+
+  it("コードフェンス付きJSON(```json ... ```)を返してもまとめ体裁が組み立てられる(拡張E26と同様の頑健化)", async () => {
+    const stub = new StubLLMClient("```json\n" + validSummaryJson + "\n```");
+    const body = await composeArticleBody(
+      { sourceType: "riot", title: "パッチ14.6ノート公開", content: patchNotesContent },
+      stub,
+    );
+    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headings).toEqual(["主な強化チャンピオン", "主な弱体チャンピオン", "アイテム・その他の変更"]);
+  });
+
+  it("LLMが一部カテゴリのみ返した場合(例: nerfedが空)は、該当する見出しのみ組み立てられる", async () => {
+    const stub = new StubLLMClient(
+      JSON.stringify({
+        buffed: ["ヤスオ: 基本攻撃力が4から8に引き上げられた。"],
+        nerfed: [],
+        other: ["インフィニティエッジ: 価格が3400から3300に引き下げられた。"],
+      }),
+    );
+    const body = await composeArticleBody(
+      { sourceType: "riot", title: "パッチ14.6ノート公開", content: patchNotesContent },
+      stub,
+    );
+    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headings).toEqual(["主な強化チャンピオン", "アイテム・その他の変更"]);
   });
 });
 

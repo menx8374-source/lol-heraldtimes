@@ -18,6 +18,7 @@ import { splitIntoSentences, excerptForQuote, gistOf } from "@/lib/generation/te
 import { parseThreadReses, extractAnchors, computeLineEmphasis, type ThreadRes } from "@/lib/generation/thread-format";
 import { isAllowedEmbedUrl, embedProviderForUrl } from "@/lib/embed";
 import { maskNgWords } from "@/lib/moderation/ng-words";
+import { PATCH_NOTES_MIN_LENGTH } from "@/lib/collection/adapters/riot-datadragon";
 
 export type GenerationCandidateInput = {
   sourceType: SourceType;
@@ -335,6 +336,91 @@ async function askLLM(llmClient: LLMClient, task: GenerationTask): Promise<strin
   return text.trim();
 }
 
+/**
+ * LLMに要約させる「公式パッチノートまとめ」の正規化結果（拡張E34 F-E34-2）。
+ * buffed: 主な強化チャンピオン、nerfed: 主な弱体チャンピオン、other: アイテム・その他の変更。
+ * 各要素は本文に実在する変更点の要約文字列（捏造禁止はsystemプロンプトで担保する）。
+ */
+type PatchSummary = { buffed: string[]; nerfed: string[]; other: string[] };
+
+/** パッチノート要約LLMへのsystem指示。捏造禁止・出力形式(JSON)をここで固定する。 */
+const PATCH_SUMMARY_SYSTEM_PROMPT =
+  "あなたはLoLまとめサイトの編集者です。次に渡す公式パッチノート本文(全文)から、実際に本文に" +
+  "書かれている変更点だけを日本語で簡潔に要約してください。本文に記載の無い数値・調整・チャンピオン名を" +
+  "作ってはいけません(捏造禁止)。可能な場合は「チャンピオン名: 変更前 ⇒ 変更後」のように簡潔にまとめて" +
+  "ください。出力はJSONのみとし、" +
+  '{"buffed": ["強化されたチャンピオンの要約", ...], "nerfed": ["弱体化されたチャンピオンの要約", ...], ' +
+  '"other": ["アイテムやその他の変更の要約", ...]} の形式にしてください。' +
+  "該当する変更が本文に無いカテゴリは空配列にしてください（無理に埋めない）。" +
+  "説明文・前置き・コードブロックは付けないでください。";
+
+/** LLMが返した配列値を検証済みの文字列配列に正規化する（空文字・非文字列は除く）。 */
+function normalizePatchSummaryItems(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((s): s is string => typeof s === "string" && s.trim().length > 0)
+    .map((s) => s.trim());
+}
+
+/** LLMの生出力（JSON、コードフェンス付きの可能性あり）をPatchSummaryに検証・正規化する。 */
+function parsePatchSummary(raw: string): PatchSummary | null {
+  const jsonStr = extractJsonObject(raw);
+  if (!jsonStr) return null;
+  try {
+    const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
+    const summary: PatchSummary = {
+      buffed: normalizePatchSummaryItems(parsed.buffed),
+      nerfed: normalizePatchSummaryItems(parsed.nerfed),
+      other: normalizePatchSummaryItems(parsed.other),
+    };
+    if (summary.buffed.length === 0 && summary.nerfed.length === 0 && summary.other.length === 0) {
+      return null;
+    }
+    return summary;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * riot由来のcontentが実パッチノート本文（PATCH_NOTES_MIN_LENGTH以上）のとき、LLMに要約させて
+ * 「主な強化/弱体チャンピオン」「アイテム・その他の変更」の見出し＋要約段落からなる本文ブロックを
+ * 組み立てる（拡張E34 F-E34-2）。LLMが使えない（mock・APIエラー・空応答）・JSON解析失敗・
+ * 全カテゴリ空（＝要約できなかった）場合は例外を投げず null を返し、呼び出し側が従来の
+ * 汎用パッチ記事（composeFactBody）にフォールバックする（本体を止めない）。
+ */
+async function composePatchSummaryBody(
+  candidate: GenerationCandidateInput,
+  llmClient: LLMClient,
+): Promise<ArticleBodyBlock[] | null> {
+  try {
+    const raw = await llmClient.generate([
+      { role: "system", content: PATCH_SUMMARY_SYSTEM_PROMPT },
+      { role: "user", content: JSON.stringify({ title: candidate.title, content: candidate.content }) },
+    ]);
+    if (typeof raw !== "string" || raw.trim().length === 0) return null;
+    const summary = parsePatchSummary(raw);
+    if (!summary) return null;
+
+    const blocks: ArticleBodyBlock[] = [];
+    if (summary.buffed.length > 0) {
+      blocks.push({ type: "heading", text: "主な強化チャンピオン" });
+      for (const item of summary.buffed) blocks.push({ type: "paragraph", text: item });
+    }
+    if (summary.nerfed.length > 0) {
+      blocks.push({ type: "heading", text: "主な弱体チャンピオン" });
+      for (const item of summary.nerfed) blocks.push({ type: "paragraph", text: item });
+    }
+    if (summary.other.length > 0) {
+      blocks.push({ type: "heading", text: "アイテム・その他の変更" });
+      for (const item of summary.other) blocks.push({ type: "paragraph", text: item });
+    }
+    return blocks;
+  } catch {
+    return null;
+  }
+}
+
 /** Riot公式（riot）由来: 「速報＋要点整理」構成（従来どおり）。 */
 const FACT_PROFILE = {
   introHeading: "速報",
@@ -422,14 +508,20 @@ async function composeClipBody(
 
 /**
  * 記事化候補から構造化された本文ブロック配列を組み立てる（F7）。
- * sourceType が "riot" なら速報＋要点整理、"clip" なら埋め込み紹介形式、
- * それ以外（5ch/reddit）ならまとめ速報レス形式にする。
+ * sourceType が "riot" なら速報＋要点整理（contentが実パッチノート本文ならLLM要約のまとめ記事、
+ * 拡張E34 F-E34-2）、"clip" なら埋め込み紹介形式、それ以外（5ch/reddit）ならまとめ速報レス形式にする。
  */
 export async function composeArticleBody(
   candidate: GenerationCandidateInput,
   llmClient: LLMClient,
 ): Promise<ArticleBodyBlock[]> {
   if (candidate.sourceType === "riot") {
+    // content が実パッチノート本文（汎用の短いcontentではない）とみなせるときのみLLM要約を試み、
+    // 失敗（mock・APIエラー・解析失敗等）した場合は従来の速報＋要点整理にフォールバックする。
+    if (candidate.content.length >= PATCH_NOTES_MIN_LENGTH) {
+      const patchSummaryBody = await composePatchSummaryBody(candidate, llmClient);
+      if (patchSummaryBody) return patchSummaryBody;
+    }
     const sentences = splitIntoSentences(candidate.content);
     return composeFactBody(candidate, sentences, llmClient);
   }
