@@ -15,6 +15,13 @@ const LINE_EMPHASIS_CLASS: Record<"red" | "orange", string> = {
   orange: "font-bold text-orange-600",
 };
 
+/** レス単位の強調色（拡張E32、おばにゅー流）のテキストカラー。ダーク/ライト両対応。 */
+const RES_EMPHASIS_COLOR_CLASS: Record<"red" | "blue" | "green", string> = {
+  red: "text-red-600 dark:text-red-400",
+  blue: "text-blue-600 dark:text-blue-400",
+  green: "text-green-700 dark:text-green-400",
+};
+
 /** レスの「番号: 名前」見出し行（名前は緑）。まとめ本文の reaction ブロック描画でのみ使う
  * （拡張E12でコメント欄は専用ヘッダーに差別化したため、このファイル内ローカル関数に降格）。 */
 function ResHeader({ number, name }: { number: number; name: string }) {
@@ -33,15 +40,23 @@ function ResHeader({ number, name }: { number: number; name: string }) {
  * `original`（拡張E3・海外の反応の原文併記）がある行は、日本語訳の前に「原文: ...（英語）」を表示する。
  * `emphasis`（拡張E25・レス単位の重要レス強調）が true のとき、行単位の色付けとは別に
  * 文字サイズを大きく＋太字にしてレス全体を目立たせる（行単位のemphasis(red/orange)と併存可能）。
+ * `emphasisColor`（拡張E32）が指定されていれば、行単位のemphasis(red/orange)が無い行のベース色を
+ * その色（赤/青/緑）にする。行単位のemphasisがある行はそちらの色を優先する（役割が違うため上書きしない）。
+ * `emphasisColor`未指定（`emphasis`のみ）は従来どおり色無しの濃色のまま（後方互換）。
  */
 export function ResLines({
   lines,
   emphasis,
+  emphasisColor,
 }: {
   lines: { text: string; emphasis?: "red" | "orange"; original?: string }[];
   emphasis?: boolean;
+  emphasisColor?: "red" | "blue" | "green";
 }) {
   const sizeClass = emphasis ? " text-base sm:text-lg font-bold" : "";
+  const baseColorClass = emphasisColor
+    ? RES_EMPHASIS_COLOR_CLASS[emphasisColor]
+    : "text-neutral-800 dark:text-neutral-200";
   return (
     <div className="flex flex-col gap-0.5">
       {lines.map((line, i) => {
@@ -54,11 +69,7 @@ export function ResLines({
               </p>
             )}
             <p
-              className={
-                (line.emphasis ? LINE_EMPHASIS_CLASS[line.emphasis] : "text-neutral-800 dark:text-neutral-200") +
-                sizeClass +
-                aaClass
-              }
+              className={(line.emphasis ? LINE_EMPHASIS_CLASS[line.emphasis] : baseColorClass) + sizeClass + aaClass}
             >
               {line.text}
             </p>
@@ -163,9 +174,14 @@ function ReactionGroupView({ blocks }: { blocks: ArticleBodyReactionBlock[] }) {
       className="flex flex-col divide-y divide-neutral-200 rounded border border-neutral-300 bg-white text-sm sm:text-base dark:divide-neutral-800 dark:border-neutral-700 dark:bg-neutral-900"
     >
       {blocks.map((block, i) => (
-        <div key={i} className="px-3 py-2" {...(block.emphasis ? { "data-res-emphasis": true } : {})}>
+        <div
+          key={i}
+          className="px-3 py-2"
+          {...(block.emphasis ? { "data-res-emphasis": true } : {})}
+          {...(block.emphasisColor ? { "data-res-emphasis-color": block.emphasisColor } : {})}
+        >
           <ResHeader number={block.number} name={block.name} />
-          <ResLines lines={block.lines} emphasis={block.emphasis} />
+          <ResLines lines={block.lines} emphasis={block.emphasis} emphasisColor={block.emphasisColor} />
         </div>
       ))}
     </div>

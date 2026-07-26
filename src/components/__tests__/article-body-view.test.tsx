@@ -248,6 +248,67 @@ describe("ArticleBodyView（レス単位の重要レス強調, 拡張E25 F-E25-2
   });
 });
 
+describe("ArticleBodyView（強調レスの色分け, 拡張E32 F-E32-1）", () => {
+  it("emphasisColor='blue'のとき青系クラスで描画し、data-res-emphasis-colorも付く", () => {
+    const blocks: ArticleBodyBlock[] = [
+      {
+        type: "reaction",
+        number: 1,
+        name: "国内プレイヤーさん",
+        lines: [{ text: "注目の反応" }],
+        emphasis: true,
+        emphasisColor: "blue",
+      },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("text-blue-600");
+    expect(html).toContain('data-res-emphasis-color="blue"');
+    expect(html).toContain("font-bold");
+  });
+
+  it("emphasisColor='green'のとき緑系クラスで描画する", () => {
+    const blocks: ArticleBodyBlock[] = [
+      {
+        type: "reaction",
+        number: 1,
+        name: "国内プレイヤーさん",
+        lines: [{ text: "補足の反応" }],
+        emphasis: true,
+        emphasisColor: "green",
+      },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("text-green-700");
+  });
+
+  it("emphasisColor無し(emphasisのみ)は従来どおりの濃色クラスで描画する(後方互換)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "reaction", number: 1, name: "国内プレイヤーさん", lines: [{ text: "重要な反応" }], emphasis: true },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("text-neutral-800");
+    expect(html).not.toContain("data-res-emphasis-color");
+  });
+
+  it("行単位の強調(red)とレス単位の色(blue)は併存する(行単位が優先されつつ両方存在)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      {
+        type: "reaction",
+        number: 1,
+        name: "国内プレイヤーさん",
+        lines: [{ text: "神プレイすぎる", emphasis: "red" }, { text: "他の行" }],
+        emphasis: true,
+        emphasisColor: "blue",
+      },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    // 行単位emphasis(red)がある行は赤のまま
+    expect(html).toContain("text-red-600");
+    // 行単位emphasisが無い行はレス単位の色(blue)になる
+    expect(html).toContain("text-blue-600");
+  });
+});
+
 describe("ResLines（AA・原文併記, 拡張E3）", () => {
   it("AAらしい行は等幅フォント(font-mono)クラスを付与する", () => {
     const blocks: ArticleBodyBlock[] = [

@@ -6,7 +6,12 @@
  *   記事フォーマット改修。同日の追加改修でAI導入/まとめ段落を除去しさらにシンプル化）。
  * - Riot公式（riot）: 「事実の速報＋要点整理」構成（従来どおり、引用ブロックは主従関係を保つ）。
  */
-import type { ArticleBodyBlock, ArticleBodyEmbedBlock, ArticleBodyReactionBlock } from "@/lib/article-body";
+import type {
+  ArticleBodyBlock,
+  ArticleBodyEmbedBlock,
+  ArticleBodyEmphasisColor,
+  ArticleBodyReactionBlock,
+} from "@/lib/article-body";
 import type { SourceType } from "@/lib/collection/types";
 import type { LLMClient, GenerationTask } from "@/lib/generation/llm-client";
 import { splitIntoSentences, excerptForQuote, gistOf } from "@/lib/generation/text-utils";
@@ -32,10 +37,14 @@ const REACTION_HANDLE: Record<"5ch" | "reddit", string> = {
 const MAX_EXCERPT_RESES = 12;
 
 /**
- * LLMによるレス抜粋・強調選定の正規化結果（拡張E28で行抽出に対応）。
+ * LLMによるレス抜粋・強調選定の正規化結果（拡張E28で行抽出、拡張E32で強調色に対応）。
  * keepLines: 採用したレスindex → 残す行indexの配列（元順・昇順）。null は「そのレス全行を採用」。
+ * emphasize: 強調するレスindex → 色（"red"|"blue"|"green"）または null（色無しの従来強調）。
  */
-type ReactionSelection = { keepLines: Map<number, number[] | null>; emphasizeIndices: Set<number> };
+type ReactionSelection = {
+  keepLines: Map<number, number[] | null>;
+  emphasize: Map<number, ArticleBodyEmphasisColor | null>;
+};
 
 /**
  * LLMが返した `{keep, emphasize}` 生JSON値を防御的に検証・正規化する純関数（拡張E25 F-E25-1）。
@@ -64,6 +73,22 @@ function parseKeepEntry(entry: unknown): { index: unknown; rawLines: unknown } |
   if (typeof entry === "object" && entry !== null) {
     const e = entry as Record<string, unknown>;
     return { index: e.index, rawLines: e.lines };
+  }
+  return null;
+}
+
+/** 強調色として許可する値の集合（拡張E32、おばにゅー流の赤/青/緑）。 */
+const ALLOWED_EMPHASIS_COLORS = new Set<ArticleBodyEmphasisColor>(["red", "blue", "green"]);
+
+/**
+ * emphasize の1要素（number または {index, color?}）から、レスindexと生の color 指定を取り出す。
+ * どちらの形にも一致しなければ null（呼び出し側で無視する）。number（従来形式）は色無しとして扱う。
+ */
+function parseEmphasizeEntry(entry: unknown): { index: unknown; rawColor: unknown } | null {
+  if (typeof entry === "number") return { index: entry, rawColor: undefined };
+  if (typeof entry === "object" && entry !== null) {
+    const e = entry as Record<string, unknown>;
+    return { index: e.index, rawColor: e.color };
   }
   return null;
 }
@@ -105,12 +130,18 @@ function normalizeReactionSelection(raw: unknown, reses: ThreadRes[]): ReactionS
   if (keepLines.size === 0) return null;
 
   const rawEmphasize = Array.isArray(obj.emphasize) ? obj.emphasize : [];
-  const emphasizeIndices = new Set<number>();
-  for (const n of rawEmphasize) {
-    if (isValidIndex(n) && keepLines.has(n)) emphasizeIndices.add(n);
+  const emphasize = new Map<number, ArticleBodyEmphasisColor | null>();
+  for (const rawEntry of rawEmphasize) {
+    const parsed = parseEmphasizeEntry(rawEntry);
+    if (!parsed || !isValidIndex(parsed.index) || !keepLines.has(parsed.index)) continue;
+    const color =
+      typeof parsed.rawColor === "string" && ALLOWED_EMPHASIS_COLORS.has(parsed.rawColor as ArticleBodyEmphasisColor)
+        ? (parsed.rawColor as ArticleBodyEmphasisColor)
+        : null;
+    emphasize.set(parsed.index, color);
   }
 
-  return { keepLines, emphasizeIndices };
+  return { keepLines, emphasize };
 }
 
 /**
@@ -143,9 +174,11 @@ async function selectReactionReses(
           "レス本文・行は書き換えず、渡された中からindexを選ぶだけです。長いレスは、記事の話題に沿った行だけを" +
           "残すために対象レスの lines のうち残す行indexを指定できます（指定しなければそのレスの全行を採用）。" +
           '出力はJSONのみとし、{"keep": [index または {"index": N, "lines": [行index,...]}, ...], ' +
-          '"emphasize": [index,...]} の形式にしてください（説明文・前置き・コードブロックは付けない）。' +
+          '"emphasize": [index または {"index": N, "color": "red"|"blue"|"green"}, ...]} の形式にしてください' +
+          "（説明文・前置き・コードブロックは付けない）。" +
           "keepは厳選した重要レスのindex（全行採用ならindexの数値のまま、行を絞る場合はオブジェクト形式）、" +
-          "emphasizeはkeepの中でも特に重要なレスのindexです。",
+          "emphasizeはkeepの中でも特に注目・重要なレスのindexです。おばにゅー流に色(red=最重要/否定的な反応、" +
+          "blue=注目/肯定的な反応、green=補足的な反応 等)を割り当ててよい（色は任意、無くても構わない）。",
       },
       { role: "user", content: JSON.stringify(task) },
     ]);
@@ -168,6 +201,7 @@ async function selectReactionReses(
  * keepインデックスのレスだけを元スレ順で組み、emphasizeインデックスのレスにブロック単位の
  * 強調フラグを立てる。選定できない場合（mockモード・APIエラー・parse失敗・keep空等）は
  * 従来どおり全レス・強調なしで組む（本体を止めない）。
+ * 拡張E32: emphasizeに色(red/blue/green)が指定されていれば emphasisColor も付与する（任意・後方互換）。
  * 拡張E27: 本文行にNGワードが含まれる場合は maskNgWords で同数のアスタリスクに伏字化する
  * （逐語は保つがNG語だけ伏字にし、moderateArticleContent の ng_word 保留を避けて公開する）。
  */
@@ -193,7 +227,8 @@ async function buildReactionBlocks(
     const extractedLines = lineIndices ? lineIndices.map((li) => res.lines[li]) : res.lines;
     const emphasis = computeLineEmphasis(extractedLines);
     const anchors = extractAnchors(extractedLines).filter((n) => n !== res.number && knownNumbers.has(n));
-    const isEmphasized = selection ? selection.emphasizeIndices.has(i) : false;
+    const isEmphasized = selection ? selection.emphasize.has(i) : false;
+    const emphasisColor = isEmphasized ? (selection!.emphasize.get(i) ?? null) : null;
     return {
       type: "reaction",
       number: res.number,
@@ -205,6 +240,7 @@ async function buildReactionBlocks(
       }),
       ...(anchors.length > 0 ? { anchors } : {}),
       ...(isEmphasized ? { emphasis: true } : {}),
+      ...(emphasisColor ? { emphasisColor } : {}),
     };
   });
 }

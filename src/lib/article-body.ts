@@ -21,6 +21,9 @@ import { isSafeLocalAssetPath } from "@/lib/image-url";
  * （`text` 側が日本語訳）。 */
 export type ArticleBodyReactionLine = { text: string; emphasis?: "red" | "orange"; original?: string };
 
+/** レス単位の強調色（拡張E32）。おばにゅー流に赤/青/緑で色分けする。 */
+export type ArticleBodyEmphasisColor = "red" | "blue" | "green";
+
 /** 掲示板/SNSの1書き込み（レス）をまとめ速報形式で表すブロック。逐語表示が前提。 */
 export type ArticleBodyReactionBlock = {
   type: "reaction";
@@ -37,6 +40,11 @@ export type ArticleBodyReactionBlock = {
    * レス全体を大きく＋太字で目立たせる。任意フラグで未設定時は従来表示（後方互換）。
    */
   emphasis?: boolean;
+  /**
+   * 強調レスの色（拡張E32 F-E32-1）。`emphasis:true` のときのみ意味を持ち、LLMが割り当てた場合に
+   * 赤/青/緑の色付きで強調する。未指定（`emphasis:true`のみ）は従来どおり色無しの濃色強調（後方互換）。
+   */
+  emphasisColor?: ArticleBodyEmphasisColor;
 };
 
 /** 記事内画像ブロック（拡張E3）。url はローカルSVG/データURI/自サイト作成のモック画像のみを想定
@@ -109,6 +117,13 @@ function parseReactionBlock(b: Record<string, unknown>, index: number): ArticleB
     }
     emphasis = b.emphasis;
   }
+  let emphasisColor: ArticleBodyEmphasisColor | undefined;
+  if (b.emphasisColor !== undefined) {
+    if (b.emphasisColor !== "red" && b.emphasisColor !== "blue" && b.emphasisColor !== "green") {
+      throw new InvalidArticleBodyError(`本文ブロック[${index}]のemphasisColorが不正です`);
+    }
+    emphasisColor = b.emphasisColor;
+  }
   return {
     type: "reaction",
     number: b.number,
@@ -116,6 +131,7 @@ function parseReactionBlock(b: Record<string, unknown>, index: number): ArticleB
     lines,
     ...(anchors ? { anchors } : {}),
     ...(emphasis ? { emphasis } : {}),
+    ...(emphasisColor ? { emphasisColor } : {}),
   };
 }
 

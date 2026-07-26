@@ -128,6 +128,49 @@ describe("parseArticleBody", () => {
     ).toThrow(InvalidArticleBodyError);
   });
 
+  it("reactionブロックのemphasisColor(赤/青/緑)をパースできる(拡張E32)", () => {
+    const input = [
+      {
+        type: "reaction",
+        number: 1,
+        name: "国内プレイヤーさん",
+        lines: [{ text: "重要な反応" }],
+        emphasis: true,
+        emphasisColor: "blue",
+      },
+    ];
+    const result = parseArticleBody(input);
+    expect(result[0]).toEqual(input[0]);
+  });
+
+  it("reactionブロックのemphasisColor省略時は従来どおり(拡張E32、後方互換)", () => {
+    const result = parseArticleBody([
+      { type: "reaction", number: 1, name: "国内プレイヤーさん", lines: [{ text: "重要な反応" }], emphasis: true },
+    ]);
+    expect(result[0]).toEqual({
+      type: "reaction",
+      number: 1,
+      name: "国内プレイヤーさん",
+      lines: [{ text: "重要な反応" }],
+      emphasis: true,
+    });
+  });
+
+  it("reactionブロックのemphasisColorが不正な値ならエラーを投げる(拡張E32)", () => {
+    expect(() =>
+      parseArticleBody([
+        {
+          type: "reaction",
+          number: 1,
+          name: "国内プレイヤーさん",
+          lines: [{ text: "x" }],
+          emphasis: true,
+          emphasisColor: "pink",
+        },
+      ]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
   it("reactionブロックのlines[].originalで原文併記(海外の反応)をパースできる(拡張E3)", () => {
     const input = [
       {

@@ -360,6 +360,66 @@ describe("composeArticleBody（反応記事のLLMレス抜粋＋重要レス強�
   });
 });
 
+describe("composeArticleBody（強調レスの色分け、拡張E32 F-E32-2）", () => {
+  const threeResContent = "1: 最初のレス。\n2: 二番目のレス。\n3: 三番目のレス。";
+
+  it("emphasize=[{index:1,color:'blue'}]のとき、レス2にemphasis:true＋emphasisColor:'blue'が付く", async () => {
+    const stub = new StubLLMClient(JSON.stringify({ keep: [0, 1, 2], emphasize: [{ index: 1, color: "blue" }] }));
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "色分けテスト", content: threeResContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions[1].type === "reaction" && reactions[1].emphasis).toBe(true);
+    expect(reactions[1].type === "reaction" && reactions[1].emphasisColor).toBe("blue");
+    // 他のレスは強調なし・色なし
+    expect(reactions[0].type === "reaction" && reactions[0].emphasis).toBeUndefined();
+    expect(reactions[0].type === "reaction" && reactions[0].emphasisColor).toBeUndefined();
+  });
+
+  it("emphasize=[1](数値・後方互換)のとき、レス2はemphasis:trueのみでemphasisColorは付かない", async () => {
+    const stub = new StubLLMClient(JSON.stringify({ keep: [0, 1, 2], emphasize: [1] }));
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "数値emphasizeテスト", content: threeResContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions[1].type === "reaction" && reactions[1].emphasis).toBe(true);
+    expect(reactions[1].type === "reaction" && reactions[1].emphasisColor).toBeUndefined();
+  });
+
+  it("不正なcolor(例:'pink')は無視され色なしの強調になる", async () => {
+    const stub = new StubLLMClient(JSON.stringify({ keep: [0, 1, 2], emphasize: [{ index: 1, color: "pink" }] }));
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "不正色テスト", content: threeResContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions[1].type === "reaction" && reactions[1].emphasis).toBe(true);
+    expect(reactions[1].type === "reaction" && reactions[1].emphasisColor).toBeUndefined();
+  });
+
+  it("emphasizeのindexがkeep外(例:{index:2,color:'green'}だがkeepは[0,1]のみ)なら色付き強調自体が付かない", async () => {
+    const stub = new StubLLMClient(JSON.stringify({ keep: [0, 1], emphasize: [{ index: 2, color: "green" }] }));
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "keep外emphasizeテスト", content: threeResContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(2);
+    expect(reactions.every((b) => b.type === "reaction" && b.emphasis === undefined)).toBe(true);
+  });
+
+  it("mockモードでは従来どおり強調・色分けなし(回帰なし)", async () => {
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "mock色分け回帰テスト", content: threeResContent },
+      new MockLLMClient(),
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions.every((b) => b.type === "reaction" && b.emphasisColor === undefined)).toBe(true);
+  });
+});
+
 describe("composeArticleBody（NGワードの伏字化、拡張E27 F-E27-2）", () => {
   it("反応記事(5ch)のレス本文にNGワードが含まれる場合、生成後の本文で伏字化される（生のNG語は残らない）", async () => {
     const body = await composeArticleBody(
