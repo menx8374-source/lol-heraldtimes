@@ -47,6 +47,18 @@ async function withPatchMode<T>(mode: "fact" | "summary", fn: () => Promise<T>):
   }
 }
 
+/** env `REDDIT_TRANSLATE_BATCH_SIZE`（拡張E49 F-E49-1）を一時的に指定して関数を実行する。実行後は復元する。 */
+async function withRedditTranslateBatchSize<T>(size: number, fn: () => Promise<T>): Promise<T> {
+  const prev = process.env.REDDIT_TRANSLATE_BATCH_SIZE;
+  process.env.REDDIT_TRANSLATE_BATCH_SIZE = String(size);
+  try {
+    return await fn();
+  } finally {
+    if (prev === undefined) delete process.env.REDDIT_TRANSLATE_BATCH_SIZE;
+    else process.env.REDDIT_TRANSLATE_BATCH_SIZE = prev;
+  }
+}
+
 describe("composeArticleBody", () => {
   it("Riot公式(riot)由来は既定(PATCH_ARTICLE_MODE未設定)で事実速報(見出し「パッチ<番号>が公開」＋事実段落＋公式リンクボタン)になる（拡張E41 F-E41-2、拡張E42 F-E42-4）", async () => {
     const body = await composeArticleBody(
@@ -1523,7 +1535,7 @@ describe("composeArticleBody（reddit反応記事のレス翻訳＋原文併記�
     expect(texts).toEqual(["Nice teamfight there.", ">>1 That was so good, I love this play."]);
   });
 
-  it("翻訳LLMが行数不一致を返した場合、そのレスのみ英語フォールバックになる(originalなし)", async () => {
+  it("翻訳LLMが行数不一致を返した場合、訳を捨てず1行に束ねて採用する(拡張E49 F-E49-2、原文は改行結合してoriginalに保持)", async () => {
     const stub = new ReactionTranslateStubLLMClient(
       JSON.stringify({
         translations: [{ index: 0, lines: ["いいチームファイトだった。", "余分な行。"] }], // 1行のはずが2行(不一致)
@@ -1534,7 +1546,25 @@ describe("composeArticleBody（reddit反応記事のレス翻訳＋原文併記�
       stub,
     );
     const reactions = body.filter((b) => b.type === "reaction");
-    expect(reactions[0].type === "reaction" && reactions[0].lines).toEqual([{ text: "Nice teamfight there." }]);
+    expect(reactions[0].type === "reaction" && reactions[0].lines).toEqual([
+      { text: "いいチームファイトだった。\n余分な行。", original: "Nice teamfight there." },
+    ]);
+  });
+
+  it("行数不一致で束ねる場合もNG文を含む行だけ削除され、残りは維持される(拡張E49 F-E49-2)", async () => {
+    const stub = new ReactionTranslateStubLLMClient(
+      JSON.stringify({
+        translations: [{ index: 0, lines: ["カスだと思う。", "でも強いと思う。", "余分な行。"] }], // 1行のはずが3行(不一致)
+      }),
+    );
+    const body = await composeArticleBody(
+      { sourceType: "reddit", title: "Bundle NG test", content: redditContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions[0].type === "reaction" && reactions[0].lines).toEqual([
+      { text: "でも強いと思う。\n余分な行。", original: "Nice teamfight there." },
+    ]);
   });
 
   it("翻訳LLMが不正なJSONを返しても例外を投げず英語フォールバックになる", async () => {
@@ -1587,5 +1617,85 @@ describe("composeArticleBody（reddit反応記事のレス翻訳＋原文併記�
     expect(reactions.every((b) => b.type === "reaction" && b.lines.every((l) => l.original === undefined))).toBe(
       true,
     );
+  });
+});
+
+describe("composeArticleBody（reddit反応記事の翻訳バッチ分割、拡張E49 F-E49-1）", () => {
+  /**
+   * reaction-select と reaction-translate を切り替えるスタブ。reaction-select は常に「全レスkeep・
+   * 強調なし」を返す。reaction-translate は、渡されたバッチのレスをそのまま `JA:<原文>` に「翻訳」して
+   * 返す（バッチ内の行対応・呼び出し回数を検証しやすくするため）。`shouldFailBatch(呼び出し順index)` が
+   * true を返すバッチだけ、不正なJSON（parse不能）を返して失敗を再現する。
+   */
+  class BatchAwareStubLLMClient implements LLMClient {
+    public selectCalls = 0;
+    public translateCalls = 0;
+    public translateBatchSizes: number[] = [];
+    constructor(private readonly shouldFailBatch: (batchCallIndex: number) => boolean = () => false) {}
+    async generate(messages: LLMMessage[]): Promise<string> {
+      const user = messages.find((m) => m.role === "user");
+      const task = JSON.parse(user!.content) as { kind: string; reses: { index: number; lines: string[] }[] };
+      if (task.kind === "reaction-select") {
+        this.selectCalls++;
+        return JSON.stringify({ keep: task.reses.map((r) => r.index), emphasize: [] });
+      }
+      const batchCallIndex = this.translateCalls;
+      this.translateCalls++;
+      this.translateBatchSizes.push(task.reses.length);
+      if (this.shouldFailBatch(batchCallIndex)) return "これはJSONではない応答です";
+      return JSON.stringify({
+        translations: task.reses.map((r) => ({ index: r.index, lines: r.lines.map((l) => `JA:${l}`) })),
+      });
+    }
+  }
+
+  function buildNumberedRedditContent(count: number): string {
+    return Array.from({ length: count }, (_, i) => `${i + 1}: Comment number ${i + 1}.`).join("\n");
+  }
+
+  it("レス数がバッチサイズ超のとき翻訳呼び出しが複数回に分割され、結果がマージされる", async () => {
+    await withRedditTranslateBatchSize(2, async () => {
+      const stub = new BatchAwareStubLLMClient();
+      const body = await composeArticleBody(
+        { sourceType: "reddit", title: "Batch split test", content: buildNumberedRedditContent(5) },
+        stub,
+      );
+      expect(stub.translateCalls).toBe(3); // 2件+2件+1件の3バッチ
+      expect(stub.translateBatchSizes).toEqual([2, 2, 1]);
+      const reactions = body.filter((b) => b.type === "reaction");
+      expect(reactions).toHaveLength(5);
+      reactions.forEach((r, idx) => {
+        expect(r.type === "reaction" && r.lines[0].text).toBe(`JA:Comment number ${idx + 1}.`);
+        expect(r.type === "reaction" && r.lines[0].original).toBe(`Comment number ${idx + 1}.`);
+      });
+    });
+  });
+
+  it("1バッチだけ失敗しても他バッチの訳は活かされ、失敗バッチのレスのみ英語フォールバックになる", async () => {
+    await withRedditTranslateBatchSize(2, async () => {
+      const stub = new BatchAwareStubLLMClient((batchCallIndex) => batchCallIndex === 1); // 2番目のバッチ(index2,3)だけ失敗
+      const body = await composeArticleBody(
+        { sourceType: "reddit", title: "Batch failure test", content: buildNumberedRedditContent(5) },
+        stub,
+      );
+      const reactions = body.filter((b) => b.type === "reaction");
+      expect(reactions).toHaveLength(5);
+      expect(reactions[0].type === "reaction" && reactions[0].lines[0].text).toBe("JA:Comment number 1.");
+      expect(reactions[1].type === "reaction" && reactions[1].lines[0].text).toBe("JA:Comment number 2.");
+      // 失敗したバッチ(index2,3)のみ英語原文フォールバック(originalなし)
+      expect(reactions[2].type === "reaction" && reactions[2].lines[0]).toEqual({ text: "Comment number 3." });
+      expect(reactions[3].type === "reaction" && reactions[3].lines[0]).toEqual({ text: "Comment number 4." });
+      expect(reactions[4].type === "reaction" && reactions[4].lines[0].text).toBe("JA:Comment number 5.");
+    });
+  });
+
+  it("1レスの合計文字数が大きい場合、件数がバッチサイズ以下でも文字数上限でバッチが分割される", async () => {
+    const longA = "A".repeat(1600);
+    const longB = "B".repeat(1600);
+    const content = `1: ${longA}\n2: ${longB}`;
+    const stub = new BatchAwareStubLLMClient();
+    await composeArticleBody({ sourceType: "reddit", title: "Char limit split test", content }, stub);
+    expect(stub.translateCalls).toBe(2);
+    expect(stub.translateBatchSizes).toEqual([1, 1]);
   });
 });
