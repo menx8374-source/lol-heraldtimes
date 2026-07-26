@@ -246,13 +246,17 @@ describe("composeArticleBody（反応記事のLLMレス抜粋＋重要レス強�
     expect(reactions[0].type === "reaction" && reactions[0].emphasis).toBeUndefined();
     expect(reactions[1].type === "reaction" && reactions[1].emphasis).toBe(true);
 
-    // LLMへはreaction-selectタスクとしてJSON(reses=index/number/text)が渡っている(逐語のまま伝える)
+    // LLMへはreaction-selectタスクとしてJSON(reses=index/number/lines[行配列])が渡っている(逐語のまま伝える、拡張E28)
     const lastCall = stub.calls[stub.calls.length - 1];
     const userMessage = lastCall.find((m) => m.role === "user");
     expect(userMessage).toBeTruthy();
-    const sentTask = JSON.parse(userMessage!.content) as { kind: string; reses: { text: string }[] };
+    const sentTask = JSON.parse(userMessage!.content) as { kind: string; reses: { lines: string[] }[] };
     expect(sentTask.kind).toBe("reaction-select");
-    expect(sentTask.reses.map((r) => r.text)).toEqual(["最初のレス。", "二番目のレス。", "三番目のレス。"]);
+    expect(sentTask.reses.map((r) => r.lines)).toEqual([
+      ["最初のレス。"],
+      ["二番目のレス。"],
+      ["三番目のレス。"],
+    ]);
   });
 
   it("LLMがコードフェンス付きJSON(```json ... ```)を返しても抜粋・強調が効く（拡張E26で頑健化）", async () => {
@@ -401,5 +405,107 @@ describe("composeArticleBody（NGワードの伏字化、拡張E27 F-E27-2）", 
     const reactions = body.filter((b) => b.type === "reaction");
     const texts = reactions.flatMap((b) => (b.type === "reaction" ? b.lines.map((l) => l.text) : []));
     expect(texts).toEqual(["壁飛び5連続でキャリーとか草生える", "それな"]);
+  });
+});
+
+describe("composeArticleBody（長レスのレス内文抽出、拡張E28 F-E28-2）", () => {
+  // レス2(index=1)は3行構成の長レス。0行目・2行目は話題に沿った行、1行目は雑談行という想定。
+  const multiLineContent =
+    "1: 最初のレス。\n2: 二番目1行目。\n二番目2行目（余談）。\n二番目3行目。\n3: 三番目のレス。";
+
+  it("keep=[{index,lines}]のとき、指定した行indexだけが逐語で残り、指定外の行は落ちる", async () => {
+    const stub = new StubLLMClient(JSON.stringify({ keep: [{ index: 1, lines: [0, 2] }], emphasize: [] }));
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "行抽出テスト", content: multiLineContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(1);
+    expect(reactions[0].type === "reaction" && reactions[0].number).toBe(2);
+    expect(reactions[0].type === "reaction" && reactions[0].lines.map((l) => l.text)).toEqual([
+      "二番目1行目。",
+      "二番目3行目。",
+    ]);
+  });
+
+  it("keep=[1]（数値・後方互換）のとき、そのレスの全行が残る", async () => {
+    const stub = new StubLLMClient(JSON.stringify({ keep: [1], emphasize: [] }));
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "後方互換テスト", content: multiLineContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(1);
+    expect(reactions[0].type === "reaction" && reactions[0].lines.map((l) => l.text)).toEqual([
+      "二番目1行目。",
+      "二番目2行目（余談）。",
+      "二番目3行目。",
+    ]);
+  });
+
+  it("linesに範囲外・重複が含まれるときは無視して正規化される（有効な行だけ元順で残る）", async () => {
+    const stub = new StubLLMClient(
+      JSON.stringify({ keep: [{ index: 1, lines: [2, 2, 99, -1, 0] }], emphasize: [] }),
+    );
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "行正規化テスト", content: multiLineContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(1);
+    // 0,2のみが有効(重複99/-1は無視)。元の行順(0→2)で残る。
+    expect(reactions[0].type === "reaction" && reactions[0].lines.map((l) => l.text)).toEqual([
+      "二番目1行目。",
+      "二番目3行目。",
+    ]);
+  });
+
+  it("linesが全て不正（範囲外のみ）のときは、そのレスの全行採用にフォールバックする", async () => {
+    const stub = new StubLLMClient(JSON.stringify({ keep: [{ index: 1, lines: [99, -1] }], emphasize: [] }));
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "行全不正テスト", content: multiLineContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(1);
+    expect(reactions[0].type === "reaction" && reactions[0].lines.map((l) => l.text)).toEqual([
+      "二番目1行目。",
+      "二番目2行目（余談）。",
+      "二番目3行目。",
+    ]);
+  });
+
+  it("厳選プロンプト強化後もmock（全keep）時は従来どおり全レス・全行になる（回帰なし）", async () => {
+    const body = await composeArticleBody(
+      { sourceType: "5ch", title: "厳選プロンプト回帰テスト", content: multiLineContent },
+      new MockLLMClient(),
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(3);
+    expect(reactions[1].type === "reaction" && reactions[1].lines.map((l) => l.text)).toEqual([
+      "二番目1行目。",
+      "二番目2行目（余談）。",
+      "二番目3行目。",
+    ]);
+  });
+
+  it("抽出後の行にNG伏字・行強調・アンカーが整合的に効く（抽出前の行indexに依存しない）", async () => {
+    // レス2(index=1): 0行目に「>>1」アンカー、1行目にNGワード「カス」、2行目に強調キーワード「草」。
+    // keepでlines=[0,2]を指定し、NGワードを含む1行目を除外する。
+    const content = "1: 最初のレス。\n2: >>1 その通り。\nこれはカスだと思う。\nこれは草生えるわ。\n3: 三番目。";
+    const stub = new StubLLMClient(JSON.stringify({ keep: [{ index: 1, lines: [0, 2] }], emphasize: [1] }));
+    const body = await composeArticleBody({ sourceType: "5ch", title: "整合性テスト", content }, stub);
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions).toHaveLength(1);
+    const res = reactions[0];
+    expect(res.type === "reaction" && res.lines.map((l) => l.text)).toEqual([">>1 その通り。", "これは草生えるわ。"]);
+    // NGワード「カス」を含む行は除外されているので、伏字にする対象すら残らない(=NGワードは出てこない)
+    expect(res.type === "reaction" && res.lines.every((l) => findNgWord(l.text) === null)).toBe(true);
+    // アンカー(>>1)は抽出後の0行目に残っているので検出される
+    expect(res.type === "reaction" && res.anchors).toEqual([1]);
+    // 強調: 抽出後の行配列で計算されるため、抽出後1行目("これは草生えるわ")がred強調になる
+    expect(res.type === "reaction" && res.lines[1].emphasis).toBe("red");
+    expect(res.type === "reaction" && res.lines[0].emphasis).toBe("orange");
+    expect(res.type === "reaction" && res.emphasis).toBe(true);
   });
 });

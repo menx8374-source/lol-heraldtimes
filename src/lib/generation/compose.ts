@@ -31,8 +31,11 @@ const REACTION_HANDLE: Record<"5ch" | "reddit", string> = {
 /** 1記事あたりの反応レス抜粋の上限件数（拡張E25 F-E25-1、超過分は先頭優先で切る）。 */
 const MAX_EXCERPT_RESES = 12;
 
-/** LLMによるレス抜粋・強調選定の正規化結果（0始まりindexの集合）。 */
-type ReactionSelection = { keepIndices: Set<number>; emphasizeIndices: Set<number> };
+/**
+ * LLMによるレス抜粋・強調選定の正規化結果（拡張E28で行抽出に対応）。
+ * keepLines: 採用したレスindex → 残す行indexの配列（元順・昇順）。null は「そのレス全行を採用」。
+ */
+type ReactionSelection = { keepLines: Map<number, number[] | null>; emphasizeIndices: Set<number> };
 
 /**
  * LLMが返した `{keep, emphasize}` 生JSON値を防御的に検証・正規化する純関数（拡張E25 F-E25-1）。
@@ -52,32 +55,62 @@ function extractJsonObject(raw: string): string | null {
   return raw.slice(start, end + 1);
 }
 
-function normalizeReactionSelection(raw: unknown, resCount: number): ReactionSelection | null {
+/**
+ * keep の1要素（number または {index, lines?}）から、レスindexと生の lines 指定を取り出す。
+ * どちらの形にも一致しなければ null（呼び出し側で無視する）。
+ */
+function parseKeepEntry(entry: unknown): { index: unknown; rawLines: unknown } | null {
+  if (typeof entry === "number") return { index: entry, rawLines: undefined };
+  if (typeof entry === "object" && entry !== null) {
+    const e = entry as Record<string, unknown>;
+    return { index: e.index, rawLines: e.lines };
+  }
+  return null;
+}
+
+function normalizeReactionSelection(raw: unknown, reses: ThreadRes[]): ReactionSelection | null {
   if (typeof raw !== "object" || raw === null) return null;
   const obj = raw as Record<string, unknown>;
   if (!Array.isArray(obj.keep)) return null;
 
+  const resCount = reses.length;
   const isValidIndex = (n: unknown): n is number =>
     typeof n === "number" && Number.isInteger(n) && n >= 0 && n < resCount;
 
-  const dedupedKeep: number[] = [];
-  const seenKeep = new Set<number>();
-  for (const n of obj.keep) {
-    if (!isValidIndex(n) || seenKeep.has(n)) continue;
-    seenKeep.add(n);
-    dedupedKeep.push(n);
-  }
-  if (dedupedKeep.length === 0) return null;
+  const keepLines = new Map<number, number[] | null>();
+  for (const rawEntry of obj.keep) {
+    const parsed = parseKeepEntry(rawEntry);
+    if (!parsed || !isValidIndex(parsed.index) || keepLines.has(parsed.index)) continue;
+    if (keepLines.size >= MAX_EXCERPT_RESES) continue;
 
-  const keepIndices = new Set(dedupedKeep.slice(0, MAX_EXCERPT_RESES));
+    const lineCount = reses[parsed.index].lines.length;
+    const isValidLine = (n: unknown): n is number =>
+      typeof n === "number" && Number.isInteger(n) && n >= 0 && n < lineCount;
+
+    let normalizedLines: number[] | null = null;
+    if (Array.isArray(parsed.rawLines)) {
+      const dedupedLines: number[] = [];
+      const seenLines = new Set<number>();
+      for (const ln of parsed.rawLines) {
+        if (!isValidLine(ln) || seenLines.has(ln)) continue;
+        seenLines.add(ln);
+        dedupedLines.push(ln);
+      }
+      dedupedLines.sort((a, b) => a - b); // 元の行順を維持
+      // 空/全て不正な行指定は「そのレスは全行採用」に丸める。
+      normalizedLines = dedupedLines.length > 0 ? dedupedLines : null;
+    }
+    keepLines.set(parsed.index, normalizedLines);
+  }
+  if (keepLines.size === 0) return null;
 
   const rawEmphasize = Array.isArray(obj.emphasize) ? obj.emphasize : [];
   const emphasizeIndices = new Set<number>();
   for (const n of rawEmphasize) {
-    if (isValidIndex(n) && keepIndices.has(n)) emphasizeIndices.add(n);
+    if (isValidIndex(n) && keepLines.has(n)) emphasizeIndices.add(n);
   }
 
-  return { keepIndices, emphasizeIndices };
+  return { keepLines, emphasizeIndices };
 }
 
 /**
@@ -96,17 +129,22 @@ async function selectReactionReses(
     const task: GenerationTask = {
       kind: "reaction-select",
       title,
-      reses: reses.map((r, index) => ({ index, number: r.number, text: r.lines.join(" ") })),
+      reses: reses.map((r, index) => ({ index, number: r.number, lines: r.lines })),
     };
     const raw = await llmClient.generate([
       {
         role: "system",
         content:
           "あなたはLoLまとめサイトの編集者です。渡されたスレッドのレス一覧(title=記事の話題, " +
-          "reses=各レスのindex/number/text)の中から、記事の話題に関係する重要なレスだけを選んでください。" +
-          "レス本文は書き換えず、渡された中から選ぶだけです。" +
-          '出力はJSONのみとし、{"keep": [index,...], "emphasize": [index,...]} の形式にしてください' +
-          "（説明文・前置き・コードブロックは付けない）。keepは話題に関係する重要なレスのindex、" +
+          "reses=各レスのindex/number/lines[行配列])の中から、記事の話題に関係する重要なレスだけを厳選してください。" +
+          "スレのルール文・テンプレ(「!extend」「次スレは>>950」「配信者やプロの話題禁止」等の定型・運営文)、" +
+          "単なる雑談、記事の話題に無関係なレスは除外し、話題の中心となる反応・意見・議論・感想があるレスだけを" +
+          "選んでください（無理に多く選ぶ必要はありません）。" +
+          "レス本文・行は書き換えず、渡された中からindexを選ぶだけです。長いレスは、記事の話題に沿った行だけを" +
+          "残すために対象レスの lines のうち残す行indexを指定できます（指定しなければそのレスの全行を採用）。" +
+          '出力はJSONのみとし、{"keep": [index または {"index": N, "lines": [行index,...]}, ...], ' +
+          '"emphasize": [index,...]} の形式にしてください（説明文・前置き・コードブロックは付けない）。' +
+          "keepは厳選した重要レスのindex（全行採用ならindexの数値のまま、行を絞る場合はオブジェクト形式）、" +
           "emphasizeはkeepの中でも特に重要なレスのindexです。",
       },
       { role: "user", content: JSON.stringify(task) },
@@ -117,7 +155,7 @@ async function selectReactionReses(
     const jsonStr = extractJsonObject(raw);
     if (!jsonStr) return null;
     const parsed: unknown = JSON.parse(jsonStr);
-    return normalizeReactionSelection(parsed, reses.length);
+    return normalizeReactionSelection(parsed, reses);
   } catch {
     return null;
   }
@@ -144,19 +182,23 @@ async function buildReactionBlocks(
 
   const selection = await selectReactionReses(llmClient, candidate.title, reses);
   const selectedIndices = selection
-    ? reses.map((_, i) => i).filter((i) => selection.keepIndices.has(i))
+    ? reses.map((_, i) => i).filter((i) => selection.keepLines.has(i))
     : reses.map((_, i) => i);
 
   return selectedIndices.map((i) => {
     const res = reses[i];
-    const emphasis = computeLineEmphasis(res.lines);
-    const anchors = extractAnchors(res.lines).filter((n) => n !== res.number && knownNumbers.has(n));
+    // 行indexの指定があれば元 res.lines からその行だけを逐語のまま抽出する（拡張E28 F-E28-2）。
+    // 指定なし（null＝全行採用、または選定自体が無いフォールバック）はres.linesをそのまま使う。
+    const lineIndices = selection?.keepLines.get(i) ?? null;
+    const extractedLines = lineIndices ? lineIndices.map((li) => res.lines[li]) : res.lines;
+    const emphasis = computeLineEmphasis(extractedLines);
+    const anchors = extractAnchors(extractedLines).filter((n) => n !== res.number && knownNumbers.has(n));
     const isEmphasized = selection ? selection.emphasizeIndices.has(i) : false;
     return {
       type: "reaction",
       number: res.number,
       name,
-      lines: res.lines.map((rawText, li) => {
+      lines: extractedLines.map((rawText, li) => {
         // 逐語転載を保ちつつNGワードのみ伏字化する（拡張E27）。他の文字列は一切書き換えない。
         const text = maskNgWords(rawText);
         return emphasis[li] ? { text, emphasis: emphasis[li] } : { text };

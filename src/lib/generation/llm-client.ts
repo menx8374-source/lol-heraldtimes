@@ -29,7 +29,7 @@ export type GenerationTask =
   | {
       kind: "reaction-select";
       title: string;
-      reses: { index: number; number: number; text: string }[];
+      reses: { index: number; number: number; lines: string[] }[];
     };
 
 function renderIntro(task: Extract<GenerationTask, { kind: "intro" }>): string {
