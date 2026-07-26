@@ -114,6 +114,7 @@ function LinkButtonBlockView({ block }: { block: Extract<ArticleBodyBlock, { typ
         href={block.url}
         target="_blank"
         rel="noopener noreferrer"
+        data-link-button
         className="inline-block rounded-lg bg-sky-700 px-8 py-3 text-center text-base font-bold text-white shadow transition-colors hover:bg-sky-800 dark:bg-sky-600 dark:hover:bg-sky-500"
       >
         {block.label}
