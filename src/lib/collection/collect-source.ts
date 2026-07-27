@@ -36,6 +36,9 @@ export function toCollectionItems(sourceType: SourceType, raw: RawCollectionItem
       author: r.author,
       flair: r.flair,
       media: r.media,
+      // リファクタリングS7: 取得元ルールで付与したカテゴリ(RiotNewsの種別分類等)を Post/Article まで
+      // 伝えるため転記する。ここで漏らすと Post.category が null になりソース既定カテゴリに落ちる。
+      category: r.category,
     });
   }
   return items;

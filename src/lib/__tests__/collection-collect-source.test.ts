@@ -33,6 +33,21 @@ describe("toCollectionItems", () => {
     expect(result).toHaveLength(1);
     expect(result[0].sourceUrl).toBe("https://example.com/a");
   });
+
+  it("取得元ルールで付与した category を共通フォーマットに転記する（リファクタS7・Post.categoryへ伝播）", () => {
+    const raw: RawCollectionItem[] = [
+      {
+        sourceUrl: "https://lolesports.com/ja-jp/news/x",
+        title: "esports news",
+        content: "c",
+        fetchedAt: new Date(),
+        externalId: "x",
+        category: "eスポーツ",
+      },
+    ];
+    const result = toCollectionItems("riot-news", raw);
+    expect(result[0].category).toBe("eスポーツ");
+  });
 });
 
 describe("collectFromSource", () => {
