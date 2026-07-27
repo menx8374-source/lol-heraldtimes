@@ -265,6 +265,10 @@ model Post {
   lastCheckedAt DateTime?
   /// メトリクス監視中フラグ（S4で使用）
   monitoring    Boolean  @default(true)
+  /// 取得元ルールで付与されたカテゴリ表示ラベル（リファクタリングS7a F-S7a-3、nullable・非破壊追加）。
+  /// アダプタがURLパス等のルールで明示した場合のみ設定される。未設定(null)の場合、生成時に
+  /// ソース既定カテゴリ（CATEGORY_BY_SOURCE）にフォールバックする（従来どおりの挙動）。
+  category      String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

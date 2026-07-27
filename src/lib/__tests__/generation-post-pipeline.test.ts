@@ -53,6 +53,7 @@ type CreatePostOptions = {
   sourceUrl?: string;
   postedAt?: Date;
   media?: { imageUrl: string };
+  category?: string;
   metrics: { score: number; commentCount: number; capturedAt: Date }[];
 };
 
@@ -69,6 +70,7 @@ async function createPost(opts: CreatePostOptions) {
       url: opts.sourceUrl ?? `https://example.com/${opts.sourceType}/${externalId}`,
       postedAt: opts.postedAt ?? new Date(T0.getTime() - hours(2)),
       ...(opts.media ? { media: opts.media } : {}),
+      ...(opts.category ? { category: opts.category } : {}),
     },
   });
   for (const m of opts.metrics) {
@@ -371,6 +373,37 @@ describe("generateArticlesFromHotPosts（hotness免除ソース、リファク�
 
     const article = await prisma.article.findUnique({ where: { postId: riotPost.id } });
     expect(article).toBeNull();
+  });
+});
+
+describe("generateArticlesFromHotPosts（取得元ルールによるカテゴリ付与、リファクタリングS7a F-S7a-3）", () => {
+  it("Post.categoryが設定されていればArticle.categoryにそのまま反映される（ソース既定より優先）", async () => {
+    const post = await createPost({
+      sourceType: "riot",
+      category: "Riot公式",
+      metrics: [{ score: 0, commentCount: 0, capturedAt: T0 }],
+    });
+
+    const summary = await generateArticlesFromHotPosts(llm, { now: T0, championMap: null });
+    const result = summary.results.find((r) => r.postId === post.id);
+    expect(result?.status).toBe("success");
+
+    const article = await prisma.article.findUnique({ where: { postId: post.id } });
+    expect(article?.category).toBe("Riot公式");
+  });
+
+  it("Post.category未設定ならソース既定カテゴリ(CATEGORY_BY_SOURCE)にフォールバックする(回帰なし)", async () => {
+    const post = await createPost({
+      sourceType: "riot",
+      metrics: [{ score: 0, commentCount: 0, capturedAt: T0 }],
+    });
+
+    const summary = await generateArticlesFromHotPosts(llm, { now: T0, championMap: null });
+    const result = summary.results.find((r) => r.postId === post.id);
+    expect(result?.status).toBe("success");
+
+    const article = await prisma.article.findUnique({ where: { postId: post.id } });
+    expect(article?.category).toBe("パッチ/メタ");
   });
 });
 

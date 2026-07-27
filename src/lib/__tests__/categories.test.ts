@@ -6,12 +6,24 @@ import {
   isReactionCategory,
 } from "@/lib/categories";
 
-describe("カテゴリ整理（拡張E19 F-E19-1/2、拡張E45で「eスポーツ」を削除）", () => {
-  it("「公式ニュース」「動画・クリップ」「eスポーツ」は廃止され、3カテゴリのみが残る", () => {
+describe("カテゴリ整理（拡張E19 F-E19-1/2、拡張E45で「eスポーツ」を削除→リファクタリングS7aで再追加）", () => {
+  it("「公式ニュース」「動画・クリップ」は廃止されたまま、Riot公式・eスポーツを含む5カテゴリになる（S7a）", () => {
     expect(CATEGORY_LABELS).not.toContain("公式ニュース");
     expect(CATEGORY_LABELS).not.toContain("動画・クリップ");
-    expect(CATEGORY_LABELS).not.toContain("eスポーツ");
-    expect(CATEGORY_LABELS.sort()).toEqual(["パッチ/メタ", "5chの反応", "海外の反応"].sort());
+    expect(CATEGORY_LABELS.sort()).toEqual(
+      ["パッチ/メタ", "Riot公式", "eスポーツ", "5chの反応", "海外の反応"].sort(),
+    );
+  });
+
+  it("既存カテゴリ（パッチ/メタ・5chの反応・海外の反応）のスラッグは不変", () => {
+    expect(categorySlugFor("パッチ/メタ")).toBe("patch-meta");
+    expect(categorySlugFor("5chの反応")).toBe("5ch");
+    expect(categorySlugFor("海外の反応")).toBe("overseas");
+  });
+
+  it("新設カテゴリ（Riot公式・eスポーツ）のスラッグが定義される", () => {
+    expect(categorySlugFor("Riot公式")).toBe("riot-official");
+    expect(categorySlugFor("eスポーツ")).toBe("esports");
   });
 });
 
@@ -40,8 +52,10 @@ describe("isReactionCategory（拡張E38 テスト2）", () => {
     expect(isReactionCategory("海外の反応")).toBe(true);
   });
 
-  it("「パッチ/メタ」「未知」はfalse（拡張E45で「eスポーツ」自体を削除済み）", () => {
+  it("「パッチ/メタ」「Riot公式」「eスポーツ」「未知」はfalse（反応カテゴリではない）", () => {
     expect(isReactionCategory("パッチ/メタ")).toBe(false);
+    expect(isReactionCategory("Riot公式")).toBe(false);
+    expect(isReactionCategory("eスポーツ")).toBe(false);
     expect(isReactionCategory("未知のカテゴリ")).toBe(false);
   });
 

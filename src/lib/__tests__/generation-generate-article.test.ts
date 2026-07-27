@@ -62,6 +62,19 @@ describe("generateArticleForCandidate（成功パス）", () => {
     expect(ch5.category).toBe("5chの反応");
     expect(reddit.category).toBe("海外の反応");
   });
+
+  it("candidate.categoryが指定されていればソース既定より優先される（リファクタリングS7a F-S7a-3）", async () => {
+    const result = await generateArticleForCandidate(
+      candidate({ sourceType: "riot", category: "Riot公式" }),
+      llm,
+    );
+    expect(result.category).toBe("Riot公式");
+  });
+
+  it("candidate.categoryが未指定ならソース既定（CATEGORY_BY_SOURCE）にフォールバックする（回帰なし）", async () => {
+    const result = await generateArticleForCandidate(candidate({ sourceType: "riot" }), llm);
+    expect(result.category).toBe("パッチ/メタ");
+  });
 });
 
 describe("generateArticleForCandidate（riotパッチ記事の構成モード切替、拡張E41 F-E41-2）", () => {

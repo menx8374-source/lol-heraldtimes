@@ -41,6 +41,7 @@ async function persistOneItem(item: RawCollectionItem, sourceType: SourceType, n
         author: item.author ?? null,
         flair: item.flair ?? null,
         media,
+        category: item.category ?? null,
         postedAt: item.fetchedAt,
         firstSeenAt: now,
         lastCheckedAt: now,
@@ -53,6 +54,7 @@ async function persistOneItem(item: RawCollectionItem, sourceType: SourceType, n
         author: item.author ?? null,
         flair: item.flair ?? null,
         media,
+        category: item.category ?? null,
         lastCheckedAt: now,
       },
     });

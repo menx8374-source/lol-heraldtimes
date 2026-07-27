@@ -47,6 +47,11 @@ export type GenerationCandidate = {
   content: string;
   /** 収集時に取得したサムネイル画像URL（拡張E19）。未設定/nullは記事のサムネイルも未設定になる。 */
   imageUrl?: string | null;
+  /**
+   * リファクタリングS7a（F-S7a-3）: 取得元ルールで明示されたカテゴリ（Post.category由来）。
+   * 未設定の場合は従来どおりソース既定（CATEGORY_BY_SOURCE）にフォールバックする。
+   */
+  category?: CategoryLabel;
 };
 
 export type GeneratedArticle = {
@@ -165,7 +170,9 @@ export async function generateArticleForCandidate(
     thumbnailUrl = pickDeterministicChampionSplashUrl(candidate.id);
   }
 
-  const category = CATEGORY_BY_SOURCE[candidate.sourceType];
+  // カテゴリ決定（リファクタリングS7a F-S7a-3）: 取得元ルールで明示されたcandidate.categoryを
+  // 優先し、未指定ならソース既定（CATEGORY_BY_SOURCE、従来どおり）にフォールバックする。
+  const category = candidate.category ?? CATEGORY_BY_SOURCE[candidate.sourceType];
   // SEO生成（F-S5b-1）: 本文・タイトルが確定した後に1回だけ呼ぶ。mock/失敗時はnull(追加コストなし)で、
   // 呼び出し側が従来のメタ生成にフォールバックする。判定・分類ではなく生成用途のみ(要件遵守)。
   const seo = await generateSeo(llmClient, {

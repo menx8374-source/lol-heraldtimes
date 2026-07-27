@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { listArticlesForSitemap } from "@/lib/articles";
-import { CATEGORY_LABELS, categorySlugFor } from "@/lib/categories";
+import { categorySlugFor } from "@/lib/categories";
+import { listVisibleCategoryLabels } from "@/lib/category-visibility";
 import { listAllTagNames } from "@/lib/tags";
 import { listArchiveMonths } from "@/lib/archive";
 import { getSiteUrl, articleUrl } from "@/lib/site";
@@ -19,10 +20,11 @@ export const dynamic = "force-dynamic";
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const siteUrl = getSiteUrl();
 
-  const [articles, tagNames, archiveMonths] = await Promise.all([
+  const [articles, tagNames, archiveMonths, visibleCategories] = await Promise.all([
     listArticlesForSitemap(),
     listAllTagNames(),
     listArchiveMonths(),
+    listVisibleCategoryLabels(),
   ]);
 
   const articleEntries: MetadataRoute.Sitemap = articles.map((article) => ({
@@ -30,7 +32,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     lastModified: article.updatedAt,
   }));
 
-  const categoryEntries: MetadataRoute.Sitemap = CATEGORY_LABELS.map((label) => ({
+  // 公開記事が1件も無いカテゴリはsitemapに出さない（リファクタリングS7a F-S7a-2。
+  // カテゴリ個別ページ自体は従来どおり存在し、直リンクは可能なまま）。
+  const categoryEntries: MetadataRoute.Sitemap = visibleCategories.map((label) => ({
     url: `${siteUrl}/category/${categorySlugFor(label)}`,
   }));
 

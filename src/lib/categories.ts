@@ -5,6 +5,8 @@
  */
 export const CATEGORY_GRADIENTS = {
   "パッチ/メタ": "from-sky-600 to-sky-800",
+  "Riot公式": "from-indigo-600 to-indigo-800",
+  "eスポーツ": "from-rose-600 to-rose-900",
   "5chの反応": "from-amber-600 to-amber-800",
   "海外の反応": "from-emerald-600 to-emerald-800",
 } as const;
@@ -25,6 +27,8 @@ export const DEFAULT_CATEGORY_GRADIENT = "from-neutral-600 to-neutral-800";
  */
 export const CATEGORY_SLUGS: Record<CategoryLabel, string> = {
   "パッチ/メタ": "patch-meta",
+  "Riot公式": "riot-official",
+  "eスポーツ": "esports",
   "5chの反応": "5ch",
   "海外の反応": "overseas",
 };

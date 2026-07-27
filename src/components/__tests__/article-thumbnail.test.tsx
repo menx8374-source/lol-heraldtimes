@@ -16,6 +16,8 @@ describe("ArticleThumbnail（拡張E31 テスト4: カテゴリ別既定画像�
       ["パッチ/メタ", "/default-thumb-patch-meta.svg"],
       ["5chの反応", "/default-thumb-5ch.svg"],
       ["海外の反応", "/default-thumb-overseas.svg"],
+      ["Riot公式", "/default-thumb-riot-official.svg"],
+      ["eスポーツ", "/default-thumb-esports.svg"],
     ];
     for (const [category, expectedSrc] of cases) {
       const html = renderToStaticMarkup(<ArticleThumbnail thumbnailUrl={null} category={category} />);
@@ -40,11 +42,11 @@ describe("ArticleThumbnail（拡張E31 テスト4: カテゴリ別既定画像�
     expect(unknownCategoryHtml).toContain('src="/default-thumb.svg"');
   });
 
-  it("拡張E45: 削除された旧カテゴリ「eスポーツ」が既存DBに残っていても未知カテゴリとして汎用既定サムネイルにフォールバックする(表示崩れなし)", () => {
+  it("リファクタリングS7a: 「eスポーツ」はE45での削除→再追加を経て既知カテゴリとなり、専用の既定サムネイルを表示する", () => {
     const html = renderToStaticMarkup(
       <ArticleThumbnail thumbnailUrl={null} category="eスポーツ" />,
     );
-    expect(html).toContain('src="/default-thumb.svg"');
+    expect(html).toContain('src="/default-thumb-esports.svg"');
   });
 });
 

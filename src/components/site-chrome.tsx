@@ -5,6 +5,7 @@ import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { NoticeBar } from "@/components/notice-bar";
 import { BottomOverlayStack } from "@/components/bottom-overlay-stack";
+import type { CategoryLabel } from "@/lib/categories";
 
 /**
  * 公開サイトのヘッダー／フッターを表示するかどうかを経路で切り替える(F14, Sprint 9)。
@@ -19,10 +20,16 @@ export function SiteChrome({
   children,
   notice,
   anchorAdCode,
+  categories,
 }: {
   children: React.ReactNode;
   notice?: string;
   anchorAdCode?: string;
+  /**
+   * ヘッダーナビに出すカテゴリラベル一覧（リファクタリングS7a F-S7a-2）。
+   * layout.tsx（サーバー側）が公開記事のあるカテゴリだけに絞ってDB結線した結果を渡す。
+   */
+  categories?: CategoryLabel[];
 }) {
   const pathname = usePathname();
   const isAdmin = pathname?.startsWith("/admin") ?? false;
@@ -34,7 +41,7 @@ export function SiteChrome({
   return (
     <>
       {notice && <NoticeBar message={notice} />}
-      <SiteHeader />
+      <SiteHeader categories={categories} />
       <main className="flex-1 w-full">{children}</main>
       <SiteFooter />
       <BottomOverlayStack anchorAdCode={anchorAdCode} />

@@ -17,6 +17,7 @@
  */
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
+import type { CategoryLabel } from "@/lib/categories";
 import { SOURCE_TYPES, type SourceType } from "@/lib/collection/types";
 import {
   generateArticleForCandidate,
@@ -219,6 +220,9 @@ export async function generateArticlesFromHotPosts(
       title: post.title,
       content: post.body,
       imageUrl: extractPostImageUrl(post.media),
+      // リファクタリングS7a（F-S7a-3）: 取得元ルールで付与されたPost.categoryがあればそれを、
+      // 無ければ従来どおり generateArticleForCandidate 側でソース既定にフォールバックする。
+      category: (post.category as CategoryLabel | null) ?? undefined,
     };
 
     try {

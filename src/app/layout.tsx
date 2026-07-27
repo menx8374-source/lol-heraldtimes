@@ -5,6 +5,7 @@ import { getSiteNotice } from "@/lib/notice";
 import { getAdSlotCode } from "@/lib/ads/config";
 import { NO_FLASH_DESIGN_SCRIPT } from "@/lib/no-flash-scripts";
 import { SITE_NAME } from "@/lib/site";
+import { listVisibleCategoryLabels } from "@/lib/category-visibility";
 
 export const metadata: Metadata = {
   title: {
@@ -29,7 +30,7 @@ const NO_FLASH_THEME_SCRIPT = `(function(){try{var t=localStorage.getItem('lol-m
 // デザイン軸（classic/news、拡張E14）の初期状態を描画前に決定するスクリプト。実体は
 // lib/no-flash-scripts.ts（DesignToggle とキー名/クラス名を共有し、テストで検証済み）。
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
@@ -38,6 +39,8 @@ export default function RootLayout({
   // アンカー広告（拡張E5）のタグは非公開env(AD_SLOT_ANCHOR)のためサーバー側で読み、
   // クライアントコンポーネント(SiteChrome→AnchorAdBar)へpropsで渡す(NoticeBarと同じ方式)。
   const anchorAdCode = getAdSlotCode("anchor");
+  // ヘッダーナビに出すカテゴリ（リファクタリングS7a F-S7a-2）: 公開記事があるカテゴリのみに絞る。
+  const categories = await listVisibleCategoryLabels();
 
   return (
     <html lang="ja" className="h-full antialiased">
@@ -46,7 +49,7 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: NO_FLASH_DESIGN_SCRIPT }} />
       </head>
       <body className="min-h-full flex flex-col bg-neutral-100 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
-        <SiteChrome notice={notice} anchorAdCode={anchorAdCode}>
+        <SiteChrome notice={notice} anchorAdCode={anchorAdCode} categories={categories}>
           {children}
         </SiteChrome>
       </body>

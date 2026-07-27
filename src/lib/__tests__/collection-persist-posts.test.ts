@@ -170,4 +170,28 @@ describe("persistPosts（リファクタリングS2 F-S2-2）", () => {
     });
     expect(post.media).toBeNull();
   });
+
+  it("item.categoryが指定されていればPost.categoryに保存される(リファクタリングS7a F-S7a-3)", async () => {
+    const now = new Date("2026-07-27T10:00:00+09:00");
+    await persistPosts(
+      [item({ externalId: "riot-news-1", category: "Riot公式" })],
+      "riot",
+      now,
+    );
+
+    const post = await prisma.post.findUniqueOrThrow({
+      where: { sourceType_externalId: { sourceType: "riot", externalId: "riot-news-1" } },
+    });
+    expect(post.category).toBe("Riot公式");
+  });
+
+  it("item.categoryが未指定ならPost.categoryはnullのまま保存される(回帰なし)", async () => {
+    const now = new Date("2026-07-27T10:00:00+09:00");
+    await persistPosts([item({ externalId: "no-category" })], "reddit", now);
+
+    const post = await prisma.post.findUniqueOrThrow({
+      where: { sourceType_externalId: { sourceType: "reddit", externalId: "no-category" } },
+    });
+    expect(post.category).toBeNull();
+  });
 });

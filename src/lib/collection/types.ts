@@ -2,6 +2,7 @@
  * 収集パイプライン（F5）共通の型定義。
  * architecture.md の `SourceAdapter` 抽象（reddit/5ch/riot、mock↔live 切替）に対応する。
  */
+import type { CategoryLabel } from "@/lib/categories";
 
 /**
  * 収集元ソースの全種別。**この配列が単一の source of truth** で、`SourceType` はここから導出する。
@@ -47,6 +48,11 @@ export type RawCollectionItem = {
   flair?: string | null;
   /** 画像/動画等のメディア情報（JSONとしてPostに保存）。未設定/nullでよい。 */
   media?: unknown;
+  /**
+   * リファクタリングS7a（F-S7a-3）: 取得元ルール（URLパス等）でアダプタが明示するカテゴリ
+   * （AI分類はしない）。未設定の場合は生成時にソース既定（CATEGORY_BY_SOURCE）にフォールバックする。
+   */
+  category?: CategoryLabel;
 };
 
 /** 出典URLを必ず持つ、保存可能な収集アイテム（共通フォーマット）。 */

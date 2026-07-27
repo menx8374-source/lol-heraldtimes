@@ -1,11 +1,20 @@
 import Link from "next/link";
-import { CATEGORY_LABELS, categorySlugFor } from "@/lib/categories";
+import { CATEGORY_LABELS, categorySlugFor, type CategoryLabel } from "@/lib/categories";
 import { SearchForm } from "@/components/search-form";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { DesignToggle } from "@/components/design-toggle";
 import { SITE_NAME } from "@/lib/site";
 
-export function SiteHeader() {
+export function SiteHeader({
+  categories = CATEGORY_LABELS,
+}: {
+  /**
+   * ナビに出すカテゴリラベル一覧（リファクタリングS7a F-S7a-2）。呼び出し側（layout.tsx経由）が
+   * 公開記事のあるカテゴリだけに絞って渡す想定。未指定時は従来どおり全定義カテゴリを表示する
+   * （テスト・Storybook的な単体レンダリングでの後方互換）。
+   */
+  categories?: CategoryLabel[];
+}) {
   return (
     <header data-site-header className="w-full bg-neutral-900 text-white">
       <div className="mx-auto max-w-7xl px-4 py-4">
@@ -47,7 +56,7 @@ export function SiteHeader() {
           <Link href="/" className="text-neutral-300 hover:text-white hover:underline">
             トップ
           </Link>
-          {CATEGORY_LABELS.map((label) => {
+          {categories.map((label) => {
             const slug = categorySlugFor(label);
             if (!slug) return null;
             return (
