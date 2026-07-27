@@ -10,6 +10,7 @@ import {
   matchKeywordThreads,
   parseBoards,
   parseDatReses,
+  parseFiveChExternalId,
   parseSubjectText,
   selectHighlightReses,
   type DatRes,
@@ -523,5 +524,75 @@ describe("FiveChAdapter: D1 可観測性(per-boardログ)", () => {
     expect(
       logs.some((l) => l.includes("board=test5ch.example/game") && l.includes("skip") && l.includes("subject")),
     ).toBe(true);
+  });
+});
+
+describe("純関数: parseFiveChExternalId（S4 F-S4-1）", () => {
+  it("\"server/board/threadId\"を板/スレIDに復元する", () => {
+    expect(parseFiveChExternalId("egg.5ch.net/livegame/1700000001")).toEqual({
+      server: "egg.5ch.net",
+      board: "livegame",
+      threadId: "1700000001",
+    });
+  });
+
+  it("形式不一致はnullを返す", () => {
+    expect(parseFiveChExternalId("invalid")).toBeNull();
+    expect(parseFiveChExternalId("a/b/c/d")).toBeNull();
+    expect(parseFiveChExternalId("a//c")).toBeNull();
+  });
+});
+
+describe("FiveChAdapter.fetchMetrics（リファクタリングS4 F-S4-1・テスト2）", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const board = { server: "test5ch.example", board: "game" };
+
+  it("subject.txtのresCountをcommentCountに変換して返す(score:0固定)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        url === buildSubjectUrl(board.server, board.board) ? sjisResponse(SUBJECT_TEXT_SJIS_HEX) : sjisResponse("", 500),
+      ),
+    );
+    const adapter = new FiveChAdapter({ boards: [board], userAgent: "test-ua" });
+    await expect(
+      adapter.fetchMetrics(`${board.server}/${board.board}/1700000001`),
+    ).resolves.toEqual({ score: 0, commentCount: 12 });
+  });
+
+  it("同一板の2スレ目以降はsubject.txtを再取得せずキャッシュを使う", async () => {
+    const fetchMock = vi.fn(async (url: string) =>
+      url === buildSubjectUrl(board.server, board.board) ? sjisResponse(SUBJECT_TEXT_SJIS_HEX) : sjisResponse("", 500),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new FiveChAdapter({ boards: [board], userAgent: "test-ua" });
+    await adapter.fetchMetrics(`${board.server}/${board.board}/1700000001`);
+    await adapter.fetchMetrics(`${board.server}/${board.board}/1700000003`);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("externalId形式不一致はnullを返す", async () => {
+    const adapter = new FiveChAdapter({ boards: [board] });
+    await expect(adapter.fetchMetrics("invalid")).resolves.toBeNull();
+  });
+
+  it("subject.txt取得失敗はnullを返す(例外を投げない)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => sjisResponse("", 403)));
+    const adapter = new FiveChAdapter({ boards: [board] });
+    await expect(
+      adapter.fetchMetrics(`${board.server}/${board.board}/1700000001`),
+    ).resolves.toBeNull();
+  });
+
+  it("subject.txtに該当スレIDが無ければnullを返す", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => sjisResponse(SUBJECT_TEXT_SJIS_HEX)));
+    const adapter = new FiveChAdapter({ boards: [board] });
+    await expect(
+      adapter.fetchMetrics(`${board.server}/${board.board}/9999999999`),
+    ).resolves.toBeNull();
   });
 });

@@ -98,6 +98,14 @@ export function buildCommentsSearchUrl(postId: string): string {
   return `${ARCTIC_SHIFT_BASE}/comments/search?${params.toString()}`;
 }
 
+/**
+ * 投稿ID指定の現在値取得エンドポイントURLを組み立てる（リファクタリングS4 F-S4-1、確認済みエンドポイント）。
+ */
+export function buildPostsByIdsUrl(externalId: string): string {
+  const params = new URLSearchParams({ ids: externalId });
+  return `${ARCTIC_SHIFT_BASE}/posts/ids?${params.toString()}`;
+}
+
 /** 投稿permalinkから一意・安定な絶対URLを構築する（permalink無ければ `.../comments/<id>` にフォールバック）。 */
 export function buildPostUrl(post: Pick<RedditPostData, "id" | "permalink">): string {
   if (post.permalink && post.permalink.trim().length > 0) {
@@ -358,5 +366,20 @@ export class RedditAdapter implements SourceAdapter {
       perSubredditResults.push(await this.fetchSubredditItems(subreddit));
     }
     return dedupeBySourceUrl(perSubredditResults.flat());
+  }
+
+  /**
+   * リファクタリングS4（F-S4-1）: 指定した投稿の現在のスコア/コメント数を取得する
+   * （`GET /api/posts/ids?ids=<externalId>` の確認済みエンドポイント）。取得失敗/空は null。
+   */
+  async fetchMetrics(externalId: string): Promise<{ score: number; commentCount: number } | null> {
+    const json = await fetchJsonSafe<ArcticShiftPostsResponse>(
+      buildPostsByIdsUrl(externalId),
+      { headers: { "User-Agent": this.userAgent } },
+      { logLabel: "reddit", context: `metrics id=${externalId}` },
+    );
+    const postData = json?.data?.[0];
+    if (!postData) return null;
+    return { score: postData.score ?? 0, commentCount: postData.num_comments ?? 0 };
   }
 }

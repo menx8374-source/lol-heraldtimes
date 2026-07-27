@@ -3,6 +3,7 @@ import {
   RedditAdapter,
   buildCommentsSearchUrl,
   buildPostUrl,
+  buildPostsByIdsUrl,
   buildRedditItem,
   buildRedditThreadDump,
   computeFetchWindow,
@@ -362,5 +363,60 @@ describe("RedditAdapter.fetchItems（拡張E46 テスト6・7）", () => {
 describe("純関数: buildCommentsSearchUrl", () => {
   it("link_idを付与したURLを組み立てる", () => {
     expect(buildCommentsSearchUrl("p1")).toContain("link_id=p1");
+  });
+});
+
+describe("純関数: buildPostsByIdsUrl（S4 F-S4-1）", () => {
+  it("idsを付与したURLを組み立てる", () => {
+    expect(buildPostsByIdsUrl("abc123")).toBe(
+      "https://arctic-shift.photon-reddit.com/api/posts/ids?ids=abc123",
+    );
+  });
+});
+
+describe("RedditAdapter.fetchMetrics（リファクタリングS4 F-S4-1・テスト2）", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("score/num_commentsを取得できる(確認済みエンドポイント/posts/ids)", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      expect(url).toBe(buildPostsByIdsUrl("abc123"));
+      return jsonResponse({ data: [{ id: "abc123", score: 321, num_comments: 42 }] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new RedditAdapter({});
+    await expect(adapter.fetchMetrics("abc123")).resolves.toEqual({ score: 321, commentCount: 42 });
+  });
+
+  it("score/num_comments未設定なら0を返す", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ data: [{ id: "abc123" }] })));
+    const adapter = new RedditAdapter({});
+    await expect(adapter.fetchMetrics("abc123")).resolves.toEqual({ score: 0, commentCount: 0 });
+  });
+
+  it("dataが空配列の場合はnullを返す", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ data: [] })));
+    const adapter = new RedditAdapter({});
+    await expect(adapter.fetchMetrics("abc123")).resolves.toBeNull();
+  });
+
+  it("HTTPエラーの場合はnullを返す(例外を投げない)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(null, 500)));
+    const adapter = new RedditAdapter({});
+    await expect(adapter.fetchMetrics("abc123")).resolves.toBeNull();
+  });
+
+  it("ネットワーク断の場合はnullを返す(例外を投げない)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network down");
+      }),
+    );
+    const adapter = new RedditAdapter({});
+    await expect(adapter.fetchMetrics("abc123")).resolves.toBeNull();
   });
 });

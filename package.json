@@ -10,6 +10,7 @@
     "test": "vitest run",
     "db:seed": "tsx prisma/seed.ts",
     "collect": "tsx scripts/collect.ts",
+    "update-metrics": "tsx scripts/update-metrics.ts",
     "generate": "tsx scripts/generate.ts",
     "pipeline": "tsx scripts/pipeline.ts",
     "regenerate-titles": "tsx scripts/regenerate-titles.ts",

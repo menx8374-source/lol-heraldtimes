@@ -103,4 +103,9 @@ export interface SourceAdapter {
   readonly sourceType: SourceType;
   /** 生の収集アイテムを返す。件数の上限は呼び出し側（pipeline）が適用する。 */
   fetchItems(): Promise<RawCollectionItem[]>;
+  /**
+   * リファクタリングS4（F-S4-1）: 監視中Postの現在のスコア/コメント数を再取得する任意メソッド。
+   * 非対応ソース（riot）は実装しなくてよい。失敗・非対応時は例外を投げず null を返す。
+   */
+  fetchMetrics?(externalId: string): Promise<{ score: number; commentCount: number } | null>;
 }

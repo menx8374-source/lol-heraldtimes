@@ -76,6 +76,18 @@ export function buildReadCgiUrl(server: string, board: string, threadId: string)
 
 export type SubjectEntry = { threadId: string; title: string; resCount: number };
 
+/**
+ * Post永続化用の externalId（`"server/board/threadId"`）を板/スレIDに復元する
+ * （リファクタリングS4 F-S4-1）。形式不一致は null。
+ */
+export function parseFiveChExternalId(externalId: string): { server: string; board: string; threadId: string } | null {
+  const parts = externalId.split("/");
+  if (parts.length !== 3) return null;
+  const [server, board, threadId] = parts;
+  if (!server || !board || !threadId) return null;
+  return { server, board, threadId };
+}
+
 /** subject.txt の1行 `"<threadId>.dat<>スレタイ (レス数)"` にマッチする正規表現。 */
 const SUBJECT_LINE = /^(\d+)\.dat<>(.*)\s+\((\d+)\)\s*$/;
 
@@ -286,6 +298,11 @@ export class FiveChAdapter implements SourceAdapter {
   private readonly sleep: (ms: number) => Promise<void>;
   /** 実行全体で最初のfetchかどうか（最初のfetch前はディレイ不要のため）。 */
   private firstFetchDone = false;
+  /**
+   * リファクタリングS4（F-S4-1）: fetchMetrics用のsubject.txtキャッシュ（同板の複数スレを
+   * 1取得で賄うため、アダプタインスタンス生存中は板ごとに1回だけ取得する）。
+   */
+  private readonly subjectCache = new Map<string, SubjectEntry[]>();
 
   constructor(options: FiveChAdapterOptions = {}) {
     const boardsRaw = process.env.FIVECH_BOARDS;
@@ -371,5 +388,35 @@ export class FiveChAdapter implements SourceAdapter {
     const collected = dedupeBySourceUrl(perBoardResults.flat());
     console.log(`[5ch] 収集完了 collected=${collected.length}`);
     return collected;
+  }
+
+  /** subject.txtを取得しパースする（板ごとに1回だけ・キャッシュ）。取得失敗は null。 */
+  private async getSubjectEntriesForMetrics(server: string, board: string): Promise<SubjectEntry[] | null> {
+    const key = `${server}/${board}`;
+    const cached = this.subjectCache.get(key);
+    if (cached) return cached;
+    const subjectText = await fetchShiftJisTextSafe(
+      buildSubjectUrl(server, board),
+      { headers: { "User-Agent": this.userAgent } },
+      { logLabel: "5ch", context: `${key} subject.txt(metrics)` },
+    );
+    if (!subjectText) return null;
+    const entries = parseSubjectText(subjectText);
+    this.subjectCache.set(key, entries);
+    return entries;
+  }
+
+  /**
+   * リファクタリングS4（F-S4-1）: 対象板のsubject.txtからスレのレス数を再取得する
+   * （score:0固定、commentCount:resCount）。板が復元できない/取得失敗/スレ無しは null。
+   */
+  async fetchMetrics(externalId: string): Promise<{ score: number; commentCount: number } | null> {
+    const parsed = parseFiveChExternalId(externalId);
+    if (!parsed) return null;
+    const entries = await this.getSubjectEntriesForMetrics(parsed.server, parsed.board);
+    if (!entries) return null;
+    const entry = entries.find((e) => e.threadId === parsed.threadId);
+    if (!entry) return null;
+    return { score: 0, commentCount: entry.resCount };
   }
 }
