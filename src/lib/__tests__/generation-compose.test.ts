@@ -1470,7 +1470,7 @@ describe("composeArticleBody（reddit反応記事のレス翻訳＋原文併記�
 
   const redditContent = "1: Nice teamfight there.\n2: >>1 That was so good, I love this play.";
 
-  it("翻訳が成功すると各行が{text:日本語, original:英語}になり、行の対応が正しい", async () => {
+  it("翻訳が成功すると各行が{text:日本語訳のみ}になり、行の対応が正しい(拡張E50: 原文併記なし)", async () => {
     const stub = new ReactionTranslateStubLLMClient(
       JSON.stringify({
         translations: [
@@ -1486,19 +1486,18 @@ describe("composeArticleBody（reddit反応記事のレス翻訳＋原文併記�
     const reactions = body.filter((b) => b.type === "reaction");
     expect(reactions).toHaveLength(2);
     expect(reactions[0].type === "reaction" && reactions[0].lines).toEqual([
-      { text: "いいチームファイトだった。", original: "Nice teamfight there." },
+      { text: "いいチームファイトだった。" },
     ]);
     expect(reactions[1].type === "reaction" && reactions[1].lines).toEqual([
       {
         text: ">>1 それめっちゃ良かった、大好きだ。",
-        original: ">>1 That was so good, I love this play.",
         emphasis: "orange",
       },
     ]);
     expect(stub.translateCalls).toBe(1);
   });
 
-  it("複数行レスでも行index対応で正しく組まれる", async () => {
+  it("複数行レスでも行index対応で正しく組まれる(拡張E50: 原文併記なし)", async () => {
     const content = "1: First line here.\nSecond line here.";
     const stub = new ReactionTranslateStubLLMClient(
       JSON.stringify({ translations: [{ index: 0, lines: ["最初の行です。", "二番目の行です。"] }] }),
@@ -1506,12 +1505,12 @@ describe("composeArticleBody（reddit反応記事のレス翻訳＋原文併記�
     const body = await composeArticleBody({ sourceType: "reddit", title: "Multi-line test", content }, stub);
     const reactions = body.filter((b) => b.type === "reaction");
     expect(reactions[0].type === "reaction" && reactions[0].lines).toEqual([
-      { text: "最初の行です。", original: "First line here." },
-      { text: "二番目の行です。", original: "Second line here." },
+      { text: "最初の行です。" },
+      { text: "二番目の行です。" },
     ]);
   });
 
-  it("NGワードを含む文だけが日本語訳(text)に対して削除される", async () => {
+  it("NGワードを含む文だけが日本語訳(text)に対して削除される(拡張E50: 原文併記なし)", async () => {
     const stub = new ReactionTranslateStubLLMClient(
       JSON.stringify({ translations: [{ index: 0, lines: ["カスだと思う。でも強いと思う。"] }] }),
     );
@@ -1522,7 +1521,7 @@ describe("composeArticleBody（reddit反応記事のレス翻訳＋原文併記�
     const reactions = body.filter((b) => b.type === "reaction");
     expect(reactions).toHaveLength(1);
     expect(reactions[0].type === "reaction" && reactions[0].lines).toEqual([
-      { text: "でも強いと思う。", original: "This champion sucks. But it is strong." },
+      { text: "でも強いと思う。" },
     ]);
   });
 
@@ -1551,7 +1550,7 @@ describe("composeArticleBody（reddit反応記事のレス翻訳＋原文併記�
     expect(texts).toEqual(["Nice teamfight there.", ">>1 That was so good, I love this play."]);
   });
 
-  it("翻訳LLMが行数不一致を返した場合、訳を捨てず1行に束ねて採用する(拡張E49 F-E49-2、原文は改行結合してoriginalに保持)", async () => {
+  it("翻訳LLMが行数不一致を返した場合、訳を捨てず1行に束ねて採用する(拡張E49 F-E49-2、拡張E50: 原文併記は付かない)", async () => {
     const stub = new ReactionTranslateStubLLMClient(
       JSON.stringify({
         translations: [{ index: 0, lines: ["いいチームファイトだった。", "余分な行。"] }], // 1行のはずが2行(不一致)
@@ -1563,11 +1562,11 @@ describe("composeArticleBody（reddit反応記事のレス翻訳＋原文併記�
     );
     const reactions = body.filter((b) => b.type === "reaction");
     expect(reactions[0].type === "reaction" && reactions[0].lines).toEqual([
-      { text: "いいチームファイトだった。\n余分な行。", original: "Nice teamfight there." },
+      { text: "いいチームファイトだった。\n余分な行。" },
     ]);
   });
 
-  it("行数不一致で束ねる場合もNG文を含む行だけ削除され、残りは維持される(拡張E49 F-E49-2)", async () => {
+  it("行数不一致で束ねる場合もNG文を含む行だけ削除され、残りは維持される(拡張E49 F-E49-2、拡張E50: 原文併記は付かない)", async () => {
     const stub = new ReactionTranslateStubLLMClient(
       JSON.stringify({
         translations: [{ index: 0, lines: ["カスだと思う。", "でも強いと思う。", "余分な行。"] }], // 1行のはずが3行(不一致)
@@ -1579,7 +1578,7 @@ describe("composeArticleBody（reddit反応記事のレス翻訳＋原文併記�
     );
     const reactions = body.filter((b) => b.type === "reaction");
     expect(reactions[0].type === "reaction" && reactions[0].lines).toEqual([
-      { text: "でも強いと思う。\n余分な行。", original: "Nice teamfight there." },
+      { text: "でも強いと思う。\n余分な行。" },
     ]);
   });
 
@@ -1682,7 +1681,7 @@ describe("composeArticleBody（reddit反応記事の翻訳バッチ分割、拡�
       expect(reactions).toHaveLength(5);
       reactions.forEach((r, idx) => {
         expect(r.type === "reaction" && r.lines[0].text).toBe(`JA:Comment number ${idx + 1}.`);
-        expect(r.type === "reaction" && r.lines[0].original).toBe(`Comment number ${idx + 1}.`);
+        expect(r.type === "reaction" && r.lines[0].original).toBeUndefined();
       });
     });
   });

@@ -8,9 +8,11 @@ import {
 } from "@/lib/articles";
 import { categorySlugFor, isReactionCategory } from "@/lib/categories";
 import { pickDeterministicChampionSplashUrl } from "@/lib/generation/champion-splash";
+import { shouldShowHeroThumbnail } from "@/lib/article-body";
 import { buildArticleDescription, toSafeJsonLd } from "@/lib/seo";
 import { getSiteUrl, SITE_NAME } from "@/lib/site";
 import { ArticleBodyView } from "@/components/article-body-view";
+import { ArticleThumbnail } from "@/components/article-thumbnail";
 import { ArticleMeta } from "@/components/article-meta";
 import { ArticleList } from "@/components/article-list";
 import { PageWithSidebar } from "@/components/page-with-sidebar";
@@ -163,6 +165,20 @@ export default async function ArticlePage({ params }: Props) {
               <p className="mt-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
                 【未確認】この記事は未確定・噂レベルの情報を含みます。内容の真偽は確認されていません。
               </p>
+            )}
+
+            {/* 記事冒頭のサムネ画像(拡張E50 F-E50-2)。本文先頭が既にimageブロック(パッチ記事の
+                公式バナー、拡張E42)の場合は二重表示になるため出さない。 */}
+            {shouldShowHeroThumbnail(article.body) && (
+              <div className="mt-4">
+                <ArticleThumbnail
+                  thumbnailUrl={article.thumbnailUrl}
+                  category={article.category}
+                  slug={article.slug}
+                  alt={article.title}
+                  className="max-h-96 w-full rounded-lg object-cover"
+                />
+              </div>
             )}
 
             <div className="mt-4">

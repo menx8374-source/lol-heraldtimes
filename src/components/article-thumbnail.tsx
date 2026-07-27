@@ -19,13 +19,16 @@ export function ArticleThumbnail({
   category,
   slug,
   className = "",
+  alt = "",
 }: {
   thumbnailUrl: string | null;
-  /** 記事のカテゴリ表示ラベル（未指定/未知のカテゴリは汎用既定画像にフォールバック）。 */
+  /** 記事のカテゴリ表示ラベル(未指定/未知のカテゴリは汎用既定画像にフォールバック)。 */
   category?: string | null;
   /** 記事slug。反応カテゴリでthumbnailUrl未設定のとき、決定論スプラッシュのキーに使う。 */
   slug?: string;
   className?: string;
+  /** 画像のalt属性(拡張E50: 記事冒頭ヒーロー表示では記事タイトルを渡す。未指定時は装飾画像として空文字)。 */
+  alt?: string;
 }) {
   const categorySlug = category ? categorySlugFor(category) : undefined;
   const defaultSrc = categorySlug ? `/default-thumb-${categorySlug}.svg` : DEFAULT_THUMBNAIL_SRC;
@@ -43,7 +46,7 @@ export function ArticleThumbnail({
     // eslint-disable-next-line @next/next/no-img-element -- 外部APIの画像URL、またはローカルの既定/モック画像のみを表示対象とする（信頼境界: isSafeImageUrlでhttps/ローカルパスを検証済み）
     <img
       src={src}
-      alt=""
+      alt={alt}
       loading="lazy"
       decoding="async"
       className={`object-cover ${className}`}

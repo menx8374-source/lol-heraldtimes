@@ -479,9 +479,10 @@ function removeNgSentences(text: string): string {
 /**
  * レス1件分の表示行（ArticleBodyReactionLine[]）を、抽出行（英語/日本語の逐語）と翻訳結果（reddit時のみ、
  * 無ければnull）から組み立てる（拡張E47 F-E47-1、拡張E49 F-E49-2で行数不一致時の束ね組み立てに対応）。
- * - 訳があり行数が原文(extractedLines)と一致 → 従来どおり行単位。text=日本語訳、original=英語原文。
- * - 訳があるが行数が不一致 → 訳を捨てず、そのレスを1行に束ねる。text=日本語訳を改行結合、
- *   original=英語原文を改行結合（逐語併記は維持）。
+ * - 訳があり行数が原文(extractedLines)と一致 → 従来どおり行単位。text=日本語訳のみ
+ *   （拡張E50で原文英語併記=originalの付与は廃止）。
+ * - 訳があるが行数が不一致 → 訳を捨てず、そのレスを1行に束ねる。text=日本語訳を改行結合
+ *   （originalは付与しない）。
  * - 訳が全く無い（5ch・reddit翻訳失敗） → 抽出行そのまま（originalなし、英語原文フォールバック）。
  * いずれの場合もNGワードを含む文はremoveNgSentencesで削除し、削除後に空になった行は落とす
  * （束ねた行がNGで空になれば、そのレスは戻り値が空配列になり呼び出し側で不掲載になる）。
@@ -500,23 +501,21 @@ function buildReactionDisplayLines(
       lines.push({
         text: cleanedText,
         ...(emphasis[li] ? { emphasis: emphasis[li] } : {}),
-        original: extractedLines[li],
       });
     });
     return lines;
   }
 
   if (translatedLines && translatedLines.length > 0) {
-    // 行数不一致: 訳を捨てず1つのまとまった行に束ねる（訳文・原文をそれぞれ改行結合）。NG文削除は
-    // 束ねる前の各行に対して行う（removeNgSentencesは文を"."で連結し直すため、先に改行結合してしまうと
-    // 行の区切りが失われる）。全行がNGで消えた場合のみこのレス自体を落とす（従来どおり）。
+    // 行数不一致: 訳を捨てず1つのまとまった行に束ねる（訳文を改行結合、originalは付与しない）。
+    // NG文削除は束ねる前の各行に対して行う（removeNgSentencesは文を"."で連結し直すため、先に改行結合
+    // してしまうと行の区切りが失われる）。全行がNGで消えた場合のみこのレス自体を落とす（従来どおり）。
     const cleanedJaLines = translatedLines.map((l) => removeNgSentences(l)).filter((l) => l.length > 0);
     if (cleanedJaLines.length === 0) return [];
     const bundledJa = cleanedJaLines.join("\n");
-    const bundledEn = extractedLines.join("\n");
     const emphasis = computeLineEmphasis(cleanedJaLines);
     const emphasisValue = emphasis.find((e) => e !== undefined);
-    return [{ text: bundledJa, ...(emphasisValue ? { emphasis: emphasisValue } : {}), original: bundledEn }];
+    return [{ text: bundledJa, ...(emphasisValue ? { emphasis: emphasisValue } : {}) }];
   }
 
   // 訳が全く無い（5ch・reddit翻訳失敗）: 抽出行そのまま（originalなし、英語原文フォールバック）。

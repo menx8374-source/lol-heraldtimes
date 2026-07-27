@@ -261,6 +261,16 @@ export function hasStructuredHeadings(blocks: ArticleBodyBlock[]): boolean {
 }
 
 /**
+ * 記事冒頭にヒーロー用のサムネイル画像を表示すべきか（拡張E50 F-E50-2）。
+ * 本文の先頭ブロックが image（パッチ記事の公式バナー、拡張E42）の場合は、ヒーローと本文冒頭の
+ * 画像が二重表示になるため false（表示しない）を返す。それ以外（反応記事等、image で
+ * 始まらない記事、本文が空の記事）は true。
+ */
+export function shouldShowHeroThumbnail(blocks: ArticleBodyBlock[]): boolean {
+  return blocks[0]?.type !== "image";
+}
+
+/**
  * 表示用のグルーピング結果（拡張E12）。連続する reaction ブロックを1つの枠にまとめて表示するため、
  * `groupArticleBodyBlocksForDisplay` がブロック配列をこの表現に変換する。それ以外のブロックは
  * 従来どおり1件ずつ描画する（`single`）。
