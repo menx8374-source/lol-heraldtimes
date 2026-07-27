@@ -105,8 +105,8 @@ describe("buildReactionBlocks（REACTION_SELECT_MODEによる反応レス選別�
       const spy = new SpyLLMClient(
         JSON.stringify({
           translations: [
-            { index: 0, lines: ["いいチームファイトだった。"] },
-            { index: 1, lines: [">>1 それめっちゃ良かった。"] },
+            { index: 0, text: "いいチームファイトだった。" },
+            { index: 1, text: ">>1 それめっちゃ良かった。" },
           ],
         }),
       );

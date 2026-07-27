@@ -218,41 +218,52 @@ async function selectReactionReses(
   }
 }
 
-/** レス翻訳（reaction-translate、拡張E47 F-E47-1）の system 指示。捏造禁止・行数厳密一致をここで固定する。 */
+/**
+ * レス翻訳（reaction-translate、拡張E47 F-E47-1）の system 指示。拡張E51 F-E51-2で「行ごとの直訳・
+ * 行数厳密一致」から「レス（コメント）全体を文脈ごと自然な日本語にする」方針へ書き換えた。日本の
+ * 『海外の反応』まとめサイトのように、日本人プレイヤーが書いたような自然な口語・スッと読める日本語に
+ * 意訳してよい（逐語訳・翻訳調を避ける）。ただし事実・数値・固有名詞（チャンピオン名/選手名/チーム名/
+ * スコア）の捏造・改変・重要情報の欠落は禁止する（ここで固定する）。
+ */
 const REACTION_TRANSLATE_SYSTEM_PROMPT =
-  "あなたはLoLまとめサイトの翻訳担当です。渡された各レスの行（英語）を自然な日本語に訳してください。" +
-  "行数・順序は入力と厳密に一致させてください（1行に1行で対応）。LoL用語（チャンピオン名・レーン・" +
-  "BAN/ピック等）は一般的な日本語表記にしてください。意味を変えない・要約しない・増やさないでください。" +
-  '出力はJSONのみとし、{"translations": [{"index": N, "lines": ["日本語行", ...]}, ...]} の形式に' +
-  "してください（説明文・前置き・コードブロックは付けない）。";
+  "あなたは日本の『海外の反応』まとめサイトの翻訳担当です。渡す各レスはRedditのコメント全文（英語）です。" +
+  "まるで日本人プレイヤーが自分の言葉で書いたような、スッと頭に入る自然な口語の日本語に翻訳してください。" +
+  "逐語訳・翻訳調は避け、意味・ニュアンス・温度感が伝わるこなれた日本語にしてください" +
+  "（人気の海外の反応まとめサイトのように読みやすく）。" +
+  "英語のネットスラング・略語・LoL用語（チャンピオン名・レーン・BAN/ピック・ナーフ/バフ等）は、" +
+  "日本のプレイヤーが普段使う自然な言い回しに置き換えてください。皮肉・ジョーク・愚痴・煽り合いなどの" +
+  "口調やテンションも日本語の口語で再現してください。一文が長い・回りくどいコメントは、日本語として" +
+  "自然な短さ・語順に整えて読みやすくしてよいです（意味は保つこと）。" +
+  "ただし事実・数値・固有名詞（チャンピオン名/選手名/チーム名/スコア）は変えない・作らない・重要な情報を" +
+  "落とさないでください。意訳・自然化はしてよいですが、情報の追加/削除や事実の改変はしないでください。" +
+  "読みやすさ重視で自然な文にしてください。ただし元コメントに無い過度な脚色・煽り増しはしないでください。" +
+  '出力はJSONのみとし、{"translations": [{"index": N, "text": "自然な日本語訳（1コメント分・複数文可）"}, ...]} ' +
+  "の形式にしてください（説明文・前置き・コードブロックは付けない）。";
 
 /**
- * LLMが返した `{translations:[{index,lines}]}` 生JSON値を検証・正規化する純関数（拡張E47 F-E47-1、
- * 拡張E49 F-E49-2で行数厳密一致の要件を緩和）。index が入力に実在し、lines が非空文字列の配列
- * （各要素が空でない文字列）であれば採用する。行数が原文と一致するかどうかはここでは問わない
- * （一致判定・不一致時の1行への束ね組み立ては呼び出し側の `buildReactionBlocks` が行う）。
- * 上位の `translateReactionLines` が最終的に null を返すかどうかを判断できるよう、ここでは
- * （空も含め）Map を返す。
+ * LLMが返した `{translations:[{index,text}]}` 生JSON値を検証・正規化する純関数（拡張E47 F-E47-1、
+ * 拡張E51 F-E51-1でレス単位の全文翻訳に変更。行数一致の制約は撤廃）。index が入力に実在し、text が
+ * 非空文字列であれば採用する。上位の `translateReactionLines` が最終的に null を返すかどうかを
+ * 判断できるよう、ここでは（空も含め）Map を返す。
  */
 function normalizeTranslations(
   raw: unknown,
-  reses: { index: number; lines: string[] }[],
-): Map<number, string[]> | null {
+  reses: { index: number; text: string }[],
+): Map<number, string> | null {
   if (typeof raw !== "object" || raw === null) return null;
   const obj = raw as Record<string, unknown>;
   if (!Array.isArray(obj.translations)) return null;
 
   const validIndices = new Set(reses.map((r) => r.index));
-  const result = new Map<number, string[]>();
+  const result = new Map<number, string>();
   for (const rawEntry of obj.translations) {
     if (typeof rawEntry !== "object" || rawEntry === null) continue;
     const e = rawEntry as Record<string, unknown>;
     const index = e.index;
     if (typeof index !== "number" || !Number.isInteger(index) || !validIndices.has(index)) continue;
     if (result.has(index)) continue;
-    if (!Array.isArray(e.lines) || e.lines.length === 0) continue;
-    if (!e.lines.every((l): l is string => typeof l === "string" && l.trim().length > 0)) continue;
-    result.set(index, e.lines as string[]);
+    if (typeof e.text !== "string" || e.text.trim().length === 0) continue;
+    result.set(index, e.text);
   }
   return result;
 }
@@ -272,21 +283,21 @@ const REDDIT_TRANSLATE_BATCH_CHAR_LIMIT = 3000;
 
 /**
  * 表示対象レスを、件数（`redditTranslateBatchSize()`件ごと）と合計文字数（`REDDIT_TRANSLATE_BATCH_CHAR_LIMIT`）
- * の両方の安全上限でバッチに分割する（拡張E49 F-E49-1）。1記事分の全レスを1回のLLM呼び出しでまとめて
- * 送ると出力JSONが大きくなり途中で切れてparse不能になりやすいため、バッチ単位に分けることで
- * 「あるバッチの失敗が記事全体を英語にする」事態を避ける。1件だけでバッチサイズ・文字数上限を
- * 超える場合でもそのレス単独のバッチにする（無限ループ・空バッチにはしない）。
+ * の両方の安全上限でバッチに分割する（拡張E49 F-E49-1、拡張E51 F-E51-1でレス全文（text）単位に変更）。
+ * 1記事分の全レスを1回のLLM呼び出しでまとめて送ると出力JSONが大きくなり途中で切れてparse不能になりやすい
+ * ため、バッチ単位に分けることで「あるバッチの失敗が記事全体を英語にする」事態を避ける。1件だけで
+ * バッチサイズ・文字数上限を超える場合でもそのレス単独のバッチにする（無限ループ・空バッチにはしない）。
  */
 function splitIntoTranslateBatches(
-  reses: { index: number; lines: string[] }[],
-): { index: number; lines: string[] }[][] {
+  reses: { index: number; text: string }[],
+): { index: number; text: string }[][] {
   const batchSize = redditTranslateBatchSize();
-  const batches: { index: number; lines: string[] }[][] = [];
-  let current: { index: number; lines: string[] }[] = [];
+  const batches: { index: number; text: string }[][] = [];
+  let current: { index: number; text: string }[] = [];
   let currentChars = 0;
 
   for (const res of reses) {
-    const resChars = res.lines.reduce((sum, l) => sum + l.length, 0);
+    const resChars = res.text.length;
     if (
       current.length > 0 &&
       (current.length >= batchSize || currentChars + resChars > REDDIT_TRANSLATE_BATCH_CHAR_LIMIT)
@@ -303,14 +314,15 @@ function splitIntoTranslateBatches(
 }
 
 /**
- * 1バッチ分のレス行をLLMに翻訳させる（拡張E49 F-E49-1、旧 translateReactionLines の単発実装を
- * バッチ単位に切り出したもの）。失敗（APIエラー・空応答・parse不能・不正形式）時は例外を投げず
- * null を返す（呼び出し側がそのバッチのレスだけ英語原文フォールバックする）。
+ * 1バッチ分のレス全文をLLMに翻訳させる（拡張E49 F-E49-1、旧 translateReactionLines の単発実装を
+ * バッチ単位に切り出したもの。拡張E51 F-E51-1でレス全文単位に変更）。失敗（APIエラー・空応答・
+ * parse不能・不正形式）時は例外を投げず null を返す（呼び出し側がそのバッチのレスだけ英語原文
+ * フォールバックする）。
  */
 async function translateReactionBatch(
   llmClient: LLMClient,
-  batch: { index: number; lines: string[] }[],
-): Promise<Map<number, string[]> | null> {
+  batch: { index: number; text: string }[],
+): Promise<Map<number, string> | null> {
   try {
     const task: GenerationTask = { kind: "reaction-translate", reses: batch };
     const raw = await llmClient.generate([
@@ -328,23 +340,24 @@ async function translateReactionBatch(
 }
 
 /**
- * reddit反応記事の表示対象レス行（英語）をLLMで日本語訳する（拡張E47 F-E47-1、拡張E49 F-E49-1で
- * バッチ分割に変更）。全レスを1回でまとめて送らず、`splitIntoTranslateBatches` で分割したバッチ
- * ごとに個別translateし、結果のMapをマージして返す。あるバッチが失敗（null）しても他バッチの
- * 訳はそのまま活かす（そのバッチのレスだけ呼び出し側で英語原文フォールバックになる＝記事まるごと
- * 英語にしない）。全レスが空配列の場合のみ null を返す。
+ * reddit反応記事の表示対象レスをLLMで日本語訳する（拡張E47 F-E47-1、拡張E49 F-E49-1でバッチ分割、
+ * 拡張E51 F-E51-1でレス（コメント）全体の全文翻訳に変更＝行単位の直訳をやめ文脈を保つ）。全レスを
+ * 1回でまとめて送らず、`splitIntoTranslateBatches` で分割したバッチごとに個別translateし、結果の
+ * Mapをマージして返す。あるバッチが失敗（null）しても他バッチの訳はそのまま活かす（そのバッチの
+ * レスだけ呼び出し側で英語原文フォールバックになる＝記事まるごと英語にしない）。全レスが空配列の
+ * 場合のみ null を返す。
  */
 async function translateReactionLines(
   llmClient: LLMClient,
-  reses: { index: number; lines: string[] }[],
-): Promise<Map<number, string[]> | null> {
+  reses: { index: number; text: string }[],
+): Promise<Map<number, string> | null> {
   if (reses.length === 0) return null;
   const batches = splitIntoTranslateBatches(reses);
-  const merged = new Map<number, string[]>();
+  const merged = new Map<number, string>();
   for (const batch of batches) {
     const result = await translateReactionBatch(llmClient, batch);
     if (!result) continue; // このバッチのレスだけ訳が欠け、呼び出し側が英語フォールバックする
-    for (const [index, lines] of result) merged.set(index, lines);
+    for (const [index, text] of result) merged.set(index, text);
   }
   return merged;
 }
@@ -477,25 +490,29 @@ function removeNgSentences(text: string): string {
 }
 
 /**
- * レス1件分の表示行（ArticleBodyReactionLine[]）を、抽出行（英語/日本語の逐語）と翻訳結果（reddit時のみ、
- * 無ければnull）から組み立てる（拡張E47 F-E47-1、拡張E49 F-E49-2で行数不一致時の束ね組み立てに対応）。
- * - 訳があり行数が原文(extractedLines)と一致 → 従来どおり行単位。text=日本語訳のみ
- *   （拡張E50で原文英語併記=originalの付与は廃止）。
- * - 訳があるが行数が不一致 → 訳を捨てず、そのレスを1行に束ねる。text=日本語訳を改行結合
- *   （originalは付与しない）。
+ * レス1件分の表示行（ArticleBodyReactionLine[]）を、抽出行（英語の逐語）と翻訳結果（reddit時のみ、
+ * 自然な日本語の全文。無ければnull）から組み立てる（拡張E47 F-E47-1、拡張E51 F-E51-3でレス全体の
+ * 自然な日本語全文からの組み立てに変更＝行数一致の制約は撤廃）。
+ * - 訳がある → 訳文（1コメント分の自然な日本語）を改行で行に分割（空行は除去、改行が無ければ1行）
+ *   して組む。text=日本語訳のみ（拡張E50で原文英語併記=originalの付与は廃止）。
  * - 訳が全く無い（5ch・reddit翻訳失敗） → 抽出行そのまま（originalなし、英語原文フォールバック）。
  * いずれの場合もNGワードを含む文はremoveNgSentencesで削除し、削除後に空になった行は落とす
- * （束ねた行がNGで空になれば、そのレスは戻り値が空配列になり呼び出し側で不掲載になる）。
+ * （全行がNGで空になれば、そのレスは戻り値が空配列になり呼び出し側で不掲載になる）。
  * 強調(computeLineEmphasis)は表示テキスト（訳があれば日本語）に対して判定する。
  */
 function buildReactionDisplayLines(
   extractedLines: string[],
-  translatedLines: string[] | null,
+  translatedText: string | null,
 ): ArticleBodyReactionBlock["lines"] {
-  if (translatedLines && translatedLines.length === extractedLines.length) {
-    const emphasis = computeLineEmphasis(translatedLines);
+  if (translatedText && translatedText.trim().length > 0) {
+    const splitLines = translatedText
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+    const jaLines = splitLines.length > 0 ? splitLines : [translatedText.trim()];
+    const emphasis = computeLineEmphasis(jaLines);
     const lines: ArticleBodyReactionBlock["lines"] = [];
-    translatedLines.forEach((jaText, li) => {
+    jaLines.forEach((jaText, li) => {
       const cleanedText = removeNgSentences(jaText);
       if (cleanedText.length === 0) return;
       lines.push({
@@ -504,18 +521,6 @@ function buildReactionDisplayLines(
       });
     });
     return lines;
-  }
-
-  if (translatedLines && translatedLines.length > 0) {
-    // 行数不一致: 訳を捨てず1つのまとまった行に束ねる（訳文を改行結合、originalは付与しない）。
-    // NG文削除は束ねる前の各行に対して行う（removeNgSentencesは文を"."で連結し直すため、先に改行結合
-    // してしまうと行の区切りが失われる）。全行がNGで消えた場合のみこのレス自体を落とす（従来どおり）。
-    const cleanedJaLines = translatedLines.map((l) => removeNgSentences(l)).filter((l) => l.length > 0);
-    if (cleanedJaLines.length === 0) return [];
-    const bundledJa = cleanedJaLines.join("\n");
-    const emphasis = computeLineEmphasis(cleanedJaLines);
-    const emphasisValue = emphasis.find((e) => e !== undefined);
-    return [{ text: bundledJa, ...(emphasisValue ? { emphasis: emphasisValue } : {}) }];
   }
 
   // 訳が全く無い（5ch・reddit翻訳失敗）: 抽出行そのまま（originalなし、英語原文フォールバック）。
@@ -550,8 +555,9 @@ function buildReactionDisplayLines(
  * `>>N` アンカーを含み、参照先Nが reses に存在し未選択なら、文脈としてそのレスも表示に追加する
  * （全行・強調なし。追加した文脈レスがさらに参照する先は辿らない＝1階層のみ）。追加後は元スレ順
  * （index昇順）に整列してから組む。
- * 拡張E49 F-E49-2: reddit翻訳の行数がレス原文と不一致でも訳を捨てず、そのレスを1行に束ねて採用する
- * （buildReactionDisplayLines参照）。訳が全く無いレスのみ英語原文フォールバックにする。
+ * 拡張E51 F-E51-1/F-E51-3: reddit翻訳はレス（コメント）全体の全文を渡し、自然な日本語の全文を
+ * 改行区切りで行に分割して採用する（行数一致の制約は撤廃、buildReactionDisplayLines参照）。訳が
+ * 全く無いレスのみ英語原文フォールバックにする。
  * リファクタリングS3 F-S3-3: `REACTION_SELECT_MODE`（既定 rules）が"llm"でない限り、AIによる
  * `selectReactionReses` を呼ばず、常に `selectMajorConversationCluster`（数値ルール＝アンカー会話
  * クラスタ）でレスを選ぶ（AI選別・スコアリングを行わない）。強調は決定論（`computeLineEmphasis`＋
@@ -602,13 +608,14 @@ async function buildReactionBlocks(
     }),
   );
 
-  // 拡張E47 F-E47-1/F-E47-2、拡張E49 F-E49-1: reddit のときだけ、表示対象レスの行（英語）を
-  // バッチ分割して日本語訳する（1記事分をまとめて1回で送ると出力JSONが途中で切れやすいため）。
+  // 拡張E47 F-E47-1/F-E47-2、拡張E49 F-E49-1、拡張E51 F-E51-1: reddit のときだけ、表示対象レスの
+  // 全文（行を改行結合したtext）をバッチ分割して日本語訳する（1記事分をまとめて1回で送ると出力JSON
+  // が途中で切れやすいため。行単位ではなくレス全体を渡すことで文脈を保った自然な訳にする）。
   // 5ch では呼ばない（追加LLM呼び出しゼロ・逐語不変）。あるバッチの翻訳が失敗した場合、そのバッチの
   // レスだけ英語原文フォールバックになる（他バッチの訳は活かす。本体を止めない）。
-  let translations: Map<number, string[]> | null = null;
+  let translations: Map<number, string> | null = null;
   if (sourceType === "reddit" && selectedIndices.length > 0) {
-    const toTranslate = selectedIndices.map((i) => ({ index: i, lines: extractedLinesByIndex.get(i)! }));
+    const toTranslate = selectedIndices.map((i) => ({ index: i, text: extractedLinesByIndex.get(i)!.join("\n") }));
     translations = await translateReactionLines(llmClient, toTranslate);
   }
 
@@ -618,15 +625,15 @@ async function buildReactionBlocks(
       // 行indexの指定があれば元 res.lines からその行だけを逐語のまま抽出する（拡張E28 F-E28-2）。
       // 指定なし（null＝全行採用、または選定自体が無いフォールバック）はres.linesをそのまま使う。
       const extractedLines = extractedLinesByIndex.get(i)!;
-      const translatedLines = translations?.get(i) ?? null;
+      const translatedText = translations?.get(i) ?? null;
       const anchors = extractAnchors(extractedLines).filter((n) => n !== res.number && knownNumbers.has(n));
       const isEmphasized = selection ? selection.emphasize.has(i) : false;
       const emphasisColor = isEmphasized ? (selection!.emphasize.get(i) ?? null) : null;
 
-      // 拡張E49 F-E49-2: 訳の行数が原文と一致すれば行単位、不一致なら1行に束ねて採用する（訳を捨てない）。
-      // 訳が全く無いレスのみ抽出行そのまま（英語原文フォールバック）。NG削除・強調は表示テキスト
-      // （訳があれば日本語）に適用する（buildReactionDisplayLines内）。
-      const cleanedLines = buildReactionDisplayLines(extractedLines, translatedLines);
+      // 拡張E51 F-E51-3: 訳（自然な日本語の全文）があればその改行区切りを行として採用する
+      // （行数一致は問わない）。訳が全く無いレスのみ抽出行そのまま（英語原文フォールバック）。
+      // NG削除・強調は表示テキスト（訳があれば日本語）に適用する（buildReactionDisplayLines内）。
+      const cleanedLines = buildReactionDisplayLines(extractedLines, translatedText);
       if (cleanedLines.length === 0) return null;
 
       return {

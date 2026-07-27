@@ -32,11 +32,13 @@ export type GenerationTask =
     }
   | {
       /**
-       * 拡張E47 F-E47-1: reddit反応記事のレス行（英語）を日本語訳させるタスク。
-       * 出力は `{ translations: [{ index, lines: [日本語行,...] }, ...] }`（行数・順序は入力と厳密一致）。
+       * 拡張E47 F-E47-1: reddit反応記事のレスを日本語訳させるタスク。拡張E51 F-E51-1で翻訳単位を
+       * 「行」から「レス（コメント）全体の全文」に変更（行を改行結合したtext）。文脈が行単位に
+       * 分断されないようにし、自然な日本語訳にする。
+       * 出力は `{ translations: [{ index, text: "自然な日本語訳（複数文可）" }, ...] }`（行数一致の制約は撤廃）。
        */
       kind: "reaction-translate";
-      reses: { index: number; lines: string[] }[];
+      reses: { index: number; text: string }[];
     };
 
 function renderIntro(task: Extract<GenerationTask, { kind: "intro" }>): string {

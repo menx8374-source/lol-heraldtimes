@@ -1434,7 +1434,7 @@ describe("composeArticleBody（riotパッチ記事の3段フォールバック: 
   });
 });
 
-describe("composeArticleBody（reddit反応記事のレス翻訳＋原文併記、拡張E47 F-E47-1/F-E47-2）", () => {
+describe("composeArticleBody（reddit反応記事のレス翻訳、拡張E47 F-E47-1/F-E47-2、拡張E51で全文翻訳に変更）", () => {
   /**
    * reaction-select と reaction-translate を呼び出しタスク種別ごとに応答を切り替えるスタブ。
    * reaction-select は常に「全レスkeep・強調なし」を返し（抜粋選定の影響を排除して翻訳だけを検証する）、
@@ -1470,12 +1470,12 @@ describe("composeArticleBody（reddit反応記事のレス翻訳＋原文併記�
 
   const redditContent = "1: Nice teamfight there.\n2: >>1 That was so good, I love this play.";
 
-  it("翻訳が成功すると各行が{text:日本語訳のみ}になり、行の対応が正しい(拡張E50: 原文併記なし)", async () => {
+  it("翻訳が成功すると各行が{text:日本語訳のみ}になる(拡張E51: レス全体の全文翻訳、拡張E50: 原文併記なし)", async () => {
     const stub = new ReactionTranslateStubLLMClient(
       JSON.stringify({
         translations: [
-          { index: 0, lines: ["いいチームファイトだった。"] },
-          { index: 1, lines: [">>1 それめっちゃ良かった、大好きだ。"] },
+          { index: 0, text: "いいチームファイトだった。" },
+          { index: 1, text: ">>1 それめっちゃ良かった、大好きだ。" },
         ],
       }),
     );
@@ -1497,10 +1497,10 @@ describe("composeArticleBody（reddit反応記事のレス翻訳＋原文併記�
     expect(stub.translateCalls).toBe(1);
   });
 
-  it("複数行レスでも行index対応で正しく組まれる(拡張E50: 原文併記なし)", async () => {
+  it("訳の全文に改行が含まれると行に分割される(拡張E51 F-E51-3: 行数一致の制約は撤廃)", async () => {
     const content = "1: First line here.\nSecond line here.";
     const stub = new ReactionTranslateStubLLMClient(
-      JSON.stringify({ translations: [{ index: 0, lines: ["最初の行です。", "二番目の行です。"] }] }),
+      JSON.stringify({ translations: [{ index: 0, text: "最初の行です。\n二番目の行です。" }] }),
     );
     const body = await composeArticleBody({ sourceType: "reddit", title: "Multi-line test", content }, stub);
     const reactions = body.filter((b) => b.type === "reaction");
@@ -1510,9 +1510,26 @@ describe("composeArticleBody（reddit反応記事のレス翻訳＋原文併記�
     ]);
   });
 
+  it("訳の改行区切りの行数が原文の行数と異なっていても、そのまま複数行として使われる(拡張E51 F-E51-1: 行数一致の制約は撤廃)", async () => {
+    const stub = new ReactionTranslateStubLLMClient(
+      JSON.stringify({
+        translations: [{ index: 0, text: "いいチームファイトだった。\n本当に楽しかった。" }],
+      }),
+    );
+    const body = await composeArticleBody(
+      { sourceType: "reddit", title: "Line count mismatch test", content: redditContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions[0].type === "reaction" && reactions[0].lines).toEqual([
+      { text: "いいチームファイトだった。" },
+      { text: "本当に楽しかった。" },
+    ]);
+  });
+
   it("NGワードを含む文だけが日本語訳(text)に対して削除される(拡張E50: 原文併記なし)", async () => {
     const stub = new ReactionTranslateStubLLMClient(
-      JSON.stringify({ translations: [{ index: 0, lines: ["カスだと思う。でも強いと思う。"] }] }),
+      JSON.stringify({ translations: [{ index: 0, text: "カスだと思う。でも強いと思う。" }] }),
     );
     const body = await composeArticleBody(
       { sourceType: "reddit", title: "Champion talk", content: "1: This champion sucks. But it is strong." },
@@ -1525,9 +1542,23 @@ describe("composeArticleBody（reddit反応記事のレス翻訳＋原文併記�
     ]);
   });
 
+  it("複数行の訳でもNG文を含む行だけ削除され、残りの行は維持される(拡張E51)", async () => {
+    const stub = new ReactionTranslateStubLLMClient(
+      JSON.stringify({ translations: [{ index: 0, text: "カスだと思う。\nでも強いと思う。" }] }),
+    );
+    const body = await composeArticleBody(
+      { sourceType: "reddit", title: "Bundle NG test", content: redditContent },
+      stub,
+    );
+    const reactions = body.filter((b) => b.type === "reaction");
+    expect(reactions[0].type === "reaction" && reactions[0].lines).toEqual([
+      { text: "でも強いと思う。" },
+    ]);
+  });
+
   it("強調(computeLineEmphasis)は日本語訳(text)に対して判定される", async () => {
     const stub = new ReactionTranslateStubLLMClient(
-      JSON.stringify({ translations: [{ index: 0, lines: ["これは草生えるわ"] }] }),
+      JSON.stringify({ translations: [{ index: 0, text: "これは草生えるわ" }] }),
     );
     const body = await composeArticleBody(
       { sourceType: "reddit", title: "Emphasis test", content: "1: haha this is hilarious" },
@@ -1548,38 +1579,6 @@ describe("composeArticleBody（reddit反応記事のレス翻訳＋原文併記�
     }
     const texts = reactions.flatMap((b) => (b.type === "reaction" ? b.lines.map((l) => l.text) : []));
     expect(texts).toEqual(["Nice teamfight there.", ">>1 That was so good, I love this play."]);
-  });
-
-  it("翻訳LLMが行数不一致を返した場合、訳を捨てず1行に束ねて採用する(拡張E49 F-E49-2、拡張E50: 原文併記は付かない)", async () => {
-    const stub = new ReactionTranslateStubLLMClient(
-      JSON.stringify({
-        translations: [{ index: 0, lines: ["いいチームファイトだった。", "余分な行。"] }], // 1行のはずが2行(不一致)
-      }),
-    );
-    const body = await composeArticleBody(
-      { sourceType: "reddit", title: "Mismatch test", content: redditContent },
-      stub,
-    );
-    const reactions = body.filter((b) => b.type === "reaction");
-    expect(reactions[0].type === "reaction" && reactions[0].lines).toEqual([
-      { text: "いいチームファイトだった。\n余分な行。" },
-    ]);
-  });
-
-  it("行数不一致で束ねる場合もNG文を含む行だけ削除され、残りは維持される(拡張E49 F-E49-2、拡張E50: 原文併記は付かない)", async () => {
-    const stub = new ReactionTranslateStubLLMClient(
-      JSON.stringify({
-        translations: [{ index: 0, lines: ["カスだと思う。", "でも強いと思う。", "余分な行。"] }], // 1行のはずが3行(不一致)
-      }),
-    );
-    const body = await composeArticleBody(
-      { sourceType: "reddit", title: "Bundle NG test", content: redditContent },
-      stub,
-    );
-    const reactions = body.filter((b) => b.type === "reaction");
-    expect(reactions[0].type === "reaction" && reactions[0].lines).toEqual([
-      { text: "でも強いと思う。\n余分な行。" },
-    ]);
   });
 
   it("翻訳LLMが不正なJSONを返しても例外を投げず英語フォールバックになる", async () => {
@@ -1635,11 +1634,11 @@ describe("composeArticleBody（reddit反応記事のレス翻訳＋原文併記�
   });
 });
 
-describe("composeArticleBody（reddit反応記事の翻訳バッチ分割、拡張E49 F-E49-1）", () => {
+describe("composeArticleBody（reddit反応記事の翻訳バッチ分割、拡張E49 F-E49-1、拡張E51で全文翻訳に変更）", () => {
   /**
    * reaction-select と reaction-translate を切り替えるスタブ。reaction-select は常に「全レスkeep・
-   * 強調なし」を返す。reaction-translate は、渡されたバッチのレスをそのまま `JA:<原文>` に「翻訳」して
-   * 返す（バッチ内の行対応・呼び出し回数を検証しやすくするため）。`shouldFailBatch(呼び出し順index)` が
+   * 強調なし」を返す。reaction-translate は、渡されたバッチのレス全文をそのまま `JA:<原文>` に「翻訳」して
+   * 返す（バッチ内の対応・呼び出し回数を検証しやすくするため）。`shouldFailBatch(呼び出し順index)` が
    * true を返すバッチだけ、不正なJSON（parse不能）を返して失敗を再現する。
    */
   class BatchAwareStubLLMClient implements LLMClient {
@@ -1649,7 +1648,7 @@ describe("composeArticleBody（reddit反応記事の翻訳バッチ分割、拡�
     constructor(private readonly shouldFailBatch: (batchCallIndex: number) => boolean = () => false) {}
     async generate(messages: LLMMessage[]): Promise<string> {
       const user = messages.find((m) => m.role === "user");
-      const task = JSON.parse(user!.content) as { kind: string; reses: { index: number; lines: string[] }[] };
+      const task = JSON.parse(user!.content) as { kind: string; reses: { index: number; text: string }[] };
       if (task.kind === "reaction-select") {
         this.selectCalls++;
         return JSON.stringify({ keep: task.reses.map((r) => r.index), emphasize: [] });
@@ -1659,7 +1658,7 @@ describe("composeArticleBody（reddit反応記事の翻訳バッチ分割、拡�
       this.translateBatchSizes.push(task.reses.length);
       if (this.shouldFailBatch(batchCallIndex)) return "これはJSONではない応答です";
       return JSON.stringify({
-        translations: task.reses.map((r) => ({ index: r.index, lines: r.lines.map((l) => `JA:${l}`) })),
+        translations: task.reses.map((r) => ({ index: r.index, text: `JA:${r.text}` })),
       });
     }
   }
@@ -1712,5 +1711,32 @@ describe("composeArticleBody（reddit反応記事の翻訳バッチ分割、拡�
     await composeArticleBody({ sourceType: "reddit", title: "Char limit split test", content }, stub);
     expect(stub.translateCalls).toBe(2);
     expect(stub.translateBatchSizes).toEqual([1, 1]);
+  });
+});
+
+describe("REACTION_TRANSLATE_SYSTEM_PROMPT（reddit翻訳の自然な日本語プロンプト、拡張E51 F-E51-2）", () => {
+  it("systemプロンプトに「自然な日本語・直訳しない・事実/数値/固有名詞は不変・JSONのみ」の指示が含まれる", async () => {
+    const stub = new StubLLMClient(JSON.stringify({ keep: [0], emphasize: [] }));
+    await composeArticleBody(
+      { sourceType: "reddit", title: "翻訳プロンプト確認テスト", content: "1: This is a test comment." },
+      stub,
+    );
+    const translateCall = stub.calls.find((messages) => {
+      const user = messages.find((m) => m.role === "user");
+      if (!user) return false;
+      try {
+        return (JSON.parse(user.content) as { kind?: string }).kind === "reaction-translate";
+      } catch {
+        return false;
+      }
+    });
+    expect(translateCall).toBeTruthy();
+    const systemMessage = translateCall!.find((m) => m.role === "system");
+    expect(systemMessage).toBeTruthy();
+    const text = systemMessage!.content;
+    expect(text).toContain("自然な口語の日本語");
+    expect(text).toContain("逐語訳・翻訳調は避け");
+    expect(text).toContain("事実・数値・固有名詞");
+    expect(text).toContain("JSONのみ");
   });
 });
