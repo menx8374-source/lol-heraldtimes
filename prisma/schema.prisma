@@ -48,12 +48,26 @@ model Article {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  /// SEOタイトル（未設定時は title を表示に使う。リファクタリングS1でスキーマのみ追加、結線はS5以降）。
+  seoTitle        String?
+  /// メタディスクリプション（未設定時は既存の生成ロジックにフォールバック）。
+  metaDescription String?
+  /// OGP用タイトル（未設定時は既存の生成ロジックにフォールバック）。
+  ogTitle         String?
+  /// OGP用ディスクリプション（未設定時は既存の生成ロジックにフォールバック）。
+  ogDescription   String?
+  /// 記事の元になった Post（新収集経路。任意・1対1）。旧経路の CollectedItem とは独立に共存する。
+  postId          String? @unique
+  post            Post?   @relation(fields: [postId], references: [id], onDelete: SetNull)
+
   tags    ArticleTag[]
   sources ArticleSource[]
   collectedItems CollectedItem[]
   reactions ArticleReaction[]
   comments ArticleComment[]
   views   ArticleView[]
+  /// 記事の更新履歴（再AI多重防止・S3以降で使用）。
+  articleUpdates ArticleUpdateHistory[]
 
   @@index([publishedAt])
   @@index([category])
@@ -227,4 +241,62 @@ model PipelineRunLog {
   errorMessage        String?
 
   @@index([startedAt])
+}
+
+/// 新収集経路（リファクタリング S1〜）で取り込む生投稿。ソース非依存の1レコード＝1投稿。
+/// 本スプリントではスキーマ追加のみで、収集/生成パイプラインには結線しない
+/// （旧経路の CollectedItem は比較用にそのまま残る）。
+model Post {
+  id            String   @id @default(cuid())
+  /// ソース種別: "reddit" | "5ch" | "riot" | 将来 "x" 等
+  sourceType    String
+  /// 投稿の外部ID（reddit id / 5ch threadId / 記事キー等）
+  externalId    String
+  title         String
+  body          String
+  url           String
+  author        String?
+  flair         String?
+  /// 画像/動画等のメディア情報（JSON）
+  media         Json?
+  /// ソース側の投稿日時
+  postedAt      DateTime
+  firstSeenAt   DateTime @default(now())
+  lastCheckedAt DateTime?
+  /// メトリクス監視中フラグ（S4で使用）
+  monitoring    Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  metrics PostMetricsHistory[]
+  article Article?
+
+  @@unique([sourceType, externalId])
+  @@index([sourceType])
+  @@index([monitoring])
+}
+
+/// Post の時系列メトリクス（スコア・コメント数の推移）。S4以降で書き込み・判定に使う。
+model PostMetricsHistory {
+  id           String   @id @default(cuid())
+  postId       String
+  post         Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  score        Int
+  commentCount Int
+  capturedAt   DateTime @default(now())
+
+  @@index([postId, capturedAt])
+}
+
+/// 記事更新の記録（再AI多重防止）。S3以降で書き込みに使う。
+model ArticleUpdateHistory {
+  id        String   @id @default(cuid())
+  articleId String
+  article   Article  @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  /// "score_surge" | "comment_surge" | "hot_rank" 等
+  reason    String
+  detail    String?
+  updatedAt DateTime @default(now())
+
+  @@index([articleId])
 }
