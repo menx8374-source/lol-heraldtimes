@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { collectFromSource } from "@/lib/collection/collect-source";
 import { normalizeUrl } from "@/lib/collection/normalize";
 import { getDefaultSourceConfigs } from "@/lib/collection/config";
+import { persistPosts } from "@/lib/collection/persist-posts";
 import type { CollectionItem, SourceAdapter, SourceConfig, SourceType } from "@/lib/collection/types";
 
 export type SourceRunSummary = {
@@ -88,6 +89,15 @@ async function runAndPersistSource(adapter: SourceAdapter, config: SourceConfig,
     await persistItem(item);
   }
   await logFetch({ sourceType, runAt: now, status: "success", itemCount: result.items.length });
+
+  // リファクタリングS2（F-S2-3）: 新経路 Post/PostMetricsHistory への並行保存。旧経路
+  // （CollectedItem・上のSourceRunSummary）はここまでで確定済みのため、以降の失敗が
+  // 収集結果に影響することは無い（補助処理は本体を止めない）。
+  try {
+    await persistPosts(result.items, sourceType, now);
+  } catch (err) {
+    console.error(`Post永続化で想定外のエラーが発生しました(sourceType=${sourceType}):`, err);
+  }
 
   return { sourceType, status: "success", fetchedCount: result.fetchedCount, savedCount: result.items.length };
 }

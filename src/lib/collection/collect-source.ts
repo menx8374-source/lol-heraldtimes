@@ -29,6 +29,13 @@ export function toCollectionItems(sourceType: SourceType, raw: RawCollectionItem
       // 未設定(undefined)のときはキー自体を残しても toEqual 等の比較上は無視されるため、
       // 素直に転記するだけでよい(既存の共通フォーマット比較テストへの影響を避ける)。
       imageUrl: r.imageUrl,
+      // リファクタリングS2: Post永続化用メタも同様にそのまま転記する(未設定は無視される)。
+      externalId: r.externalId,
+      score: r.score,
+      commentCount: r.commentCount,
+      author: r.author,
+      flair: r.flair,
+      media: r.media,
     });
   }
   return items;

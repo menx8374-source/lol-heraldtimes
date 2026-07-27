@@ -345,6 +345,10 @@ describe("FiveChAdapter.fetchItems", () => {
     expect(item1).toBeDefined();
     expect(item1?.title).toBe("【LoL】バロン前ワイプ、議論勃発");
     expect(parseThreadReses(item1!.content)).toHaveLength(3);
+    // リファクタリングS2（F-S2-1・テスト1）: Post永続化用メタ(externalId/commentCount/score)が載る。
+    expect(item1?.externalId).toBe(`${board.server}/${board.board}/1700000001`);
+    expect(item1?.commentCount).toBe(12); // subject.txtのレス数(12)
+    expect(item1?.score).toBe(0); // 5chはupvote概念が無いため常に0
     // 麻雀スレ(1700000002)は非関連なのでdatすら取得されない(fetchMockのthrowが起きていないことで担保)
     expect(fetchMock).toHaveBeenCalledTimes(3); // subject.txt + dat*2
   });

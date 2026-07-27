@@ -1,0 +1,129 @@
+/**
+ * リファクタリングS2（F-S2-2）: persistPosts の結合テスト。専用テストDB（vitest.global-setup.ts で
+ * DATABASE_URL を差し替え済み）に対して実際にPrisma経由で書き込み、
+ * 「upsert（Postは1行・メトリクスは時系列で複数行）」「externalId無し無視」「1件失敗のグレースフル継続」を検証する。
+ */
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { prisma } from "@/lib/prisma";
+import { persistPosts } from "@/lib/collection/persist-posts";
+import type { RawCollectionItem } from "@/lib/collection/types";
+
+async function resetDb() {
+  await prisma.postMetricsHistory.deleteMany();
+  await prisma.post.deleteMany();
+}
+
+beforeEach(async () => {
+  await resetDb();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+function item(overrides: Partial<RawCollectionItem> = {}): RawCollectionItem {
+  return {
+    title: "タイトル",
+    content: "本文",
+    sourceUrl: "https://example.com/post-1",
+    fetchedAt: new Date("2026-07-25T00:00:00+09:00"),
+    externalId: "post-1",
+    score: 10,
+    commentCount: 2,
+    ...overrides,
+  };
+}
+
+describe("persistPosts（リファクタリングS2 F-S2-2）", () => {
+  it("externalIdありのアイテムはPostがupsertされ、PostMetricsHistoryが1行追記される", async () => {
+    const now = new Date("2026-07-25T10:00:00+09:00");
+    const result = await persistPosts(
+      [item({ externalId: "abc", author: "user1", flair: "Discussion", media: { imageUrl: "https://x/y.png" } })],
+      "reddit",
+      now,
+    );
+
+    expect(result.postCount).toBe(1);
+    expect(result.metricsCount).toBe(1);
+
+    const post = await prisma.post.findUniqueOrThrow({
+      where: { sourceType_externalId: { sourceType: "reddit", externalId: "abc" } },
+    });
+    expect(post.title).toBe("タイトル");
+    expect(post.body).toBe("本文");
+    expect(post.url).toBe("https://example.com/post-1");
+    expect(post.author).toBe("user1");
+    expect(post.flair).toBe("Discussion");
+    expect(post.media).toEqual({ imageUrl: "https://x/y.png" });
+    expect(post.monitoring).toBe(true);
+    expect(post.lastCheckedAt).toEqual(now);
+
+    const metrics = await prisma.postMetricsHistory.findMany({ where: { postId: post.id } });
+    expect(metrics).toHaveLength(1);
+    expect(metrics[0].score).toBe(10);
+    expect(metrics[0].commentCount).toBe(2);
+  });
+
+  it("同一externalIdを2回persistするとPostは1行のまま(update)で、PostMetricsHistoryは2行(時系列)になる", async () => {
+    const t1 = new Date("2026-07-25T10:00:00+09:00");
+    const t2 = new Date("2026-07-25T11:00:00+09:00");
+
+    await persistPosts([item({ externalId: "dup-1", score: 10, commentCount: 2 })], "reddit", t1);
+    await persistPosts(
+      [item({ externalId: "dup-1", title: "更新後タイトル", score: 50, commentCount: 8 })],
+      "reddit",
+      t2,
+    );
+
+    const posts = await prisma.post.findMany({ where: { sourceType: "reddit", externalId: "dup-1" } });
+    expect(posts).toHaveLength(1);
+    expect(posts[0].title).toBe("更新後タイトル");
+    expect(posts[0].lastCheckedAt).toEqual(t2);
+    expect(posts[0].firstSeenAt).not.toEqual(t2); // firstSeenAtは初回のまま保持される
+
+    const history = await prisma.postMetricsHistory.findMany({
+      where: { postId: posts[0].id },
+      orderBy: { capturedAt: "asc" },
+    });
+    expect(history.map((h) => h.score)).toEqual([10, 50]);
+    expect(history.map((h) => h.commentCount)).toEqual([2, 8]);
+  });
+
+  it("externalId無しのアイテムは無視される(Post未作成)", async () => {
+    const result = await persistPosts([item({ externalId: undefined, sourceUrl: "https://example.com/no-id" })], "5ch", new Date());
+
+    expect(result.postCount).toBe(0);
+    expect(result.metricsCount).toBe(0);
+    const count = await prisma.post.count();
+    expect(count).toBe(0);
+  });
+
+  it("1件の保存が失敗しても例外を投げず、他アイテムは保存される(グレースフル)", async () => {
+    const errorLogSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const upsertSpy = vi
+      .spyOn(prisma.post, "upsert")
+      .mockRejectedValueOnce(new Error("意図的な失敗(テスト用)"));
+
+    const items = [
+      item({ externalId: "fail-1", sourceUrl: "https://example.com/fail-1" }),
+      item({ externalId: "ok-1", sourceUrl: "https://example.com/ok-1" }),
+    ];
+
+    await expect(persistPosts(items, "reddit", new Date())).resolves.toEqual({
+      postCount: 1,
+      metricsCount: 1,
+    });
+    expect(errorLogSpy).toHaveBeenCalled();
+
+    const okPost = await prisma.post.findUnique({
+      where: { sourceType_externalId: { sourceType: "reddit", externalId: "ok-1" } },
+    });
+    expect(okPost).not.toBeNull();
+    const failPost = await prisma.post.findUnique({
+      where: { sourceType_externalId: { sourceType: "reddit", externalId: "fail-1" } },
+    });
+    expect(failPost).toBeNull();
+
+    upsertSpy.mockRestore();
+  });
+});

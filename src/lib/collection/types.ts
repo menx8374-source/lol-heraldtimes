@@ -31,6 +31,22 @@ export type RawCollectionItem = {
    * （表示側 article-thumbnail.tsx が既定画像にフォールバックする）。
    */
   imageUrl?: string | null;
+  /**
+   * リファクタリングS2（収集の履歴化）: Post永続化用の外部ID（ソース内で安定・一意）。
+   * 未設定の場合、そのアイテムは Post に保存されない（後方互換。既存アダプタ/mockの挙動は不変）。
+   * reddit=投稿id、5ch="<server>/<board>/<threadId>"、riot=パッチ識別子（publicPatchNumber）。
+   */
+  externalId?: string;
+  /** メトリクス: スコア（Reddit upvote等）。5ch/riotは0固定・未使用のためundefinedのまま（persist側で0扱い）。 */
+  score?: number;
+  /** メトリクス: コメント数（Redditのnum_comments・5chのresCount等）。 */
+  commentCount?: number;
+  /** 投稿者。取得できない/概念が無いソースは未設定またはnull。 */
+  author?: string | null;
+  /** flair（Redditのlink_flair_text等）。取得できない/概念が無いソースは未設定またはnull。 */
+  flair?: string | null;
+  /** 画像/動画等のメディア情報（JSONとしてPostに保存）。未設定/nullでよい。 */
+  media?: unknown;
 };
 
 /** 出典URLを必ず持つ、保存可能な収集アイテム（共通フォーマット）。 */
@@ -42,6 +58,18 @@ export type CollectionItem = {
   fetchedAt: Date;
   /** サムネイル画像URL（拡張E19）。未設定/nullは既定画像にフォールバックする。 */
   imageUrl?: string | null;
+  /** リファクタリングS2: Post永続化用の外部ID。RawCollectionItem からそのまま引き継ぐ。 */
+  externalId?: string;
+  /** メトリクス: スコア。 */
+  score?: number;
+  /** メトリクス: コメント数。 */
+  commentCount?: number;
+  /** 投稿者。 */
+  author?: string | null;
+  /** flair。 */
+  flair?: string | null;
+  /** 画像/動画等のメディア情報。 */
+  media?: unknown;
 };
 
 /** ソースごとのレート制限設定（F5: 取得件数上限・実行間隔）。 */

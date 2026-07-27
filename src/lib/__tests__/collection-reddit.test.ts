@@ -171,6 +171,49 @@ describe("純関数: RawCollectionItem生成（拡張E46 テスト4）", () => {
   });
 });
 
+describe("純関数: Post永続化用メタの付与（リファクタリングS2 F-S2-1・テスト1）", () => {
+  it("externalId=投稿id・score・commentCount・author・flairがRawCollectionItemに載る", () => {
+    const p = post({
+      id: "meta1",
+      score: 321,
+      num_comments: 42,
+      author: "some_redditor",
+      link_flair_text: "Discussion",
+    });
+    const item = buildRedditItem(p, [comment({ body: "nice" })]);
+    expect(item.externalId).toBe("meta1");
+    expect(item.score).toBe(321);
+    expect(item.commentCount).toBe(42);
+    expect(item.author).toBe("some_redditor");
+    expect(item.flair).toBe("Discussion");
+    // 既存の共通フィールドは不変
+    expect(item.sourceUrl).toBe(buildPostUrl(p));
+    expect(item.title).toBe(p.title);
+  });
+
+  it("scoreやnum_commentsが未指定の場合は0になる、author/flairは未指定ならnull", () => {
+    const p = post({ id: "meta2", score: undefined, num_comments: undefined, author: undefined, link_flair_text: undefined });
+    const item = buildRedditItem(p, []);
+    expect(item.score).toBe(0);
+    expect(item.commentCount).toBe(0);
+    expect(item.author).toBeNull();
+    expect(item.flair).toBeNull();
+  });
+
+  it("mediaにimageUrl/urlが設定される（どちらも無ければundefined）", () => {
+    const p = post({
+      id: "meta3",
+      url: "https://external.example.com/article",
+      preview: { images: [{ source: { url: "https://preview.redd.it/x.jpg" } }] },
+    });
+    const item = buildRedditItem(p, []);
+    expect(item.media).toEqual({ imageUrl: "https://preview.redd.it/x.jpg", url: "https://external.example.com/article" });
+
+    const withNeither = post({ id: "meta4", thumbnail: undefined, preview: undefined, url: undefined });
+    expect(buildRedditItem(withNeither, []).media).toBeUndefined();
+  });
+});
+
 describe("RedditAdapter.fetchItems（拡張E46 テスト6・7）", () => {
   afterEach(() => {
     vi.unstubAllGlobals();

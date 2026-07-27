@@ -51,6 +51,11 @@ describe("純関数: buildPatchNoteUrl / buildPatchItem", () => {
     expect(item.fetchedAt).toBe(now);
   });
 
+  it("externalIdにパッチ識別子(publicPatchNumber)が設定される（リファクタリングS2 F-S2-1）", () => {
+    const item = buildPatchItem("16.14.1", new Date());
+    expect(item.externalId).toBe("26.14");
+  });
+
   it("新パッチ検知アイテムには画像を設定しない", () => {
     const item = buildPatchItem("14.6.1", new Date());
     expect(item.imageUrl).toBeFalsy();

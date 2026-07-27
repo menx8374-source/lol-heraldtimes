@@ -223,6 +223,9 @@ export function buildPatchItem(
       : `Riot Games の Data Dragon にて、パッチ ${patchLabel}（内部バージョン ${version}）のゲームデータが公開された。最新バージョンのチャンピオン・アイテム等のデータが利用可能になっている。`,
     fetchedAt: now,
     ...(imageUrl ? { imageUrl } : {}),
+    // リファクタリングS2（F-S2-1）: Post永続化用の外部ID(パッチ識別子)。score/commentCountは
+    // Riotに概念が無いため未設定のまま(persist側で0扱い)。
+    externalId: patchLabel,
   };
 }
 

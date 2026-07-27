@@ -60,6 +60,14 @@ export type RedditPostData = {
   preview?: { images?: { source?: { url?: string } }[] };
   /** サムネイルURL、または"self"/"default"/"nsfw"/"spoiler"等の非画像プレースホルダー文字列。 */
   thumbnail?: string;
+  /** コメント数（リファクタリングS2: PostMetricsHistory.commentCount に使う）。 */
+  num_comments?: number;
+  /** 投稿者ユーザー名（リファクタリングS2: Post.author に使う）。 */
+  author?: string;
+  /** flair（リファクタリングS2: Post.flair に使う）。 */
+  link_flair_text?: string | null;
+  /** リンク先URL（自己投稿の場合はpermalinkと同じ。リファクタリングS2: Post.mediaに使う）。 */
+  url?: string;
 };
 
 export type RedditCommentData = {
@@ -201,14 +209,34 @@ export function extractRedditImageUrl(post: RedditPostData): string | null {
   return null;
 }
 
+/**
+ * 投稿のメディア情報（画像URL・リンク先URL）をまとめる（リファクタリングS2 F-S2-1）。
+ * どちらも無ければ undefined（Post.media は未設定のままにする）。
+ */
+export function buildRedditMedia(
+  imageUrl: string | null,
+  url: string | undefined,
+): { imageUrl: string | null; url?: string } | undefined {
+  if (!imageUrl && !url) return undefined;
+  return { imageUrl, url };
+}
+
 /** 投稿＋選抜済みコメントから RawCollectionItem を組み立てる純関数。 */
 export function buildRedditItem(post: RedditPostData, comments: RedditCommentData[]): RawCollectionItem {
+  const imageUrl = extractRedditImageUrl(post);
   return {
     sourceUrl: buildPostUrl(post),
     title: post.title,
     content: buildRedditThreadDump(post, comments),
     fetchedAt: new Date(post.created_utc * 1000),
-    imageUrl: extractRedditImageUrl(post),
+    imageUrl,
+    // リファクタリングS2（F-S2-1）: Post永続化用メタ。
+    externalId: post.id,
+    score: post.score ?? 0,
+    commentCount: post.num_comments ?? 0,
+    author: post.author ?? null,
+    flair: post.link_flair_text ?? null,
+    media: buildRedditMedia(imageUrl, post.url),
   };
 }
 

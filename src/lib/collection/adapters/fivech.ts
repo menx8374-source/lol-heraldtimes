@@ -345,6 +345,11 @@ export class FiveChAdapter implements SourceAdapter {
         title: entry.title,
         content,
         fetchedAt: now,
+        // リファクタリングS2（F-S2-1）: Post永続化用メタ。5chはupvote概念が無いためscore=0固定、
+        // 勢いはコメント数(resCount)の時系列で見る。
+        externalId: `${boardConf.server}/${boardConf.board}/${entry.threadId}`,
+        commentCount: entry.resCount,
+        score: 0,
       });
     }
     console.log(
