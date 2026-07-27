@@ -34,7 +34,7 @@ import {
   type HotnessMetricsSummary,
   type HotnessResult,
 } from "@/lib/hotness/evaluator";
-import { getHotnessConfig } from "@/lib/hotness/config";
+import { getExemptSourceTypes, getHotnessConfig } from "@/lib/hotness/config";
 import { getPipelineConfig } from "@/lib/pipeline/config";
 
 /** metricsをincludeしたPostの型（Prismaの生成型から導出、DB非依存の純関数にも渡せる）。 */
@@ -97,7 +97,30 @@ function hotnessStrength(metrics: HotnessMetricsSummary): number {
 }
 
 /**
- * hot判定されたPostを、カテゴリ(=ソース種別)ごとに独立してhotnessの強さ降順で最大maxPerCategory件選ぶ
+ * hotness免除ソース（既定riot、リファクタリング S5c F-S5c-1）向けの擬似HotnessResultを組み立てる。
+ * 免除ソースはhotness判定そのものを経ない（age窓判定も含めて評価しない）ため常にisHot=trueとし、
+ * metricsは参考情報として最新の実測値をそのまま入れる（hotnessStrengthのソートに使うが、免除ソースの
+ * 実際の並び順は後段のpostedAt降順タイブレークで決める。カテゴリ内順序の決定論のため）。
+ */
+function buildExemptHotnessResult(post: PostWithMetrics): HotnessResult {
+  const latest = post.metrics[post.metrics.length - 1];
+  const metrics: HotnessMetricsSummary = {
+    score: latest?.score ?? 0,
+    comments: latest?.commentCount ?? 0,
+    ageMinutes: 0,
+    scoreGrowthPerHour: 0,
+    commentGrowthPerHour: 0,
+  };
+  return {
+    isHot: true,
+    reasons: ["免除ソース（exemptSourceTypes）のためhotness判定を経ずに常に記事化対象"],
+    metrics,
+  };
+}
+
+/**
+ * hot判定された（または免除された）Postを、カテゴリ(=ソース種別)ごとに独立してhotnessの強さ降順・
+ * 同点はpostedAt降順（新しい投稿優先）で最大maxPerCategory件選ぶ
  * （拡張E48のカテゴリ別上限と同じ考え方。純関数・DB非依存・決定論）。
  */
 function selectTopHotPosts(
@@ -118,6 +141,8 @@ function selectTopHotPosts(
     const sorted = [...list].sort((a, b) => {
       const diff = hotnessStrength(b.hotness.metrics) - hotnessStrength(a.hotness.metrics);
       if (diff !== 0) return diff;
+      const postedAtDiff = b.post.postedAt.getTime() - a.post.postedAt.getTime();
+      if (postedAtDiff !== 0) return postedAtDiff;
       return a.post.id.localeCompare(b.post.id); // 決定論のための最終タイブレーク
     });
     selected.push(...sorted.slice(0, maxPerCategory).map((e) => e.post));
@@ -149,9 +174,15 @@ export async function generateArticlesFromHotPosts(
   }
 
   // 話題性判定(数値ルール・AI不使用): sourceType別の閾値でisHot判定し、非hotは記事化対象から外す。
+  // ただしexemptSourceTypes(既定riot、リファクタリングS5c F-S5c-1)に含まれるsourceTypeは、
+  // 公式ニュース等"話題性"で測るべきでないためhotness判定そのものを経ず常に記事化対象にする。
+  const exemptSourceTypes = getExemptSourceTypes();
   const evaluated = posts
     .map((post) => {
       const sourceType = post.sourceType as SourceType;
+      if (exemptSourceTypes.includes(sourceType)) {
+        return { post, hotness: buildExemptHotnessResult(post) };
+      }
       const metricsHistory: HotnessMetricsPoint[] = post.metrics.map((m) => ({
         score: m.score,
         commentCount: m.commentCount,

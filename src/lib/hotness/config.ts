@@ -10,7 +10,7 @@
  *
  * 本モジュールはまだパイプラインに結線しない（S4でメトリクス更新、S5で記事化判定に使用）。
  */
-import type { SourceType } from "@/lib/collection/types";
+import { SOURCE_TYPES, type SourceType } from "@/lib/collection/types";
 
 export type HotnessConfig = {
   /** 現在値ルールで使うスコア下限。 */
@@ -93,4 +93,24 @@ export function getHotnessConfig(sourceType?: SourceType): HotnessConfig {
     minScore: envInt("HOTNESS_MIN_SCORE", 100),
     minComments: envInt("HOTNESS_MIN_COMMENTS", 30),
   };
+}
+
+/** hotness免除ソース種別の既定値（リファクタリング S5c F-S5c-1）。 */
+const DEFAULT_EXEMPT_SOURCE_TYPES: SourceType[] = ["riot"];
+
+/**
+ * hotness判定を経ずに常に記事化対象とする免除ソース種別の一覧を返す（リファクタリング S5c F-S5c-1）。
+ * 公式パッチノート（riot）のように"話題性"で測るべきでない公式ニュースをhotness判定の対象外にするための
+ * 設定。既定は `["riot"]`。env `HOTNESS_EXEMPT_SOURCE_TYPES` にカンマ区切りで指定すると上書きできる
+ * （前後空白は除去し、`SourceType` として無効な値は無視する。有効な値が1つも無ければ既定値にフォールバックする）。
+ */
+export function getExemptSourceTypes(): SourceType[] {
+  const raw = process.env.HOTNESS_EXEMPT_SOURCE_TYPES;
+  if (!raw) return DEFAULT_EXEMPT_SOURCE_TYPES;
+  const validSourceTypes: readonly string[] = SOURCE_TYPES;
+  const parsed = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s): s is SourceType => validSourceTypes.includes(s));
+  return parsed.length > 0 ? parsed : DEFAULT_EXEMPT_SOURCE_TYPES;
 }

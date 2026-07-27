@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { getHotnessConfig } from "@/lib/hotness/config";
+import { getExemptSourceTypes, getHotnessConfig } from "@/lib/hotness/config";
 
 const ENV_KEYS = [
   "HOTNESS_MIN_SCORE",
@@ -15,6 +15,7 @@ const ENV_KEYS = [
   "HOTNESS_MIN_AGE_MINUTES",
   "HOTNESS_MAX_AGE_HOURS",
   "HOTNESS_USE_RANK_SIGNAL",
+  "HOTNESS_EXEMPT_SOURCE_TYPES",
 ];
 
 afterEach(() => {
@@ -82,5 +83,29 @@ describe("getHotnessConfig（話題性判定の設定ファイル、リファク
     const config = getHotnessConfig();
     expect(config.minScore).toBe(100);
     expect(config.minAgeMinutes).toBe(30);
+  });
+});
+
+describe("getExemptSourceTypes（hotness免除ソース、リファクタリング S5c F-S5c-1）", () => {
+  it("既定は['riot']（公式パッチノートはhotness判定を経ずに常に記事化対象）", () => {
+    expect(getExemptSourceTypes()).toEqual(["riot"]);
+  });
+
+  it("envでカンマ区切り上書きできる（前後空白除去）", () => {
+    process.env.HOTNESS_EXEMPT_SOURCE_TYPES = " reddit, 5ch ";
+    expect(getExemptSourceTypes()).toEqual(["reddit", "5ch"]);
+  });
+
+  it("envに無効なSourceTypeが混じっていれば無視し、有効な値のみ残す", () => {
+    process.env.HOTNESS_EXEMPT_SOURCE_TYPES = "riot,not-a-source-type";
+    expect(getExemptSourceTypes()).toEqual(["riot"]);
+  });
+
+  it("envが空文字列・有効な値が1つも無い場合は既定値にフォールバックする", () => {
+    process.env.HOTNESS_EXEMPT_SOURCE_TYPES = "not-a-source-type";
+    expect(getExemptSourceTypes()).toEqual(["riot"]);
+
+    process.env.HOTNESS_EXEMPT_SOURCE_TYPES = "";
+    expect(getExemptSourceTypes()).toEqual(["riot"]);
   });
 });

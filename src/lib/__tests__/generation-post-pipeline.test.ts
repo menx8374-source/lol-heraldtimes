@@ -4,7 +4,7 @@
  * 書き込み、「hot判定による母数絞り・既記事化スキップ(1投稿1回)」「カテゴリ別上限・hotness降順選択」
  * 「postId紐付け・moderation held・1件失敗でも他継続」を検証する。
  */
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { generateArticlesFromHotPosts } from "@/lib/generation/post-pipeline";
 import { MockLLMClient, type LLMClient, type LLMMessage } from "@/lib/generation/llm-client";
@@ -52,6 +52,7 @@ type CreatePostOptions = {
   body?: string;
   sourceUrl?: string;
   postedAt?: Date;
+  media?: { imageUrl: string };
   metrics: { score: number; commentCount: number; capturedAt: Date }[];
 };
 
@@ -67,6 +68,7 @@ async function createPost(opts: CreatePostOptions) {
       body: opts.body ?? `1: 本文${seq}その1\n2: 本文${seq}その2`,
       url: opts.sourceUrl ?? `https://example.com/${opts.sourceType}/${externalId}`,
       postedAt: opts.postedAt ?? new Date(T0.getTime() - hours(2)),
+      ...(opts.media ? { media: opts.media } : {}),
     },
   });
   for (const m of opts.metrics) {
@@ -260,5 +262,135 @@ describe("generateArticlesFromHotPosts（SEO列・タグの保存、リファク
     expect(article?.ogTitle).toBeNull();
     expect(article?.ogDescription).toBeNull();
     expect(article?.tags).toHaveLength(0);
+  });
+});
+
+describe("generateArticlesFromHotPosts（hotness免除ソース、リファクタリング S5c F-S5c-1／ブリーフ テスト1）", () => {
+  afterEach(() => {
+    delete process.env.HOTNESS_EXEMPT_SOURCE_TYPES;
+  });
+
+  const riotTitle = "パッチ26.14ノート公開";
+  const riotContent = "本パッチではジャングルモンスターの経験値量が引き下げられ、序盤のペースに変化が生まれた。";
+  const riotSourceUrl = "https://www.leagueoflegends.com/ja-jp/news/patch-26-14-notes/";
+
+  it("riot(score0/comment0)は既定でhotness免除され、hotness判定を経ずに記事化される。同条件の5chはhotでないためスキップされる", async () => {
+    const riotPost = await createPost({
+      sourceType: "riot",
+      title: riotTitle,
+      body: riotContent,
+      sourceUrl: riotSourceUrl,
+      metrics: [{ score: 0, commentCount: 0, capturedAt: T0 }],
+    });
+    const nonHotFivech = await createPost({
+      sourceType: "5ch",
+      metrics: [{ score: 0, commentCount: 0, capturedAt: T0 }],
+    });
+
+    const summary = await generateArticlesFromHotPosts(llm, { now: T0, championMap: null });
+
+    expect(summary.results).toHaveLength(1);
+    expect(summary.results[0]).toMatchObject({ postId: riotPost.id, status: "success" });
+
+    const riotArticle = await prisma.article.findUnique({ where: { postId: riotPost.id } });
+    expect(riotArticle).not.toBeNull();
+    const fivechArticle = await prisma.article.findUnique({ where: { postId: nonHotFivech.id } });
+    expect(fivechArticle).toBeNull();
+  });
+
+  it("免除ソース(riot)でも既記事化済みPost(article有り)は対象から除外される(1投稿1回)", async () => {
+    const alreadyArticledRiot = await createPost({
+      sourceType: "riot",
+      title: riotTitle,
+      body: riotContent,
+      sourceUrl: riotSourceUrl,
+      metrics: [{ score: 0, commentCount: 0, capturedAt: T0 }],
+    });
+    await prisma.article.create({
+      data: {
+        slug: "already-articled-riot",
+        title: "既存パッチ記事タイトル",
+        category: "パッチ/メタ",
+        body: [],
+        publishedAt: T0,
+        postId: alreadyArticledRiot.id,
+      },
+    });
+
+    const summary = await generateArticlesFromHotPosts(llm, { now: T0, championMap: null });
+    expect(summary).toEqual({ succeededCount: 0, failedCount: 0, results: [] });
+  });
+
+  it("免除ソース(riot)にもカテゴリ別上限(maxPerCategory)が適用され、同点時はpostedAt降順(新しい投稿優先)で選ばれる", async () => {
+    const older = await createPost({
+      sourceType: "riot",
+      title: "パッチ26.13ノート公開",
+      body: riotContent,
+      sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/patch-26-13-notes/",
+      postedAt: new Date(T0.getTime() - hours(48)),
+      metrics: [{ score: 0, commentCount: 0, capturedAt: T0 }],
+    });
+    const newer = await createPost({
+      sourceType: "riot",
+      title: riotTitle,
+      body: riotContent,
+      sourceUrl: riotSourceUrl,
+      postedAt: new Date(T0.getTime() - hours(1)),
+      metrics: [{ score: 0, commentCount: 0, capturedAt: T0 }],
+    });
+    const oldest = await createPost({
+      sourceType: "riot",
+      title: "パッチ26.12ノート公開",
+      body: riotContent,
+      sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/patch-26-12-notes/",
+      postedAt: new Date(T0.getTime() - hours(72)),
+      metrics: [{ score: 0, commentCount: 0, capturedAt: T0 }],
+    });
+
+    const summary = await generateArticlesFromHotPosts(llm, { now: T0, maxPerCategory: 2, championMap: null });
+
+    const processedIds = new Set(summary.results.map((r) => r.postId));
+    expect(processedIds.size).toBe(2);
+    expect(processedIds.has(newer.id)).toBe(true);
+    expect(processedIds.has(older.id)).toBe(true);
+    expect(processedIds.has(oldest.id)).toBe(false); // 上限外(最も古い)
+  });
+
+  it("env HOTNESS_EXEMPT_SOURCE_TYPESで免除ソースを上書きできる(riotを免除から外すとscore0/comment0では記事化されない)", async () => {
+    process.env.HOTNESS_EXEMPT_SOURCE_TYPES = "5ch"; // riotを免除リストから除外
+    const riotPost = await createPost({
+      sourceType: "riot",
+      title: riotTitle,
+      body: riotContent,
+      sourceUrl: riotSourceUrl,
+      metrics: [{ score: 0, commentCount: 0, capturedAt: T0 }],
+    });
+
+    const summary = await generateArticlesFromHotPosts(llm, { now: T0, championMap: null });
+    expect(summary).toEqual({ succeededCount: 0, failedCount: 0, results: [] });
+
+    const article = await prisma.article.findUnique({ where: { postId: riotPost.id } });
+    expect(article).toBeNull();
+  });
+});
+
+describe("generateArticlesFromHotPosts（Post経路の画像取りこぼし修正、リファクタリング S5c F-S5c-2／ブリーフ テスト4）", () => {
+  it("Post.media.imageUrlを持つriot Postから生成したArticleのthumbnailUrlに画像URLが反映される", async () => {
+    const imageUrl = "https://www.leagueoflegends.com/og-image-patch-26-14.png";
+    const post = await createPost({
+      sourceType: "riot",
+      title: "パッチ26.14ノート公開",
+      body: "本パッチではジャングルモンスターの経験値量が引き下げられ、序盤のペースに変化が生まれた。",
+      sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/patch-26-14-notes/",
+      media: { imageUrl },
+      metrics: [{ score: 0, commentCount: 0, capturedAt: T0 }],
+    });
+
+    const summary = await generateArticlesFromHotPosts(llm, { now: T0, championMap: null });
+    const result = summary.results.find((r) => r.postId === post.id);
+    expect(result?.status).toBe("success");
+
+    const article = await prisma.article.findUnique({ where: { postId: post.id } });
+    expect(article?.thumbnailUrl).toBe(imageUrl);
   });
 });

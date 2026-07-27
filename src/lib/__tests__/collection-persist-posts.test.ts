@@ -126,4 +126,48 @@ describe("persistPosts（リファクタリングS2 F-S2-2）", () => {
 
     upsertSpy.mockRestore();
   });
+
+  it("item.mediaが無くitem.imageUrlのみ持つ場合、Post.media.imageUrlにフォールバック保存される(riot相当、リファクタリングS5c F-S5c-2)", async () => {
+    const now = new Date("2026-07-27T10:00:00+09:00");
+    await persistPosts(
+      [item({ externalId: "patch-26-14", media: undefined, imageUrl: "https://www.leagueoflegends.com/og-image.png" })],
+      "riot",
+      now,
+    );
+
+    const post = await prisma.post.findUniqueOrThrow({
+      where: { sourceType_externalId: { sourceType: "riot", externalId: "patch-26-14" } },
+    });
+    expect(post.media).toEqual({ imageUrl: "https://www.leagueoflegends.com/og-image.png" });
+  });
+
+  it("item.mediaが有る場合はitem.imageUrlより優先される(従来どおり)", async () => {
+    const now = new Date("2026-07-27T10:00:00+09:00");
+    await persistPosts(
+      [
+        item({
+          externalId: "media-priority",
+          media: { imageUrl: "https://example.com/from-media.png" },
+          imageUrl: "https://example.com/from-image-url.png",
+        }),
+      ],
+      "reddit",
+      now,
+    );
+
+    const post = await prisma.post.findUniqueOrThrow({
+      where: { sourceType_externalId: { sourceType: "reddit", externalId: "media-priority" } },
+    });
+    expect(post.media).toEqual({ imageUrl: "https://example.com/from-media.png" });
+  });
+
+  it("item.media・item.imageUrlとも無い場合はPost.mediaがnullのまま保存される(回帰なし)", async () => {
+    const now = new Date("2026-07-27T10:00:00+09:00");
+    await persistPosts([item({ externalId: "no-media", media: undefined, imageUrl: undefined })], "5ch", now);
+
+    const post = await prisma.post.findUniqueOrThrow({
+      where: { sourceType_externalId: { sourceType: "5ch", externalId: "no-media" } },
+    });
+    expect(post.media).toBeNull();
+  });
 });

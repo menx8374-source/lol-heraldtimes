@@ -23,7 +23,13 @@ async function persistOneItem(item: RawCollectionItem, sourceType: SourceType, n
   if (!externalId) return false;
 
   try {
-    const media = (item.media ?? undefined) as Prisma.InputJsonValue | undefined;
+    // item.mediaが無くitem.imageUrl（riot等のog:image、拡張E42）のみ持つソースでも
+    // Post.media.imageUrlに画像が入るようフォールバックする（リファクタリングS5c F-S5c-2）。
+    // どちらも無ければundefinedのまま（create時は未設定＝null、update時はこの列を更新しない＝
+    // 既存値を保持。既存の挙動を変えない）。
+    const media = (item.media ?? (item.imageUrl ? { imageUrl: item.imageUrl } : undefined)) as
+      | Prisma.InputJsonValue
+      | undefined;
     const post = await prisma.post.upsert({
       where: { sourceType_externalId: { sourceType, externalId } },
       create: {
