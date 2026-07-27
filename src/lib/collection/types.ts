@@ -78,6 +78,8 @@ export type CollectionItem = {
   flair?: string | null;
   /** 画像/動画等のメディア情報。 */
   media?: unknown;
+  /** リファクタリングS7: 取得元ルールで付与したカテゴリ（Post.category→Article.category へ伝播）。 */
+  category?: CategoryLabel;
 };
 
 /** ソースごとのレート制限設定（F5: 取得件数上限・実行間隔）。 */
