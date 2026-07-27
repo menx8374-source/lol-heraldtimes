@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildChampionSplashUrl,
+  championNameToId,
   CURATED_SPLASH_CHAMPION_IDS,
   pickDeterministicChampionSplashUrl,
 } from "@/lib/generation/champion-splash";
@@ -33,6 +34,34 @@ describe("pickDeterministicChampionSplashUrl（拡張E38 テスト1: 決定論�
     expect(reexportedPickDeterministicChampionSplashUrl).toBe(pickDeterministicChampionSplashUrl);
     expect(reexportedPickDeterministicChampionSplashUrl("same-key")).toBe(
       pickDeterministicChampionSplashUrl("same-key"),
+    );
+  });
+});
+
+describe("championNameToId（拡張E53 F-E53-2 テスト1: 純粋な名前→id対応表）", () => {
+  it("主要チャンピオンの日本語名からchampionIdを解決する", () => {
+    expect(championNameToId("アジール")).toBe("Azir");
+    expect(championNameToId("ガレン")).toBe("Garen");
+    expect(championNameToId("ヤスオ")).toBe("Yasuo");
+    expect(championNameToId("リー・シン")).toBe("LeeSin");
+    expect(championNameToId("ウーコン")).toBe("MonkeyKing");
+  });
+
+  it("championId自身(英語表記)からも解決できる", () => {
+    expect(championNameToId("Yasuo")).toBe("Yasuo");
+    expect(championNameToId("Azir")).toBe("Azir");
+  });
+
+  it("未知の名前はnullを返す", () => {
+    expect(championNameToId("そんざいしないちゃんぴおん")).toBeNull();
+    expect(championNameToId("")).toBeNull();
+  });
+
+  it("buildChampionSplashUrlと組み合わせて画像URLを生成できる", () => {
+    const id = championNameToId("アジール");
+    expect(id).not.toBeNull();
+    expect(buildChampionSplashUrl(id!)).toBe(
+      "https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Azir_0.jpg",
     );
   });
 });

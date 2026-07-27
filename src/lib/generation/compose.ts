@@ -22,6 +22,7 @@ import { findNgWord } from "@/lib/moderation/ng-words";
 import { PATCH_NOTES_MIN_LENGTH } from "@/lib/collection/adapters/riot-datadragon";
 import { CHAMPIONS } from "@/lib/generation/title";
 import { isSafeImageUrl } from "@/lib/image-url";
+import { buildChampionSplashUrl, championNameToId } from "@/lib/generation/champion-splash";
 
 export type GenerationCandidateInput = {
   sourceType: SourceType;
@@ -1036,6 +1037,71 @@ function composeDeterministicPatchChangesBody(
   return blocks;
 }
 
+/**
+ * detailed パッチ本文（拡張E53 F-E53-1、lol-times風の詳細記事）を組み立てる。
+ * `extractPatchChangesDeterministic` が返した逐語の変更点をチャンピオンごとにセクション化し、
+ * 各セクションにチャンピオンの公式スプラッシュ画像（`championNameToId` で解決できた場合のみ）を添える。
+ * 1. `candidate.imageUrl`（og:image バナー）が安全なhttps画像URLなら先頭に画像ブロック。
+ * 2. 見出し「パッチ<番号> の変更点」＋短い導入段落（一般的事実のみ、捏造なし）。
+ * 3. チャンピオンごと: 見出し（チャンピオン名）→ 画像ブロック（id解決できた場合のみ・省略時はテキストのみ）
+ *    → 変更点の段落（本文の部分文字列そのまま、逐語維持）。
+ * 4. 出典URLが安全なhttpsなら公式リンクボタン（linkButton）。
+ * AIは使わない（決定的抽出＋公式画像URLの組み立てのみ）。
+ */
+function composeDetailedPatchBody(
+  candidate: GenerationCandidateInput,
+  changes: PatchChampionChanges[],
+): ArticleBodyBlock[] {
+  const patchNumber = extractPatchNumberLabel(candidate);
+  const label = patchNumber ? `パッチ${patchNumber}` : "今回のパッチ";
+  const sourceUrl = candidate.sourceUrl?.trim();
+  const blocks: ArticleBodyBlock[] = [];
+
+  if (isSafeImageUrl(candidate.imageUrl)) {
+    blocks.push({
+      type: "image",
+      url: candidate.imageUrl,
+      alt: `${label} 公式パッチノートのメイン画像`,
+      credit: "画像: Riot Games 公式パッチノートより",
+    });
+  }
+
+  blocks.push({ type: "heading", text: `${label} の変更点` });
+  blocks.push({
+    type: "paragraph",
+    text:
+      `リーグ・オブ・レジェンドの${label}が公開され、複数のチャンピオンに数値調整が入りました。` +
+      "公式パッチノートに記載されているチャンピオンごとの主な変更点を、変更前後の数値とあわせてまとめます。",
+  });
+
+  for (const c of changes) {
+    blocks.push({ type: "heading", text: c.champion });
+    const championId = championNameToId(c.champion);
+    if (championId) {
+      blocks.push({
+        type: "image",
+        url: buildChampionSplashUrl(championId),
+        alt: `${c.champion}のスプラッシュアート`,
+        credit: "画像: Riot Games 公式(Data Dragon)より",
+      });
+    }
+    for (const change of c.changes) {
+      blocks.push({ type: "paragraph", text: change });
+    }
+  }
+
+  if (sourceUrl && isHttpsUrl(sourceUrl)) {
+    blocks.push({ type: "linkButton", url: sourceUrl, label: `▶ ${label} 公式パッチノートを読む` });
+  } else {
+    blocks.push({
+      type: "paragraph",
+      text: "出典: Riot Games 公式サイトのパッチノートページをご確認ください。",
+    });
+  }
+
+  return blocks;
+}
+
 /** Riot公式（riot）由来: 「速報＋要点整理」構成（従来どおり）。 */
 const FACT_PROFILE = {
   introHeading: "速報",
@@ -1093,13 +1159,17 @@ async function composeReactionBody(
 }
 
 /**
- * env `PATCH_ARTICLE_MODE` によるriot（パッチ）記事の構成モード切替（拡張E41 F-E41-2）。
- * "summary" のみ従来のE40 3段（LLM要約→決定的抽出→クリーン定型）を使い、それ以外（未設定含む）は
- * 既定の "fact"（事実速報、LLM不使用）にする。後でLLMまとめに戻す可能性があるため、summaryモードの
- * コード・テストは削除せず残す。
+ * env `PATCH_ARTICLE_MODE` によるriot（パッチ）記事の構成モード切替（拡張E41 F-E41-2、拡張E53 F-E53-1で
+ * "detailed" を追加し既定にした）。
+ * - "fact": 事実速報のみ（LLM不使用、拡張E41）。
+ * - "summary": 従来のE40 3段（LLM要約→決定的抽出→クリーン定型）。後でLLMまとめに戻す可能性があるため
+ *   コード・テストは削除せず残す。
+ * - それ以外（未設定含む、既定）: "detailed"（チャンピオンごとの画像＋変更前後の詳細記事、拡張E53）。
  */
-function patchArticleMode(): "fact" | "summary" {
-  return process.env.PATCH_ARTICLE_MODE === "summary" ? "summary" : "fact";
+function patchArticleMode(): "detailed" | "fact" | "summary" {
+  if (process.env.PATCH_ARTICLE_MODE === "fact") return "fact";
+  if (process.env.PATCH_ARTICLE_MODE === "summary") return "summary";
+  return "detailed";
 }
 
 /**
@@ -1198,9 +1268,11 @@ async function composeRiotNewsBody(
 
 /**
  * 記事化候補から構造化された本文ブロック配列を組み立てる（F7）。
- * sourceType が "riot" なら、既定(env `PATCH_ARTICLE_MODE`未設定/"fact")では本文の長短に関わらず
- * 事実速報（拡張E41 F-E41-2）。"summary" なら従来のE40の3段（LLM要約のまとめ記事→決定的抽出→
- * クリーン定型フォールバック、contentが短い汎用文なら速報＋要点整理）。
+ * sourceType が "riot" なら、既定(env `PATCH_ARTICLE_MODE`未設定/"detailed")では、実パッチノート本文
+ * （PATCH_NOTES_MIN_LENGTH以上）からチャンピオンごとの変更点が決定的抽出できればlol-times風の詳細記事
+ * （画像＋変更前後、拡張E53 F-E53-1）にし、抽出できない／本文が無い場合は事実速報にフォールバックする。
+ * "fact" では本文の長短に関わらず常に事実速報（拡張E41 F-E41-2）。"summary" なら従来のE40の3段
+ * （LLM要約のまとめ記事→決定的抽出→クリーン定型フォールバック、contentが短い汎用文なら速報＋要点整理）。
  * "riot-news"（リファクタリングS7b）なら image→見出し→短い要約→公式リンクの定型構成
  * （composeRiotNewsBody）。それ以外（5ch/reddit）ならまとめ速報レス形式にする。
  */
@@ -1209,7 +1281,18 @@ export async function composeArticleBody(
   llmClient: LLMClient,
 ): Promise<ArticleBodyBlock[]> {
   if (candidate.sourceType === "riot") {
-    if (patchArticleMode() === "fact") {
+    const mode = patchArticleMode();
+    if (mode === "fact") {
+      return composePatchFactFlashBody(candidate);
+    }
+    if (mode === "detailed") {
+      // 実パッチノート本文（汎用の短いcontentではない）と見なせるときのみ、決定的（逐語）抽出を試みる。
+      if (candidate.content.length >= PATCH_NOTES_MIN_LENGTH) {
+        const deterministicChanges = extractPatchChangesDeterministic(candidate.content);
+        if (deterministicChanges) return composeDetailedPatchBody(candidate, deterministicChanges);
+      }
+      // 変更点が抽出できない、または本文が無い（mock等）場合は事実速報にフォールバックする
+      // （壊れない・捏造しない、拡張E53 F-E53-1）。
       return composePatchFactFlashBody(candidate);
     }
     // "summary"モード: 従来どおり、content が実パッチノート本文（汎用の短いcontentではない）と
