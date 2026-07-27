@@ -4,6 +4,7 @@
  * - 掲示板/Reddit（5ch/reddit）: AI要約段落を持たず、「反応まとめ」見出し＋収集したスレッドの
  *   レス群を番号付きレスとして逐語のまま並べるだけの「レス羅列中心」構成（2026-07-25 ユーザー決定の
  *   記事フォーマット改修。同日の追加改修でAI導入/まとめ段落を除去しさらにシンプル化）。
+ *   レス選別は既定でAI不使用（`REACTION_SELECT_MODE`、リファクタリングS3 F-S3-3）。
  * - Riot公式（riot）: 「事実の速報＋要点整理」構成（従来どおり、引用ブロックは主従関係を保つ）。
  */
 import type {
@@ -40,6 +41,16 @@ const REACTION_HANDLE: Record<"5ch" | "reddit", string> = {
 
 /** 1記事あたりの反応レス抜粋の上限件数（拡張E25 F-E25-1、超過分は先頭優先で切る）。 */
 const MAX_EXCERPT_RESES = 12;
+
+/**
+ * 反応レス選別の方式（リファクタリング S3 F-S3-3）。要件「AIによる話題性判定・分類・スコアリングは禁止」
+ * に合わせ、既定（未設定 or `"rules"`）は数値ルール（`selectMajorConversationCluster`によるアンカー会話
+ * クラスタ選定＋決定論強調）にし、AI（`selectReactionReses`）を呼ばない。`"llm"`を指定した場合のみ
+ * 従来どおりAI選別を使う（質の比較用に旧コードは削除せず残す）。
+ */
+function reactionSelectMode(): "rules" | "llm" {
+  return process.env.REACTION_SELECT_MODE === "llm" ? "llm" : "rules";
+}
 
 /**
  * LLMによるレス抜粋・強調選定の正規化結果（拡張E28で行抽出、拡張E32で強調色に対応）。
@@ -542,6 +553,10 @@ function buildReactionDisplayLines(
  * （index昇順）に整列してから組む。
  * 拡張E49 F-E49-2: reddit翻訳の行数がレス原文と不一致でも訳を捨てず、そのレスを1行に束ねて採用する
  * （buildReactionDisplayLines参照）。訳が全く無いレスのみ英語原文フォールバックにする。
+ * リファクタリングS3 F-S3-3: `REACTION_SELECT_MODE`（既定 rules）が"llm"でない限り、AIによる
+ * `selectReactionReses` を呼ばず、常に `selectMajorConversationCluster`（数値ルール＝アンカー会話
+ * クラスタ）でレスを選ぶ（AI選別・スコアリングを行わない）。強調は決定論（`computeLineEmphasis`＋
+ * `applyMinColorFallback`）で付与する。
  */
 async function buildReactionBlocks(
   candidate: GenerationCandidateInput,
@@ -553,11 +568,12 @@ async function buildReactionBlocks(
   const knownNumbers = new Set(reses.map((r) => r.number));
   const numberToIndex = new Map(reses.map((r, i) => [r.number, i]));
 
-  const selection = await selectReactionReses(llmClient, candidate.title, reses);
-  // LLM選定が失敗した場合（null）、拡張E43以前は「全レス無制限」にフォールバックしており、
-  // 話題バラバラの無関係レスが全部出てしまっていた。拡張E43 F-E43-2で、代わりに>>Nアンカーで
-  // 連結した会話クラスタのうち最大のもの（＝そのスレで最も会話が集まっている中心的な議論）だけを
-  // 採用するようにする（selectMajorConversationCluster）。
+  const selection =
+    reactionSelectMode() === "llm" ? await selectReactionReses(llmClient, candidate.title, reses) : null;
+  // LLM選定を使わない（既定rulesモード）、またはLLM選定が失敗した場合（null）、拡張E43以前は
+  // 「全レス無制限」にフォールバックしており、話題バラバラの無関係レスが全部出てしまっていた。
+  // 拡張E43 F-E43-2で、代わりに>>Nアンカーで連結した会話クラスタのうち最大のもの（＝そのスレで
+  // 最も会話が集まっている中心的な議論）だけを採用するようにする（selectMajorConversationCluster）。
   const baseIndices = selection
     ? reses.map((_, i) => i).filter((i) => selection.keepLines.has(i))
     : selectMajorConversationCluster(reses);

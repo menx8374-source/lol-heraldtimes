@@ -51,6 +51,7 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
 | `FIVECH_USER_AGENT` | 任意 | 5ch側が空/既定UAを弾くことがあるための説明的User-Agent文字列（秘密ではない）。未設定時は既定の説明的UAを使用 |
 | `GENERATION_MODE` | 任意 | `mock`（既定、APIキー不要の決定論的モックLLM）／`live`（拡張E24: `ANTHROPIC_API_KEY`設定時のみAnthropic Claude(Haiku)へ本接続。未設定ならmockに自動フォールバック） |
 | `PATCH_ARTICLE_MODE` | 任意 | riot（パッチ）記事の構成モード（拡張E41）。`fact`（既定）: 事実速報（見出し「パッチ<番号>が公開」＋一般的事実段落＋出典URL、LLM不使用・捏造なし）／`summary`: 従来のLLM要約→決定的抽出→クリーン定型の3段フォールバック |
+| `REACTION_SELECT_MODE` | 任意 | 反応記事(5ch/reddit)のレス選別モード（リファクタリングS3 F-S3-3）。`rules`（既定）: 数値ルール（アンカー会話クラスタ選定＋決定論強調、AI不使用）／`llm`: 従来どおりAI(`selectReactionReses`)で選別する旧挙動（質の比較用に残置） |
 | `PIPELINE_MAX_PUBLISH_PER_RUN` | 任意 | 統合パイプライン(`npm run pipeline`)1回の実行で処理・公開する記事本数の上限（既定5件） |
 | `PIPELINE_INTERVAL_MS` | 任意 | 統合パイプラインの繰り返し実行の目安間隔(ミリ秒)。既定14400000(4時間) |
 | `SITE_URL` | 任意 | サイトの絶対URLベース（既定 `http://localhost:3000`）。OGP／構造化データ／サイトマップ／robotsの絶対URL生成に使う |

@@ -14,6 +14,22 @@ import { computeVerbatimMatchRatio } from "@/lib/generation/verbatim";
 
 const llm = new MockLLMClient();
 
+/**
+ * このファイルの既存テストは、AIによるレス選別（selectReactionReses、拡張E25〜E49）の挙動を
+ * 直接検証する内容のため、リファクタリングS3 F-S3-3で既定が数値ルール（rules）に変わった後も
+ * 明示的に `REACTION_SELECT_MODE=llm`（旧挙動）に固定して実行する（回帰なし）。rules既定の挙動は
+ * `generation-compose-reaction-select-mode.test.ts` で別途検証する。
+ */
+let prevReactionSelectMode: string | undefined;
+beforeAll(() => {
+  prevReactionSelectMode = process.env.REACTION_SELECT_MODE;
+  process.env.REACTION_SELECT_MODE = "llm";
+});
+afterAll(() => {
+  if (prevReactionSelectMode === undefined) delete process.env.REACTION_SELECT_MODE;
+  else process.env.REACTION_SELECT_MODE = prevReactionSelectMode;
+});
+
 /** テスト用のスタブLLMClient(拡張E25)。指定した応答文字列(または関数)をそのまま返す。実APIは叩かない。 */
 class StubLLMClient implements LLMClient {
   public readonly calls: LLMMessage[][] = [];
