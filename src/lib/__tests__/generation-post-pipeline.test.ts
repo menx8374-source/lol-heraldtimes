@@ -7,14 +7,34 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { generateArticlesFromHotPosts } from "@/lib/generation/post-pipeline";
-import { MockLLMClient } from "@/lib/generation/llm-client";
+import { MockLLMClient, type LLMClient, type LLMMessage } from "@/lib/generation/llm-client";
+import { SEO_SYSTEM_PROMPT } from "@/lib/generation/seo";
 import type { SourceType } from "@/lib/collection/types";
 
 async function resetDb() {
   await prisma.articleSource.deleteMany();
+  await prisma.articleTag.deleteMany();
   await prisma.article.deleteMany();
   await prisma.postMetricsHistory.deleteMany();
   await prisma.post.deleteMany();
+  await prisma.tag.deleteMany();
+}
+
+/** SEO_SYSTEM_PROMPT向けの呼び出しだけ有効なSEO JSONを返し、それ以外はMockLLMClientに委譲するスタブ（S5b）。 */
+class SeoStubLLMClient implements LLMClient {
+  private readonly mock = new MockLLMClient();
+  async generate(messages: LLMMessage[]): Promise<string> {
+    if (messages.some((m) => m.role === "system" && m.content === SEO_SYSTEM_PROMPT)) {
+      return JSON.stringify({
+        seoTitle: "新経路SEO保存確認用のSEOタイトル",
+        metaDescription: "新経路(Post)でSEO列とタグが保存されることを確認する説明文。",
+        ogTitle: "新経路SEO確認用OGPタイトル",
+        ogDescription: "新経路SEO確認用OGPディスクリプション。",
+        tags: ["ヤスオ", "パッチ"],
+      });
+    }
+    return this.mock.generate(messages);
+  }
 }
 
 beforeEach(async () => {
@@ -198,5 +218,47 @@ describe("generateArticlesFromHotPosts（リファクタリングS5a F-S5a-1）"
   it("Postが1件も無い場合は0件記事化で正常終了する(例外なし)", async () => {
     const summary = await generateArticlesFromHotPosts(llm, { now: T0, championMap: null });
     expect(summary).toEqual({ succeededCount: 0, failedCount: 0, results: [] });
+  });
+});
+
+describe("generateArticlesFromHotPosts（SEO列・タグの保存、リファクタリングS5b F-S5b-2 ブリーフテスト3）", () => {
+  it("SEOをスタブで返すLLMを渡すと Article の SEO列に保存され、tags が ArticleTag に紐付く", async () => {
+    const post = await createPost({
+      sourceType: "riot",
+      metrics: [{ score: 200, commentCount: 50, capturedAt: T0 }],
+    });
+    const summary = await generateArticlesFromHotPosts(new SeoStubLLMClient(), { now: T0, championMap: null });
+
+    const result = summary.results.find((r) => r.postId === post.id);
+    expect(result?.status).toBe("success");
+    const article = await prisma.article.findUnique({
+      where: { postId: post.id },
+      include: { tags: { include: { tag: true } } },
+    });
+    expect(article?.seoTitle).toBe("新経路SEO保存確認用のSEOタイトル");
+    expect(article?.metaDescription).toBe("新経路(Post)でSEO列とタグが保存されることを確認する説明文。");
+    expect(article?.ogTitle).toBe("新経路SEO確認用OGPタイトル");
+    expect(article?.ogDescription).toBe("新経路SEO確認用OGPディスクリプション。");
+    expect(article?.tags.map((t) => t.tag.name).sort()).toEqual(["パッチ", "ヤスオ"]);
+  });
+
+  it("mock(MockLLMClient)ではSEOがnullのため、SEO列・タグとも未設定のまま保存される(回帰なし)", async () => {
+    const post = await createPost({
+      sourceType: "riot",
+      metrics: [{ score: 200, commentCount: 50, capturedAt: T0 }],
+    });
+    const summary = await generateArticlesFromHotPosts(llm, { now: T0, championMap: null });
+
+    const result = summary.results.find((r) => r.postId === post.id);
+    expect(result?.status).toBe("success");
+    const article = await prisma.article.findUnique({
+      where: { postId: post.id },
+      include: { tags: true },
+    });
+    expect(article?.seoTitle).toBeNull();
+    expect(article?.metaDescription).toBeNull();
+    expect(article?.ogTitle).toBeNull();
+    expect(article?.ogDescription).toBeNull();
+    expect(article?.tags).toHaveLength(0);
   });
 });

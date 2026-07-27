@@ -47,6 +47,14 @@ export type ArticleDetail = ArticleSummary & {
   unconfirmed: boolean;
   /** 絵文字リアクションの件数（拡張E1）。既定の全絵文字を必ず含む（未押下は0）。 */
   reactions: ReactionCounts;
+  /**
+   * SEOメタ・OGP（リファクタリングS5b F-S5b-3）。AI生成できた記事のみ設定され、未設定(null)の
+   * 記事は表示側（generateMetadata）が従来のメタ生成にフォールバックする。
+   */
+  seoTitle: string | null;
+  metaDescription: string | null;
+  ogTitle: string | null;
+  ogDescription: string | null;
 };
 
 /**
@@ -120,6 +128,10 @@ function toDetail(article: ArticleWithRelations): ArticleDetail {
     sources: article.sources.map((s) => ({ label: s.label, url: s.url })),
     unconfirmed: article.unconfirmed,
     reactions: mergeReactionCounts(article.reactions),
+    seoTitle: article.seoTitle,
+    metaDescription: article.metaDescription,
+    ogTitle: article.ogTitle,
+    ogDescription: article.ogDescription,
   };
 }
 

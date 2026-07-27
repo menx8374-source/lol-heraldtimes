@@ -173,6 +173,22 @@ export async function generateArticlesForQueue(
             heldReason: isPublished ? null : moderation.reason,
             heldDetail: isPublished ? null : moderation.detail,
             unconfirmed: isPublished ? moderation.unconfirmed : false,
+            // SEOメタ・タグ（リファクタリングS5b F-S5b-2）: AI生成できた(generated.seoが非null)場合のみ
+            // SEO列を保存し、tagsをTag/ArticleTagにconnectOrCreateで紐付ける。null(mock/失敗)時は
+            // SEO列・タグとも未設定のままにする(表示は従来メタにフォールバック、回帰なし)。
+            ...(generated.seo
+              ? {
+                  seoTitle: generated.seo.seoTitle,
+                  metaDescription: generated.seo.metaDescription,
+                  ogTitle: generated.seo.ogTitle,
+                  ogDescription: generated.seo.ogDescription,
+                  tags: {
+                    create: generated.seo.tags.map((name) => ({
+                      tag: { connectOrCreate: { where: { name }, create: { name } } },
+                    })),
+                  },
+                }
+              : {}),
             sources: {
               create: generated.sources,
             },

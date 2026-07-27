@@ -57,15 +57,20 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
   const siteUrl = getSiteUrl();
   const url = `${siteUrl}/articles/${article.slug}`;
-  const description = buildArticleDescription(article.body);
+  // SEO列（リファクタリングS5b F-S5b-3）: AI生成できた記事はそれを優先し、未設定(null)の記事は
+  // 従来のメタ生成にフォールバックする（既存記事・mock生成でも壊れない）。
+  const title = article.seoTitle ?? article.title;
+  const description = article.metaDescription ?? buildArticleDescription(article.body);
+  const ogTitle = article.ogTitle ?? article.seoTitle ?? article.title;
+  const ogDescription = article.ogDescription ?? article.metaDescription ?? buildArticleDescription(article.body);
   const imageUrl = resolveOgImageUrl(siteUrl, article.thumbnailUrl, article.category, article.slug);
 
   return {
-    title: article.title,
+    title,
     description,
     openGraph: {
-      title: article.title,
-      description,
+      title: ogTitle,
+      description: ogDescription,
       url,
       type: "article",
       images: [{ url: imageUrl }],

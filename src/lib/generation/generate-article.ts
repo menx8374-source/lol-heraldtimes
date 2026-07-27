@@ -21,6 +21,7 @@ import { computeVerbatimMatchRatio, DEFAULT_VERBATIM_THRESHOLD } from "@/lib/gen
 import { hasAcceptableQuoteRatio } from "@/lib/generation/quote-ratio";
 import { generateHookTitleLLM } from "@/lib/generation/title";
 import { threadBodyText } from "@/lib/generation/thread-format";
+import { generateSeo, type GeneratedSeo } from "@/lib/generation/seo";
 import { isSafeImageUrl } from "@/lib/image-url";
 import {
   detectChampionSplashUrl,
@@ -64,6 +65,12 @@ export type GeneratedArticle = {
    *    汎用の既定画像にフォールバックする）。
    */
   thumbnailUrl: string | null;
+  /**
+   * SEOメタ・OGP・タグ（リファクタリングS5b F-S5b-1）。本文・タイトル確定後にAIへ1回だけ生成を
+   * 依頼した結果。mock・APIエラー・空応答・parse不能・必須値欠落の場合は null になり、呼び出し側
+   * （pipeline.ts / post-pipeline.ts）は SEO列を未設定のままにする（表示は従来メタにフォールバック）。
+   */
+  seo: GeneratedSeo | null;
 };
 
 const CATEGORY_BY_SOURCE: Record<SourceType, CategoryLabel> = {
@@ -158,11 +165,21 @@ export async function generateArticleForCandidate(
     thumbnailUrl = pickDeterministicChampionSplashUrl(candidate.id);
   }
 
+  const category = CATEGORY_BY_SOURCE[candidate.sourceType];
+  // SEO生成（F-S5b-1）: 本文・タイトルが確定した後に1回だけ呼ぶ。mock/失敗時はnull(追加コストなし)で、
+  // 呼び出し側が従来のメタ生成にフォールバックする。判定・分類ではなく生成用途のみ(要件遵守)。
+  const seo = await generateSeo(llmClient, {
+    title,
+    bodyText: body.map(blockText).join(" "),
+    category,
+  });
+
   return {
     title,
-    category: CATEGORY_BY_SOURCE[candidate.sourceType],
+    category,
     body,
     sources: [{ label: ARTICLE_SOURCE_LABEL[candidate.sourceType], url: candidate.sourceUrl }],
     thumbnailUrl,
+    seo,
   };
 }

@@ -9,6 +9,7 @@ import { MockLLMClient, type LLMClient, type LLMMessage } from "@/lib/generation
 import { blockText, parseArticleBody } from "@/lib/article-body";
 import { pickDeterministicChampionSplashUrl } from "@/lib/generation/champion-thumbnail";
 import { LLM_TITLE_SYSTEM_PROMPT } from "@/lib/generation/title";
+import { SEO_SYSTEM_PROMPT } from "@/lib/generation/seo";
 
 /**
  * env `PATCH_ARTICLE_MODE` を一時的に指定して関数を実行する(拡張E41 F-E41-2)。
@@ -608,5 +609,44 @@ describe("generateArticleForCandidate（まとめ速報レス形式=5ch/reddit�
         llm,
       ),
     ).rejects.toBeInstanceOf(GenerationError);
+  });
+});
+
+describe("generateArticleForCandidate（SEO生成、リファクタリングS5b F-S5b-2）", () => {
+  /** SEO_SYSTEM_PROMPT向けの呼び出しだけ有効なSEO JSONを返し、それ以外はMockLLMClientに委譲するスタブ。 */
+  class SeoStubLLMClient implements LLMClient {
+    public seoCallCount = 0;
+    private readonly mock = new MockLLMClient();
+    async generate(messages: LLMMessage[]): Promise<string> {
+      if (messages.some((m) => m.role === "system" && m.content === SEO_SYSTEM_PROMPT)) {
+        this.seoCallCount++;
+        return JSON.stringify({
+          seoTitle: "スタブ生成のSEOタイトルをここに入れる",
+          metaDescription: "スタブ生成のメタディスクリプションをここに入れて確認する。",
+          ogTitle: "スタブ生成のOGPタイトル",
+          ogDescription: "スタブ生成のOGPディスクリプション。",
+          tags: ["ヤスオ", "パッチ"],
+        });
+      }
+      return this.mock.generate(messages);
+    }
+  }
+
+  it("SEOをスタブで返すLLMを渡すと GeneratedArticle.seo に載る（記事1本につきSEO呼び出しは1回）", async () => {
+    const stub = new SeoStubLLMClient();
+    const result = await generateArticleForCandidate(candidate(), stub);
+    expect(result.seo).toEqual({
+      seoTitle: "スタブ生成のSEOタイトルをここに入れる",
+      metaDescription: "スタブ生成のメタディスクリプションをここに入れて確認する。",
+      ogTitle: "スタブ生成のOGPタイトル",
+      ogDescription: "スタブ生成のOGPディスクリプション。",
+      tags: ["ヤスオ", "パッチ"],
+    });
+    expect(stub.seoCallCount).toBe(1);
+  });
+
+  it("mock(MockLLMClient)ではSEOを組み立てられないため seo は null になる（従来どおり・追加コストなし）", async () => {
+    const result = await generateArticleForCandidate(candidate(), llm);
+    expect(result.seo).toBeNull();
   });
 });

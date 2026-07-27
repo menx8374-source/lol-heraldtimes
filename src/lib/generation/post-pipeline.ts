@@ -217,6 +217,21 @@ export async function generateArticlesFromHotPosts(
             heldDetail: isPublished ? null : moderation.detail,
             unconfirmed: isPublished ? moderation.unconfirmed : false,
             postId: post.id,
+            // SEOメタ・タグ（リファクタリングS5b F-S5b-2）: 旧経路(pipeline.ts)と同じ方針。
+            // generated.seoがnull(mock/失敗)ならSEO列・タグとも未設定のまま(従来メタにフォールバック)。
+            ...(generated.seo
+              ? {
+                  seoTitle: generated.seo.seoTitle,
+                  metaDescription: generated.seo.metaDescription,
+                  ogTitle: generated.seo.ogTitle,
+                  ogDescription: generated.seo.ogDescription,
+                  tags: {
+                    create: generated.seo.tags.map((name) => ({
+                      tag: { connectOrCreate: { where: { name }, create: { name } } },
+                    })),
+                  },
+                }
+              : {}),
             sources: {
               create: generated.sources,
             },

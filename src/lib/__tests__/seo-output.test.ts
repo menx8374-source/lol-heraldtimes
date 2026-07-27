@@ -237,6 +237,55 @@ describe("記事OG画像のフォールバック（拡張E38 テスト4: 反応�
   });
 });
 
+describe("記事メタのSEO列フォールバック（リファクタリングS5b F-S5b-3 ブリーフテスト4）", () => {
+  it("SEO列(seoTitle/metaDescription/ogTitle/ogDescription)がある記事はそれを使う", async () => {
+    await prisma.article.update({
+      where: { slug: "published-article-a" },
+      data: {
+        seoTitle: "SEO用の記事タイトル",
+        metaDescription: "SEO用のメタディスクリプション。",
+        ogTitle: "SEO用のOGPタイトル",
+        ogDescription: "SEO用のOGPディスクリプション。",
+      },
+    });
+    const meta = await generateArticleMetadata({
+      params: Promise.resolve({ slug: "published-article-a" }),
+    });
+    expect(meta.title).toBe("SEO用の記事タイトル");
+    expect(meta.description).toBe("SEO用のメタディスクリプション。");
+    expect(meta.openGraph?.title).toBe("SEO用のOGPタイトル");
+    expect(meta.openGraph?.description).toBe("SEO用のOGPディスクリプション。");
+  });
+
+  it("SEO列が無い記事は従来どおりtitle/本文抜粋のメタにフォールバックする（回帰なし）", async () => {
+    const meta = await generateArticleMetadata({
+      params: Promise.resolve({ slug: "published-article-b" }),
+    });
+    expect(meta.title).toBe("公開記事B");
+    expect(meta.openGraph?.title).toBe("公開記事B");
+    expect(meta.description).toBeTruthy();
+    expect(meta.openGraph?.description).toBe(meta.description);
+  });
+
+  it("seoTitle/metaDescriptionはあるがogTitle/ogDescriptionが無い記事は、OGPのみseoTitle/metaDescriptionにフォールバックする", async () => {
+    await prisma.article.update({
+      where: { slug: "published-article-a" },
+      data: {
+        seoTitle: "SEO用の記事タイトル(OGP列なし)",
+        metaDescription: "SEO用のメタディスクリプション(OGP列なし)。",
+        ogTitle: null,
+        ogDescription: null,
+      },
+    });
+    const meta = await generateArticleMetadata({
+      params: Promise.resolve({ slug: "published-article-a" }),
+    });
+    expect(meta.title).toBe("SEO用の記事タイトル(OGP列なし)");
+    expect(meta.openGraph?.title).toBe("SEO用の記事タイトル(OGP列なし)");
+    expect(meta.openGraph?.description).toBe("SEO用のメタディスクリプション(OGP列なし)。");
+  });
+});
+
 describe("feed.xml（RSSフィード, 拡張E4）", () => {
   it("公開記事のみを含み、保留記事のタイトルは含めない", async () => {
     const res = await getFeed();
