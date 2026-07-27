@@ -420,3 +420,59 @@ describe("RedditAdapter.fetchMetrics（リファクタリングS4 F-S4-1・テ�
     await expect(adapter.fetchMetrics("abc123")).resolves.toBeNull();
   });
 });
+
+describe("RedditAdapter.fetchContent（リファクタリングS6 F-S6-2・テスト3）", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("投稿id→投稿本体+上位コメントの順に再取得し、現在の内容でスレッドダンプを作り直す(既存ロジック再利用)", async () => {
+    const calledUrls: string[] = [];
+    const fetchMock = vi.fn(async (url: string) => {
+      calledUrls.push(url);
+      if (url.includes("/posts/ids")) {
+        return jsonResponse({
+          data: [post({ id: "abc123", title: "Updated title after surge", selftext: "New details" })],
+        });
+      }
+      if (url.includes("/comments/search")) {
+        return jsonResponse({ data: [comment({ body: "Fresh top comment" })] });
+      }
+      throw new Error(`unexpected url: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new RedditAdapter({ maxComments: 20, delayMs: 0, sleep: async () => {} });
+    const result = await adapter.fetchContent("abc123");
+
+    expect(result).not.toBeNull();
+    expect(result?.title).toBe("Updated title after surge");
+    expect(parseThreadReses(result!.content)).toHaveLength(2); // OP + 1コメント
+    expect(calledUrls[0]).toContain("/posts/ids");
+    expect(calledUrls[1]).toContain("/comments/search");
+  });
+
+  it("投稿が見つからない(data空)場合はnullを返す", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ data: [] })));
+    const adapter = new RedditAdapter({});
+    await expect(adapter.fetchContent("abc123")).resolves.toBeNull();
+  });
+
+  it("HTTPエラーの場合はnullを返す(例外を投げない)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(null, 500)));
+    const adapter = new RedditAdapter({});
+    await expect(adapter.fetchContent("abc123")).resolves.toBeNull();
+  });
+
+  it("ネットワーク断の場合はnullを返す(例外を投げない)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network down");
+      }),
+    );
+    const adapter = new RedditAdapter({});
+    await expect(adapter.fetchContent("abc123")).resolves.toBeNull();
+  });
+});

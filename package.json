@@ -11,6 +11,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "collect": "tsx scripts/collect.ts",
     "update-metrics": "tsx scripts/update-metrics.ts",
+    "update-articles": "tsx scripts/update-articles.ts",
     "generate": "tsx scripts/generate.ts",
     "pipeline": "tsx scripts/pipeline.ts",
     "regenerate-titles": "tsx scripts/regenerate-titles.ts",

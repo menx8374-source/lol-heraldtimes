@@ -95,6 +95,36 @@ export function getHotnessConfig(sourceType?: SourceType): HotnessConfig {
   };
 }
 
+/**
+ * 記事更新トリガ（再AI更新、リファクタリングS6 F-S6-1）の閾値設定。公開後もPostを監視し、
+ * ここで定めた条件（更新回数上限・cooldown・経過時間上限・スコア/コメント増加量）を
+ * すべて満たしたときだけ `shouldUpdateArticle`（`update-trigger.ts`）がtrueを返す。
+ */
+export type ArticleUpdateConfig = {
+  /** baselineからのScore増加量の下限。これ以上増えたら更新トリガ対象（既定100。reddit主体）。 */
+  updateMinScoreDelta: number;
+  /** baselineからのコメント数増加量の下限（既定30。5ch/reddit共通）。5chはscoreが常に0のため
+   *  scoreDeltaが常に0となり、実質このコメント増加量のみで判定される（設定を分けなくても吸収できる）。 */
+  updateMinCommentDelta: number;
+  /** 前回更新（無ければ記事化）からの最短間隔（時間、既定6）。 */
+  updateCooldownHours: number;
+  /** 1記事あたりの最大更新回数（既定2）。これに達したら以後は更新しない（多重更新の歯止め）。 */
+  updateMaxCount: number;
+  /** 投稿からの経過時間がこれを超えたら更新対象外（既定48。`METRICS_MAX_MONITOR_HOURS`既定と整合）。 */
+  updateMaxAgeHours: number;
+};
+
+/** 記事更新トリガの設定を返す（env上書き可能）。 */
+export function getArticleUpdateConfig(): ArticleUpdateConfig {
+  return {
+    updateMinScoreDelta: envInt("UPDATE_MIN_SCORE_DELTA", 100),
+    updateMinCommentDelta: envInt("UPDATE_MIN_COMMENT_DELTA", 30),
+    updateCooldownHours: envInt("UPDATE_COOLDOWN_HOURS", 6),
+    updateMaxCount: envInt("UPDATE_MAX_COUNT", 2),
+    updateMaxAgeHours: envInt("UPDATE_MAX_AGE_HOURS", 48),
+  };
+}
+
 /** hotness免除ソース種別の既定値（リファクタリング S5c F-S5c-1）。 */
 const DEFAULT_EXEMPT_SOURCE_TYPES: SourceType[] = ["riot"];
 

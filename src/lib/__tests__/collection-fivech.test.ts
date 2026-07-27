@@ -6,6 +6,7 @@ import {
   buildSubjectUrl,
   buildThreadDumpFromDat,
   decodeDatBody,
+  extractDatThreadTitle,
   filterRelevantThreads,
   matchKeywordThreads,
   parseBoards,
@@ -67,6 +68,16 @@ function sjisResponse(bodyHex: string, status = 200): Response {
     ok: status >= 200 && status < 300,
     status,
     arrayBuffer: async () => Uint8Array.from(Buffer.from(bodyHex, "hex")).buffer,
+  } as unknown as Response;
+}
+
+/** ASCIIのみのテキストをShift_JISデコード経路(arrayBuffer)で返すモック応答（リファクタリングS6 F-S6-2）。
+ * ASCII範囲(0x00-0x7F)はShift_JISでもUTF-8と同じバイト列になるため、hexエンコード無しで書ける。 */
+function asciiResponse(text: string, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    arrayBuffer: async () => Uint8Array.from(Buffer.from(text, "utf8")).buffer,
   } as unknown as Response;
 }
 
@@ -593,6 +604,97 @@ describe("FiveChAdapter.fetchMetrics（リファクタリングS4 F-S4-1・テ�
     const adapter = new FiveChAdapter({ boards: [board] });
     await expect(
       adapter.fetchMetrics(`${board.server}/${board.board}/9999999999`),
+    ).resolves.toBeNull();
+  });
+});
+
+describe("純関数: extractDatThreadTitle（リファクタリングS6 F-S6-2）", () => {
+  it("dat1行目(レス1)の5番目のフィールドからスレタイトルを取り出す", () => {
+    const dat =
+      "Anon<><>2026/07/27(Mon) 10:00:00.00 ID:aaa<>OP body<>Title After Surge\n" +
+      "Anon<><>2026/07/27(Mon) 10:01:00.00 ID:bbb<>Fresh reply<>\n";
+    expect(extractDatThreadTitle(dat)).toBe("Title After Surge");
+  });
+
+  it("HTMLエンティティをデコードする", () => {
+    const dat = "Anon<><>2026/07/27(Mon) 10:00:00.00 ID:aaa<>OP body<>Title &amp; More\n";
+    expect(extractDatThreadTitle(dat)).toBe("Title & More");
+  });
+
+  it("空/形式不一致の場合はnullを返す", () => {
+    expect(extractDatThreadTitle("")).toBeNull();
+    expect(extractDatThreadTitle("no separators here")).toBeNull();
+  });
+});
+
+describe("FiveChAdapter.fetchContent（リファクタリングS6 F-S6-2・テスト3）", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const board = { server: "test5ch.example", board: "game" };
+  const DAT_AFTER_SURGE =
+    "Anon<><>2026/07/27(Mon) 10:00:00.00 ID:aaa<>OP body about the surge<>Old Title\n" +
+    "Anon<><>2026/07/27(Mon) 10:01:00.00 ID:bbb<>Fresh reply after surge<>\n";
+  const SUBJECT_WITH_CURRENT_TITLE =
+    "1700000001.dat<>Current Thread Title After Surge (99)\n";
+
+  it("externalIdからdatを再取得し現在の内容でスレッドダンプを作り直す。タイトルはsubject.txtの現在のスレタイを使う", async () => {
+    const calledUrls: string[] = [];
+    const fetchMock = vi.fn(async (url: string) => {
+      calledUrls.push(url);
+      if (url === buildSubjectUrl(board.server, board.board)) return asciiResponse(SUBJECT_WITH_CURRENT_TITLE);
+      if (url === buildDatUrl(board.server, board.board, "1700000001")) return asciiResponse(DAT_AFTER_SURGE);
+      return asciiResponse("", 500);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new FiveChAdapter({ boards: [board], delayMs: 0, sleep: async () => {} });
+    const result = await adapter.fetchContent(`${board.server}/${board.board}/1700000001`);
+
+    expect(result).not.toBeNull();
+    expect(result?.title).toBe("Current Thread Title After Surge");
+    expect(parseThreadReses(result!.content)).toHaveLength(2); // OP + 1レス
+    expect(result?.imageUrl).toBeNull();
+    expect(calledUrls.some((u) => u === buildDatUrl(board.server, board.board, "1700000001"))).toBe(true);
+  });
+
+  it("subject.txt取得に失敗した場合はdat埋め込みのタイトルにフォールバックする", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url === buildSubjectUrl(board.server, board.board)) return asciiResponse("", 500);
+        if (url === buildDatUrl(board.server, board.board, "1700000001")) return asciiResponse(DAT_AFTER_SURGE);
+        return asciiResponse("", 500);
+      }),
+    );
+    const adapter = new FiveChAdapter({ boards: [board], delayMs: 0, sleep: async () => {} });
+    const result = await adapter.fetchContent(`${board.server}/${board.board}/1700000001`);
+    expect(result?.title).toBe("Old Title");
+  });
+
+  it("externalId形式不一致の場合はnullを返す(fetchを一切呼ばない)", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const adapter = new FiveChAdapter({ boards: [board] });
+    await expect(adapter.fetchContent("invalid")).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("dat取得に失敗した場合はnullを返す(例外を投げない)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => asciiResponse("", 403)));
+    const adapter = new FiveChAdapter({ boards: [board], delayMs: 0, sleep: async () => {} });
+    await expect(
+      adapter.fetchContent(`${board.server}/${board.board}/1700000001`),
+    ).resolves.toBeNull();
+  });
+
+  it("有効なレスが1件も無い(空dat)場合はnullを返す", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => asciiResponse("")));
+    const adapter = new FiveChAdapter({ boards: [board], delayMs: 0, sleep: async () => {} });
+    await expect(
+      adapter.fetchContent(`${board.server}/${board.board}/1700000001`),
     ).resolves.toBeNull();
   });
 });

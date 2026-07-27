@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { getExemptSourceTypes, getHotnessConfig } from "@/lib/hotness/config";
+import { getArticleUpdateConfig, getExemptSourceTypes, getHotnessConfig } from "@/lib/hotness/config";
 
 const ENV_KEYS = [
   "HOTNESS_MIN_SCORE",
@@ -16,6 +16,11 @@ const ENV_KEYS = [
   "HOTNESS_MAX_AGE_HOURS",
   "HOTNESS_USE_RANK_SIGNAL",
   "HOTNESS_EXEMPT_SOURCE_TYPES",
+  "UPDATE_MIN_SCORE_DELTA",
+  "UPDATE_MIN_COMMENT_DELTA",
+  "UPDATE_COOLDOWN_HOURS",
+  "UPDATE_MAX_COUNT",
+  "UPDATE_MAX_AGE_HOURS",
 ];
 
 afterEach(() => {
@@ -107,5 +112,41 @@ describe("getExemptSourceTypes（hotness免除ソース、リファクタリン�
 
     process.env.HOTNESS_EXEMPT_SOURCE_TYPES = "";
     expect(getExemptSourceTypes()).toEqual(["riot"]);
+  });
+});
+
+describe("getArticleUpdateConfig（記事更新トリガの設定、リファクタリングS6 F-S6-1）", () => {
+  it("既定値を返す", () => {
+    expect(getArticleUpdateConfig()).toEqual({
+      updateMinScoreDelta: 100,
+      updateMinCommentDelta: 30,
+      updateCooldownHours: 6,
+      updateMaxCount: 2,
+      updateMaxAgeHours: 48,
+    });
+  });
+
+  it("envで各値を上書きできる", () => {
+    process.env.UPDATE_MIN_SCORE_DELTA = "200";
+    process.env.UPDATE_MIN_COMMENT_DELTA = "50";
+    process.env.UPDATE_COOLDOWN_HOURS = "12";
+    process.env.UPDATE_MAX_COUNT = "3";
+    process.env.UPDATE_MAX_AGE_HOURS = "72";
+
+    expect(getArticleUpdateConfig()).toEqual({
+      updateMinScoreDelta: 200,
+      updateMinCommentDelta: 50,
+      updateCooldownHours: 12,
+      updateMaxCount: 3,
+      updateMaxAgeHours: 72,
+    });
+  });
+
+  it("不正な値(数値でない・負数)を設定した場合は既定値にフォールバックする", () => {
+    process.env.UPDATE_MIN_SCORE_DELTA = "not-a-number";
+    process.env.UPDATE_MAX_COUNT = "-1";
+    const config = getArticleUpdateConfig();
+    expect(config.updateMinScoreDelta).toBe(100);
+    expect(config.updateMaxCount).toBe(2);
   });
 });

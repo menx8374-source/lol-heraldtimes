@@ -108,4 +108,10 @@ export interface SourceAdapter {
    * 非対応ソース（riot）は実装しなくてよい。失敗・非対応時は例外を投げず null を返す。
    */
   fetchMetrics?(externalId: string): Promise<{ score: number; commentCount: number } | null>;
+  /**
+   * リファクタリングS6（F-S6-2）: 記事更新（伸びたら条件付き再AI）用に、投稿の「現在の内容」を
+   * 再取得する任意メソッド。reddit/5chは現在の上位コメント/レスで内容を作り直したスレッドダンプを
+   * 返す。非対応ソース（riot）は実装しなくてよい。失敗・非対応時は例外を投げず null を返す。
+   */
+  fetchContent?(externalId: string): Promise<{ title: string; content: string; imageUrl?: string | null } | null>;
 }

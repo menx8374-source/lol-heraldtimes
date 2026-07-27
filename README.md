@@ -27,6 +27,7 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
   - 生成LLMは既定で決定論的な**モック実装**（テンプレート/ルールベース、API キー不要）。`GENERATION_MODE=live`＋`ANTHROPIC_API_KEY`設定時のみAnthropic Claude(Haiku)へ本接続する（拡張E24。未設定ならmockに自動フォールバックし課金しない）。逐語一致率・引用の主従関係・最低文字数を満たさない候補は「生成失敗」(`CollectedItem.status="generation_failed"`、`generationError`にエラー内容を記録)として扱われ、他候補の生成は継続する。
   - 生成に成功した候補は `CollectedItem.articleId` と `status="articled"` が同一トランザクションで同期される（再実行しても二重記事化しない）。
   - **公開前コンテンツ安全フィルタ（F9）**: 生成した本文＋タイトルを NGワード／出典欠落／特定個人への中傷・晒し／重複の観点で判定し、通過した記事のみ `Article.status="published"` として公開される。通過しない記事は `status="held"`（保留）となり `heldReason`/`heldDetail` に理由が記録され、閲覧サイトの一覧・検索・個別ページのいずれにも表示されない（保留キューは `src/lib/moderation/queue.ts` の `listHeldArticles()` で参照できる）。未確定・噂レベルの表現を含む記事は保留にはせず `unconfirmed=true` として公開され、記事ページに「未確認情報」ラベルが表示される。
+- **記事更新（伸びたら条件付き再AI）実行**: `npm run update-articles`（articleが紐付き(記事化済み)かつ監視中(`Post.monitoring=true`)のPostのうち、Scoreが大きく伸びた／コメントが急増したものだけ数値ルール(AI不使用)で判定して再AI更新する。通常は再実行しない(cooldown・更新回数上限・経過時間上限で抑制)。更新の多重実行防止は`ArticleUpdateHistory`で行い、既存Articleはslug/id/postId/publishedAtを変えずin-place更新する。riot(免除ソース)は対象外)
 - **統合パイプライン実行（F10・F11）**: `npm run pipeline`（収集→重複排除→記事生成→タイトル生成→安全フィルタ→公開までを1回の起動で人手介入なしで実行する。`npm run collect`+`npm run generate` を1本のオーケストレーションにまとめたもの）
   - 1回の実行で公開する記事本数の上限は `PIPELINE_MAX_PUBLISH_PER_RUN`（既定5件）。上限を超えた候補は次回実行に持ち越される（破棄されない）。
   - 実行間隔（スケジュール設定）は `PIPELINE_INTERVAL_MS`（既定4時間）。実際のcron常駐は本スプリントの対象外のため、`npm run pipeline` を間隔を空けて再実行する運用を想定する（実行結果に「次回実行の目安」を表示する）。
@@ -52,6 +53,7 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
 | `GENERATION_MODE` | 任意 | `mock`（既定、APIキー不要の決定論的モックLLM）／`live`（拡張E24: `ANTHROPIC_API_KEY`設定時のみAnthropic Claude(Haiku)へ本接続。未設定ならmockに自動フォールバック） |
 | `PATCH_ARTICLE_MODE` | 任意 | riot（パッチ）記事の構成モード（拡張E41）。`fact`（既定）: 事実速報（見出し「パッチ<番号>が公開」＋一般的事実段落＋出典URL、LLM不使用・捏造なし）／`summary`: 従来のLLM要約→決定的抽出→クリーン定型の3段フォールバック |
 | `REACTION_SELECT_MODE` | 任意 | 反応記事(5ch/reddit)のレス選別モード（リファクタリングS3 F-S3-3）。`rules`（既定）: 数値ルール（アンカー会話クラスタ選定＋決定論強調、AI不使用）／`llm`: 従来どおりAI(`selectReactionReses`)で選別する旧挙動（質の比較用に残置） |
+| `UPDATE_MIN_SCORE_DELTA` / `UPDATE_MIN_COMMENT_DELTA` / `UPDATE_COOLDOWN_HOURS` / `UPDATE_MAX_COUNT` / `UPDATE_MAX_AGE_HOURS` / `UPDATE_MAX_POSTS_PER_RUN` / `UPDATE_REQUEST_DELAY_MS` | 任意 | 記事更新（`npm run update-articles`、リファクタリングS6）のトリガ閾値。既定: スコア増加量100・コメント増加量30・cooldown6時間・最大更新回数2回・最大経過時間48時間・1回の実行で調べる最大Post数20・連続fetch間ディレイ1000ms |
 | `PIPELINE_MAX_PUBLISH_PER_RUN` | 任意 | 統合パイプライン(`npm run pipeline`)1回の実行で処理・公開する記事本数の上限（既定5件） |
 | `PIPELINE_INTERVAL_MS` | 任意 | 統合パイプラインの繰り返し実行の目安間隔(ミリ秒)。既定14400000(4時間) |
 | `SITE_URL` | 任意 | サイトの絶対URLベース（既定 `http://localhost:3000`）。OGP／構造化データ／サイトマップ／robotsの絶対URL生成に使う |

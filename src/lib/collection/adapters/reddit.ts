@@ -382,4 +382,28 @@ export class RedditAdapter implements SourceAdapter {
     if (!postData) return null;
     return { score: postData.score ?? 0, commentCount: postData.num_comments ?? 0 };
   }
+
+  /**
+   * リファクタリングS6（F-S6-2）: 投稿の現在の内容（OP＋上位コメント）を再取得し、
+   * `buildRedditThreadDump`/`selectTopComments`（既存のコメント取得・ダンプ構築ロジック）を
+   * 再利用してスレッドダンプを作り直す。投稿が見つからない/取得失敗時は null。
+   */
+  async fetchContent(externalId: string): Promise<{ title: string; content: string; imageUrl?: string | null } | null> {
+    await this.waitBeforeFetch();
+    const json = await fetchJsonSafe<ArcticShiftPostsResponse>(
+      buildPostsByIdsUrl(externalId),
+      { headers: { "User-Agent": this.userAgent } },
+      { logLabel: "reddit", context: `content id=${externalId}` },
+    );
+    const postData = json?.data?.[0];
+    if (!postData) return null;
+
+    const comments = await this.fetchComments(postData);
+    const topComments = selectTopComments(comments, this.maxComments);
+    return {
+      title: postData.title,
+      content: buildRedditThreadDump(postData, topComments),
+      imageUrl: extractRedditImageUrl(postData),
+    };
+  }
 }

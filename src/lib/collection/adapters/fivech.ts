@@ -258,6 +258,20 @@ export function buildThreadDumpFromDat(datText: string, maxReses: number): strin
   return selected.map((r) => `${r.number}: ${r.bodyLines.join("\n")}`).join("\n\n");
 }
 
+/**
+ * dat 1行目（レス1）の5番目のフィールド（スレタイ、レス1のみ設定される）からスレタイトルを
+ * 取り出す純関数（リファクタリングS6 F-S6-2、`fetchContent`のタイトル復元に使う。フォールバック用）。
+ * 形式不一致・空の場合は null。
+ */
+export function extractDatThreadTitle(datText: string): string | null {
+  const firstLine = datText.split(/\r?\n/).find((l) => l.length > 0);
+  if (!firstLine) return null;
+  const rawTitle = firstLine.split("<>")[4];
+  if (!rawTitle) return null;
+  const decoded = decodeEntities(rawTitle).trim();
+  return decoded.length > 0 ? decoded : null;
+}
+
 export type FiveChAdapterOptions = {
   /** テスト・注入用。既定は env `FIVECH_BOARDS`（未設定/無効時は既定板）。 */
   boards?: FiveChBoard[];
@@ -418,5 +432,31 @@ export class FiveChAdapter implements SourceAdapter {
     const entry = entries.find((e) => e.threadId === parsed.threadId);
     if (!entry) return null;
     return { score: 0, commentCount: entry.resCount };
+  }
+
+  /**
+   * リファクタリングS6（F-S6-2）: externalIdからdatを再取得し、スレッドダンプを作り直す
+   * （既存の `buildThreadDumpFromDat` を再利用）。タイトルはsubject.txt（板ごとキャッシュ、
+   * `fetchMetrics`と同じ仕組み）のスレタイを優先し、無ければdat1行目埋め込みのタイトルにフォールバックする。
+   * externalId形式不一致・dat取得失敗・有効なレスが1件も無い場合は null。
+   */
+  async fetchContent(externalId: string): Promise<{ title: string; content: string; imageUrl?: string | null } | null> {
+    const parsed = parseFiveChExternalId(externalId);
+    if (!parsed) return null;
+
+    await this.waitBeforeFetch();
+    const datText = await fetchShiftJisTextSafe(
+      buildDatUrl(parsed.server, parsed.board, parsed.threadId),
+      { headers: { "User-Agent": this.userAgent } },
+      { logLabel: "5ch", context: `${parsed.server}/${parsed.board}/${parsed.threadId}.dat(content)` },
+    );
+    if (!datText) return null;
+
+    const content = buildThreadDumpFromDat(datText, this.maxResesPerThread);
+    if (!content) return null;
+
+    const entries = await this.getSubjectEntriesForMetrics(parsed.server, parsed.board);
+    const title = entries?.find((e) => e.threadId === parsed.threadId)?.title ?? extractDatThreadTitle(datText) ?? "";
+    return { title, content, imageUrl: null };
   }
 }
