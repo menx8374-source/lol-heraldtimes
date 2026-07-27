@@ -15,9 +15,15 @@ import type { RawCollectionItem, SourceAdapter, SourceType } from "@/lib/collect
  * （チャンピオン検出のフェッチ自体をスキップ）を既定にする（拡張E31）。
  * チャンピオン検出の配線自体は generation-generate-article.test.ts / champion-thumbnail.test.ts で
  * スタブMapを使って別途検証する。
+ *
+ * リファクタリングS5a F-S5a-2: 既定の生成経路は"post"（hot判定されたPostだけをAIで記事化する
+ * 新フロー）に変わったが、このファイルは従来どおりCollectedItemベースの記事化
+ * （generateArticlesForQueue、CollectedItemの状態遷移・重複防止等）を検証する比較用の回帰テストのため、
+ * generationSource: "collected"（旧経路）を明示して従来の期待値のまま動かす
+ * （新フロー自体のテストは generation-post-pipeline.test.ts、経路切替自体のテストは本ファイル末尾）。
  */
 function runPipeline(options: PipelineRunOptions = {}) {
-  return runFullPipeline({ championMap: null, ...options });
+  return runFullPipeline({ championMap: null, generationSource: "collected", ...options });
 }
 
 class FakeAdapter implements SourceAdapter {
@@ -366,5 +372,76 @@ describe("runFullPipeline（統合パイプライン）", () => {
     const runLog = await prisma.pipelineRunLog.findFirst({ orderBy: { startedAt: "desc" } });
     expect(runLog?.status).toBe("failure");
     expect(runLog?.errorMessage).toContain("想定外のDB異常");
+  });
+});
+
+/**
+ * 生成経路の切替（リファクタリングS5a F-S5a-2）の結合テスト。実際の生成ロジック（新旧いずれも）は
+ * generation-post-pipeline.test.ts / generation-pipeline.test.ts で別途検証済みのため、ここでは
+ * runFullPipeline が options.generationSource（未指定時はenv GENERATION_SOURCE）に従って
+ * どちらの生成関数を呼ぶかだけをスパイで検証する（DB書き込みは発生させない）。
+ */
+describe("runFullPipeline の生成経路切替（GENERATION_SOURCE、リファクタリングS5a F-S5a-2）", () => {
+  it("generationSource未指定・env未設定時は既定でgeneratePostArticles（新フロー）が呼ばれる", async () => {
+    const original = process.env.GENERATION_SOURCE;
+    delete process.env.GENERATION_SOURCE;
+    try {
+      let called = false;
+      await runFullPipeline({
+        now: T0,
+        championMap: null,
+        generatePostArticles: async () => {
+          called = true;
+          return { succeededCount: 0, failedCount: 0, results: [] };
+        },
+        generateArticles: async () => {
+          throw new Error("旧経路が誤って呼ばれた(テスト用)");
+        },
+      });
+      expect(called).toBe(true);
+    } finally {
+      if (original === undefined) delete process.env.GENERATION_SOURCE;
+      else process.env.GENERATION_SOURCE = original;
+    }
+  });
+
+  it('generationSource:"collected" 指定時は旧経路(generateArticlesForQueue相当)が呼ばれる', async () => {
+    let called = false;
+    await runFullPipeline({
+      now: T0,
+      championMap: null,
+      generationSource: "collected",
+      generateArticles: async () => {
+        called = true;
+        return { succeededCount: 0, failedCount: 0, results: [] };
+      },
+      generatePostArticles: async () => {
+        throw new Error("新フローが誤って呼ばれた(テスト用)");
+      },
+    });
+    expect(called).toBe(true);
+  });
+
+  it('env GENERATION_SOURCE="collected" のときはoptions未指定でも旧経路が呼ばれる', async () => {
+    const original = process.env.GENERATION_SOURCE;
+    process.env.GENERATION_SOURCE = "collected";
+    try {
+      let called = false;
+      await runFullPipeline({
+        now: T0,
+        championMap: null,
+        generateArticles: async () => {
+          called = true;
+          return { succeededCount: 0, failedCount: 0, results: [] };
+        },
+        generatePostArticles: async () => {
+          throw new Error("新フローが誤って呼ばれた(テスト用)");
+        },
+      });
+      expect(called).toBe(true);
+    } finally {
+      if (original === undefined) delete process.env.GENERATION_SOURCE;
+      else process.env.GENERATION_SOURCE = original;
+    }
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeNextRunAt, getPipelineConfig } from "@/lib/pipeline/config";
+import { computeNextRunAt, getGenerationSource, getPipelineConfig } from "@/lib/pipeline/config";
 
 describe("getPipelineConfig", () => {
   it("既定値（公開本数上限・実行間隔）を持つ", () => {
@@ -22,6 +22,41 @@ describe("getPipelineConfig", () => {
     } finally {
       if (original === undefined) delete process.env.PIPELINE_MAX_PUBLISH_PER_CATEGORY;
       else process.env.PIPELINE_MAX_PUBLISH_PER_CATEGORY = original;
+    }
+  });
+});
+
+describe("getGenerationSource（リファクタリングS5a F-S5a-2）", () => {
+  it("env未設定時は既定で'post'を返す", () => {
+    const original = process.env.GENERATION_SOURCE;
+    delete process.env.GENERATION_SOURCE;
+    try {
+      expect(getGenerationSource()).toBe("post");
+    } finally {
+      if (original === undefined) delete process.env.GENERATION_SOURCE;
+      else process.env.GENERATION_SOURCE = original;
+    }
+  });
+
+  it("GENERATION_SOURCE=collectedのときは'collected'を返す", () => {
+    const original = process.env.GENERATION_SOURCE;
+    process.env.GENERATION_SOURCE = "collected";
+    try {
+      expect(getGenerationSource()).toBe("collected");
+    } finally {
+      if (original === undefined) delete process.env.GENERATION_SOURCE;
+      else process.env.GENERATION_SOURCE = original;
+    }
+  });
+
+  it("不正な値のときは既定の'post'にフォールバックする", () => {
+    const original = process.env.GENERATION_SOURCE;
+    process.env.GENERATION_SOURCE = "unknown";
+    try {
+      expect(getGenerationSource()).toBe("post");
+    } finally {
+      if (original === undefined) delete process.env.GENERATION_SOURCE;
+      else process.env.GENERATION_SOURCE = original;
     }
   });
 });

@@ -18,9 +18,10 @@ import { getAllAdapters } from "@/lib/collection/adapters";
 import { getDefaultSourceConfigs } from "@/lib/collection/config";
 import type { SourceAdapter, SourceConfig, SourceType } from "@/lib/collection/types";
 import { generateArticlesForQueue, type GenerationRunSummary } from "@/lib/generation/pipeline";
+import { generateArticlesFromHotPosts, type PostGenerationRunSummary } from "@/lib/generation/post-pipeline";
 import type { ChampionNameToIdMap } from "@/lib/generation/champion-thumbnail";
 import { getLLMClient, type LLMClient } from "@/lib/generation/llm-client";
-import { getPipelineConfig } from "@/lib/pipeline/config";
+import { getPipelineConfig, getGenerationSource, type GenerationSource } from "@/lib/pipeline/config";
 import { promoteScheduledArticles } from "@/lib/generation/scheduled-publish";
 
 export type PipelineRunOptions = {
@@ -45,12 +46,21 @@ export type PipelineRunOptions = {
    * （未指定undefinedならrun開始時に1回だけ実フェッチ、明示的にnullならフェッチ自体をスキップ）。
    */
   championMap?: ChampionNameToIdMap | null;
+  /**
+   * 生成経路の切替（リファクタリングS5a F-S5a-2）。未指定時は env `GENERATION_SOURCE`
+   * （`getGenerationSource()`、既定 "post"）に従う。"post": hot判定されたPostだけをAIで記事化する
+   * 新フロー（既定）。"collected": 従来の CollectedItem→記事化（旧経路、比較用）。
+   */
+  generationSource?: GenerationSource;
 
   // 以下はテスト用の差し替えフック（想定外の例外に対する安全網を検証するため）。
   // 通常運用では指定不要（既定で実工程を呼ぶ）。
   runCollection?: typeof runCollectionPipeline;
   rebuildQueue?: typeof rebuildCandidateQueue;
+  /** generationSource="collected" のときに使う生成関数（旧経路）。 */
   generateArticles?: typeof generateArticlesForQueue;
+  /** generationSource="post"（既定）のときに使う生成関数（新フロー）。 */
+  generatePostArticles?: typeof generateArticlesFromHotPosts;
   promoteScheduled?: typeof promoteScheduledArticles;
 };
 
@@ -69,7 +79,8 @@ export type PipelineRunReport = {
   scheduledPublishedCount: number;
   errorMessage?: string;
   sourceSummaries: SourceRunSummary[];
-  generationSummary?: GenerationRunSummary;
+  /** generationSource（"post"既定 or "collected"）に応じてどちらかの型のサマリが入る。 */
+  generationSummary?: GenerationRunSummary | PostGenerationRunSummary;
 };
 
 /** 実行ログの保存。保存自体の失敗は実行結果に影響させず、コンソールに残すだけにする。 */
@@ -106,9 +117,11 @@ export async function runFullPipeline(options: PipelineRunOptions = {}): Promise
   const maxPublishPerRun = options.maxPublishPerRun;
   const maxPerCategory = options.maxPerCategory ?? pipelineConfig.maxPublishPerCategory;
 
+  const generationSource = options.generationSource ?? getGenerationSource();
   const runCollection = options.runCollection ?? runCollectionPipeline;
   const rebuildQueue = options.rebuildQueue ?? rebuildCandidateQueue;
   const generateArticles = options.generateArticles ?? generateArticlesForQueue;
+  const generatePostArticles = options.generatePostArticles ?? generateArticlesFromHotPosts;
   const promoteScheduled = options.promoteScheduled ?? promoteScheduledArticles;
 
   let sourceSummaries: SourceRunSummary[] = [];
@@ -119,7 +132,7 @@ export async function runFullPipeline(options: PipelineRunOptions = {}): Promise
   let publishedCount = 0;
   let heldCount = 0;
   let scheduledPublishedCount = 0;
-  let generationSummary: GenerationRunSummary | undefined;
+  let generationSummary: GenerationRunSummary | PostGenerationRunSummary | undefined;
   let status: "success" | "failure" = "success";
   let errorMessage: string | undefined;
 
@@ -137,12 +150,22 @@ export async function runFullPipeline(options: PipelineRunOptions = {}): Promise
     candidateCount = queueSummary.queuedCount;
 
     const llmClient = options.llmClient ?? getLLMClient();
-    generationSummary = await generateArticles(
-      llmClient,
-      maxPublishPerRun != null
-        ? { maxCandidates: maxPublishPerRun, championMap: options.championMap }
-        : { maxPerCategory, championMap: options.championMap },
-    );
+    if (generationSource === "collected") {
+      // 旧経路（比較用）: CollectedItem候補キューから記事化する。
+      generationSummary = await generateArticles(
+        llmClient,
+        maxPublishPerRun != null
+          ? { maxCandidates: maxPublishPerRun, championMap: options.championMap }
+          : { maxPerCategory, championMap: options.championMap },
+      );
+    } else {
+      // 既定の新フロー: hot判定された未記事化PostだけをAIで記事化する（リファクタリングS5a）。
+      generationSummary = await generatePostArticles(llmClient, {
+        maxPerCategory,
+        now: startedAt,
+        championMap: options.championMap,
+      });
+    }
     generationSucceeded = generationSummary.succeededCount;
     generationFailed = generationSummary.failedCount;
     publishedCount = generationSummary.results.filter(

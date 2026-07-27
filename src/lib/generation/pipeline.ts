@@ -28,8 +28,12 @@ import { fetchChampionNameToIdMap, type ChampionNameToIdMap } from "@/lib/genera
 /** 重複判定の比較対象にする既存公開記事の上限件数（記事数増加時のコスト有界化。related-articles.ts と同じ考え方）。 */
 const DUPLICATE_CHECK_POOL = 200;
 
-/** 重複判定用に、直近の公開済み記事のタイトル+本文テキストを取得する。 */
-async function loadPublishedContentPool(): Promise<{ title: string; content: string }[]> {
+/**
+ * 重複判定用に、直近の公開済み記事のタイトル+本文テキストを取得する。
+ * リファクタリングS5a: Postベースの新フロー（generation/post-pipeline.ts）でも同じ重複判定プールを
+ * 使うため export する（新旧経路で重複判定ロジックを二重管理しない）。
+ */
+export async function loadPublishedContentPool(): Promise<{ title: string; content: string }[]> {
   const rows = await prisma.article.findMany({
     where: { status: "published" },
     select: { title: true, body: true },

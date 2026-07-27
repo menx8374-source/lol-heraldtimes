@@ -30,12 +30,15 @@ async function main() {
     }
   }
 
+  // generationSource（既定"post"）に応じて結果の識別子が collectedItemId（旧経路）/ postId（新経路）
+  // のどちらかになる（リファクタリングS5a）。"in"演算子でどちらの形かを判定してログ出力する。
   for (const r of report.generationSummary?.results ?? []) {
+    const sourceId = "postId" in r ? `postId=${r.postId}` : `collectedItemId=${r.collectedItemId}`;
     if (r.status === "success") {
       const pub = r.publicationStatus === "held" ? `held(理由:${r.heldReason})` : "published";
-      console.log(`  [生成] collectedItemId=${r.collectedItemId} -> articleId=${r.articleId} status=${pub}`);
+      console.log(`  [生成] ${sourceId} -> articleId=${r.articleId} status=${pub}`);
     } else {
-      console.log(`  [生成失敗] collectedItemId=${r.collectedItemId}: ${r.errorMessage}`);
+      console.log(`  [生成失敗] ${sourceId}: ${r.errorMessage}`);
     }
   }
 

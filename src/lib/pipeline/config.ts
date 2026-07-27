@@ -37,3 +37,15 @@ export function getPipelineConfig(): PipelineConfig {
 export function computeNextRunAt(lastRunAt: Date, intervalMs: number): Date {
   return new Date(lastRunAt.getTime() + intervalMs);
 }
+
+/** 生成経路の種別。"post": Postベース新フロー（既定、リファクタリングS5a）。"collected": 旧CollectedItem経路。 */
+export type GenerationSource = "post" | "collected";
+
+/**
+ * 生成経路の切替フラグ（リファクタリングS5a F-S5a-2）。env `GENERATION_SOURCE` で切替。
+ * 既定（未設定 or 値が"collected"以外）は "post"（hot判定されたPostだけをAIで記事化する新フロー）。
+ * "collected" を指定した場合のみ旧経路（generateArticlesForQueue、比較用）を使う。
+ */
+export function getGenerationSource(): GenerationSource {
+  return process.env.GENERATION_SOURCE === "collected" ? "collected" : "post";
+}
