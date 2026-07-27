@@ -171,12 +171,15 @@ export default async function ArticlePage({ params }: Props) {
                 公式バナー、拡張E42)の場合は二重表示になるため出さない。 */}
             {shouldShowHeroThumbnail(article.body) && (
               <div className="mt-4">
+                {/* 拡張E52: 見切れ・過度な引き伸ばしを避けるため、切り抜き(object-cover)をやめ
+                    全体を表示(object-contain)・自然サイズ上限で中央寄せする。 */}
                 <ArticleThumbnail
                   thumbnailUrl={article.thumbnailUrl}
                   category={article.category}
                   slug={article.slug}
                   alt={article.title}
-                  className="max-h-96 w-full rounded-lg object-cover"
+                  objectFit="contain"
+                  className="mx-auto block max-h-[26rem] w-auto max-w-full rounded-lg"
                 />
               </div>
             )}

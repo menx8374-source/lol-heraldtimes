@@ -20,6 +20,7 @@ export function ArticleThumbnail({
   slug,
   className = "",
   alt = "",
+  objectFit = "cover",
 }: {
   thumbnailUrl: string | null;
   /** 記事のカテゴリ表示ラベル(未指定/未知のカテゴリは汎用既定画像にフォールバック)。 */
@@ -29,6 +30,11 @@ export function ArticleThumbnail({
   className?: string;
   /** 画像のalt属性(拡張E50: 記事冒頭ヒーロー表示では記事タイトルを渡す。未指定時は装飾画像として空文字)。 */
   alt?: string;
+  /**
+   * 画像の object-fit（拡張E52）。既定は "cover"（一覧カードは枠に合わせて切り抜き）。
+   * "contain" は切り抜かず全体を表示（記事冒頭ヒーローで見切れ・過度な引き伸ばしを避ける）。
+   */
+  objectFit?: "cover" | "contain";
 }) {
   const categorySlug = category ? categorySlugFor(category) : undefined;
   const defaultSrc = categorySlug ? `/default-thumb-${categorySlug}.svg` : DEFAULT_THUMBNAIL_SRC;
@@ -49,7 +55,7 @@ export function ArticleThumbnail({
       alt={alt}
       loading="lazy"
       decoding="async"
-      className={`object-cover ${className}`}
+      className={`${objectFit === "contain" ? "object-contain" : "object-cover"} ${className}`}
     />
   );
 }
