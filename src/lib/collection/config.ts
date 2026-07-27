@@ -94,6 +94,16 @@ export function getDefaultSourceConfigs(): Record<SourceType, SourceConfig> {
       },
       relevance: { keywords: DEFAULT_LOL_KEYWORDS },
     },
+    // リファクタリングS7b: Riot公式ニュース（RiotNewsAdapter）。公式ドメインが出典のため常にLoL関連
+    // （filter.ts の isRelevantItem がキーワード判定をバイパスする）。keywords は型充足のためのみ保持。
+    "riot-news": {
+      sourceType: "riot-news",
+      rateLimit: {
+        maxItemsPerRun: envInt("COLLECTION_RIOT_NEWS_MAX_ITEMS", 4),
+        minIntervalMsBetweenRuns: envInt("COLLECTION_RIOT_NEWS_MIN_INTERVAL_MS", 30 * 60 * 1000),
+      },
+      relevance: { keywords: DEFAULT_LOL_KEYWORDS },
+    },
   };
 }
 

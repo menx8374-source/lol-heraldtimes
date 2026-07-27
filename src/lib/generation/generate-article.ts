@@ -83,12 +83,16 @@ const CATEGORY_BY_SOURCE: Record<SourceType, CategoryLabel> = {
   reddit: "海外の反応",
   // Riot Data Dragon はパッチ/チャンピオンの公式データそのものなので「パッチ/メタ」に分類する（拡張E19 F-E19-1）。
   riot: "パッチ/メタ",
+  // リファクタリングS7b: Riot公式ニュースの既定カテゴリ（未指定時の保険）。実際は取得元ルールで
+  // 明示された candidate.category（item.category）を優先する。
+  "riot-news": "Riot公式",
 };
 
 const ARTICLE_SOURCE_LABEL: Record<SourceType, string> = {
   "5ch": "5ch",
   reddit: "Reddit",
   riot: "Riot公式",
+  "riot-news": "Riot公式",
 };
 
 /**
@@ -116,11 +120,19 @@ export async function generateArticleForCandidate(
   // (レス)が1件以上あること」だけを最低条件にする(F9のNGワード等の安全フィルタは形式によらず
   // pipeline.tsで必ず適用する)。riot(fact形式)のみ従来どおり300字・逐語・引用比率を適用する。
   const isReactionFormat = candidate.sourceType === "5ch" || candidate.sourceType === "reddit";
+  // リファクタリングS7b: riot-news(image→見出し→短い要約→公式リンクの定型構成)も、原文の忠実な
+  // 短い要約が主体でAI要約段落の逐語コピーを問題にする形式ではないため、300字下限・逐語一致率・
+  // 引用主従比率のチェックは対象外にし、見出しが1件以上あることだけを最低条件にする。
+  const isRiotNewsFormat = candidate.sourceType === "riot-news";
 
   if (isReactionFormat) {
     const reactionCount = body.filter((b) => b.type === "reaction").length;
     if (reactionCount === 0) {
       throw new GenerationError("反応まとめ記事にレス(reactionブロック)が1件もありません");
+    }
+  } else if (isRiotNewsFormat) {
+    if (!body.some((b) => b.type === "heading")) {
+      throw new GenerationError("ニュース記事に見出し(heading)がありません");
     }
   } else {
     const totalLength = body.reduce((sum, b) => sum + blockText(b).length, 0);
@@ -145,14 +157,15 @@ export async function generateArticleForCandidate(
     }
   }
 
-  // タイトル決定（拡張E40 F-E40-1）: riot（パッチ/公式データ）は事実性が最優先のため、煽り速報タイトル
-  // LLM（generateHookTitleLLM）を使わず、収集アダプタが既に組み立てた事実タイトル（candidate.title。
-  // 例「【パッチ】26.14 の主な変更点まとめ」）をそのまま採用する。拡張E26で「本文由来の具体要素を含む」
+  // タイトル決定（拡張E40 F-E40-1、リファクタリングS7b でriot-newsにも適用）: riot（パッチ/公式データ）・
+  // riot-news（公式ニュース）は事実性が最優先のため、煽り速報タイトルLLM（generateHookTitleLLM）を使わず、
+  // 収集アダプタが既に組み立てた事実タイトル（candidate.title。riotなら「【パッチ】26.14 の主な変更点
+  // まとめ」、riot-newsなら公式ページのog:title）をそのまま採用する。拡張E26で「本文由来の具体要素を含む」
   // チェックを撤廃したため、煽りLLMに通すとラベル＋文字数さえ満たせば本文に無い主張（捏造）でも
   // 通ってしまう問題があった。反応記事（5ch/reddit）は従来どおり惹きつけタイトルLLMを使う。
   // タイトルのソースはレス番号「N: 」やアンカー行を除いた本文にする（タイトルへの「1: 」混入を防ぐ）。
   const title =
-    candidate.sourceType === "riot"
+    candidate.sourceType === "riot" || candidate.sourceType === "riot-news"
       ? candidate.title
       : await generateHookTitleLLM(llmClient, {
           title: candidate.title,

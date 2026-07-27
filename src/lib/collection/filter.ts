@@ -33,11 +33,15 @@ export function matchesKeyword(title: string, keywords: string[]): boolean {
  * reddit はサブレディット許可リストを優先適用し、それ以外（5ch/riot含め全ソース）は
  * タイトルキーワード一致で判定する（サブレディット外・キーワード不一致のいずれかで除外）。
  * ※サブレディットフィルタは reddit 固有の概念のため sourceType で明示的に限定する。
+ * リファクタリングS7b: `riot-news`（Riot公式ニュース）は出典自体が公式ニュースドメインで
+ * URLルール分類済み（RiotNewsAdapter）のため、キーワード一致判定はバイパスし常に関連ありとする
+ * （og:titleが日本語の商品的な見出しでDEFAULT_LOL_KEYWORDSに一致しないケースを誤って除外しないため）。
  */
 export function isRelevantItem(
   item: { sourceType: SourceType; sourceUrl: string; title: string },
   config: RelevanceFilterConfig,
 ): boolean {
+  if (item.sourceType === "riot-news") return true;
   if (item.sourceType === "reddit" && config.allowedSubreddits && config.allowedSubreddits.length > 0) {
     if (!isFromAllowedSubreddit(item.sourceUrl, config.allowedSubreddits)) return false;
   }

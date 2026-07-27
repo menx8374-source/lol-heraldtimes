@@ -3,10 +3,12 @@
  * RawCollectionItem[] として返すだけの決定論的アダプタ。
  * architecture.md の方針: 初期実装は fixture ベースの Mock、後日 live アダプタへ差し替え。
  */
+import type { CategoryLabel } from "@/lib/categories";
 import type { RawCollectionItem, SourceAdapter, SourceType } from "@/lib/collection/types";
 import redditFixture from "@/lib/collection/fixtures/reddit.json";
 import fivechFixture from "@/lib/collection/fixtures/5ch.json";
 import riotFixture from "@/lib/collection/fixtures/riot.json";
+import riotNewsFixture from "@/lib/collection/fixtures/riot-news.json";
 
 type FixtureRow = {
   sourceUrl?: string | null;
@@ -15,6 +17,8 @@ type FixtureRow = {
   fetchedAt: string;
   /** サムネイル画像URL（拡張E19）。fixtureに無ければ未設定のままでよい。 */
   imageUrl?: string | null;
+  /** 取得元ルールで付与されたカテゴリ（リファクタリングS7b、riot-news fixtureのみ使用）。 */
+  category?: CategoryLabel;
 };
 
 function toRawItems(rows: FixtureRow[]): RawCollectionItem[] {
@@ -24,6 +28,7 @@ function toRawItems(rows: FixtureRow[]): RawCollectionItem[] {
     content: row.content,
     fetchedAt: new Date(row.fetchedAt),
     imageUrl: row.imageUrl,
+    category: row.category,
   }));
 }
 
@@ -31,6 +36,7 @@ const FIXTURES: Record<SourceType, FixtureRow[]> = {
   reddit: redditFixture,
   "5ch": fivechFixture,
   riot: riotFixture,
+  "riot-news": riotNewsFixture as FixtureRow[],
 };
 
 /** fixture JSON を読むだけの Mock アダプタ。 */

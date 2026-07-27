@@ -10,8 +10,10 @@ import type { CategoryLabel } from "@/lib/categories";
  * mock・カテゴリ対応表等）に網羅漏れがあればコンパイルエラーになる（拡張E17 自浄で導入）。
  * 拡張E45: 「eスポーツ」単独ソース（clip、YouTube/Twitch無差別検索型）は質が低いため削除した。
  * 反応記事内の動画埋め込み（別機能）は不変。
+ * リファクタリングS7b: `riot-news`（Riot公式ニュース、`RiotNewsAdapter`）を追加。パッチノート以外の
+ * 公式ニュース（Dev Blog/チャンピオン・スキン/eスポーツ/ゲームアップデート）を取得元ルールで分類し記事化する。
  */
-export const SOURCE_TYPES = ["reddit", "5ch", "riot"] as const;
+export const SOURCE_TYPES = ["reddit", "5ch", "riot", "riot-news"] as const;
 
 /** 収集元ソースの種別。`SOURCE_TYPES` から導出。 */
 export type SourceType = (typeof SOURCE_TYPES)[number];

@@ -92,8 +92,8 @@ describe("getHotnessConfig（話題性判定の設定ファイル、リファク
 });
 
 describe("getExemptSourceTypes（hotness免除ソース、リファクタリング S5c F-S5c-1）", () => {
-  it("既定は['riot']（公式パッチノートはhotness判定を経ずに常に記事化対象）", () => {
-    expect(getExemptSourceTypes()).toEqual(["riot"]);
+  it("既定は['riot','riot-news']（公式パッチノート・公式ニュースはhotness判定を経ずに常に記事化対象、リファクタリングS7bでriot-newsを追加）", () => {
+    expect(getExemptSourceTypes()).toEqual(["riot", "riot-news"]);
   });
 
   it("envでカンマ区切り上書きできる（前後空白除去）", () => {
@@ -108,10 +108,10 @@ describe("getExemptSourceTypes（hotness免除ソース、リファクタリン�
 
   it("envが空文字列・有効な値が1つも無い場合は既定値にフォールバックする", () => {
     process.env.HOTNESS_EXEMPT_SOURCE_TYPES = "not-a-source-type";
-    expect(getExemptSourceTypes()).toEqual(["riot"]);
+    expect(getExemptSourceTypes()).toEqual(["riot", "riot-news"]);
 
     process.env.HOTNESS_EXEMPT_SOURCE_TYPES = "";
-    expect(getExemptSourceTypes()).toEqual(["riot"]);
+    expect(getExemptSourceTypes()).toEqual(["riot", "riot-news"]);
   });
 });
 

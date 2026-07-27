@@ -41,8 +41,11 @@ function fetchJson<T>(url: string): Promise<T | null> {
   return fetchJsonSafe<T>(url, {}, { logLabel: "riot-datadragon", context: url });
 }
 
-/** 主要なHTMLエンティティ（数値参照含む）を復号する（新規npm依存を避けるための簡易実装）。 */
-function decodeHtmlEntities(text: string): string {
+/**
+ * 主要なHTMLエンティティ（数値参照含む）を復号する（新規npm依存を避けるための簡易実装）。
+ * リファクタリングS7b: `riot-news.ts`（og:title抽出）でも再利用するためexportする。
+ */
+export function decodeHtmlEntities(text: string): string {
   const named: Record<string, string> = {
     "&nbsp;": " ",
     "&amp;": "&",
@@ -97,8 +100,9 @@ function dedupeConsecutiveLines(lines: string[]): string[] {
  * 拡張E35 F-E35-1: ナビ・ヘッダー・フッター・サイドバー（<nav>/<header>/<footer>/<aside>）は
  * タグ除去前に要素ごと丸ごと落とし、本文に無関係なボイラープレートテキストの混入を減らす
  * （best-effort。完全な本文抽出は狙わず、後段のLLMプロンプト強化と合わせてノイズを許容する方針）。
+ * リファクタリングS7b: `riot-news.ts`（ニュース記事本文抽出）でも再利用するためexportする。
  */
-function stripHtmlToText(html: string): string {
+export function stripHtmlToText(html: string): string {
   const withoutBoilerplateBlocks = html.replace(/<(nav|header|footer|aside)\b[^>]*>[\s\S]*?<\/\1>/gi, " ");
   const withoutScripts = withoutBoilerplateBlocks
     .replace(/<script[\s\S]*?<\/script>/gi, " ")

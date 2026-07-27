@@ -7,10 +7,12 @@
  * グレースフル。
  * 拡張E45: 「eスポーツ」単独ソース（YouTube/Twitch検索型のclipアダプタ）は質が低く削除した。
  * 反応記事内の動画埋め込み（別機能、compose.tsのdetectClipEmbedBlocks）は不変。
+ * リファクタリングS7b: `riot-news`（Riot公式ニュース、RiotNewsAdapter）をlive実装として登録した。
  */
 import { SOURCE_TYPES, type SourceAdapter, type SourceType } from "@/lib/collection/types";
 import { MockSourceAdapter } from "@/lib/collection/adapters/mock";
 import { RiotDataDragonAdapter } from "@/lib/collection/adapters/riot-datadragon";
+import { RiotNewsAdapter } from "@/lib/collection/adapters/riot-news";
 import { RedditAdapter } from "@/lib/collection/adapters/reddit";
 import { FiveChAdapter } from "@/lib/collection/adapters/fivech";
 import { getCollectionMode } from "@/lib/collection/config";
@@ -20,11 +22,12 @@ const LIVE_ADAPTER_FACTORIES: Partial<Record<SourceType, () => SourceAdapter>> =
   riot: () => new RiotDataDragonAdapter(),
   reddit: () => new RedditAdapter(),
   "5ch": () => new FiveChAdapter(),
+  "riot-news": () => new RiotNewsAdapter(),
 };
 
 /**
  * 指定ソース種別のアダプタを返す。`mode` 省略時は `getCollectionMode()`（env `COLLECTION_MODE`）に従う。
- * live モードでは全ソース（riot・reddit・5ch）が live 実装を返す。
+ * live モードでは全ソース（riot・reddit・5ch・riot-news）が live 実装を返す。
  * 将来ソースが追加され未実装のまま live 指定された場合のみ、分かりやすいエラーで失敗する。
  */
 export function getAdapter(sourceType: SourceType, mode: "mock" | "live" = getCollectionMode()): SourceAdapter {
@@ -41,7 +44,7 @@ export function getAdapter(sourceType: SourceType, mode: "mock" | "live" = getCo
 }
 
 /**
- * 全ソース種別分のアダプタをまとめて取得する。live モードでは（現状は全3ソース実装済みのため
+ * 全ソース種別分のアダプタをまとめて取得する。live モードでは（現状は全4ソース実装済みのため
  * 該当しないが、将来ソースが追加された場合に）未実装ソースをエラーで全体停止させず、
  * スキップしてログに残す（実装済みソースだけで運用を開始できるように）。
  * mock モードの挙動（全ソースfixture）は変えない。

@@ -1740,3 +1740,69 @@ describe("REACTION_TRANSLATE_SYSTEM_PROMPT（reddit翻訳の自然な日本語�
     expect(text).toContain("JSONのみ");
   });
 });
+
+describe("composeArticleBody（riot-news: Riot公式ニュース記事生成、リファクタリングS7b F-S7b-3）", () => {
+  const newsContent = "本記事ではDev Blogの内容として、今後のジャングル調整の方向性が解説されている。".repeat(5);
+  const newsTitle = "開発者ノート: ジャングルの今後の方向性について";
+  const sourceUrl = "https://www.leagueoflegends.com/ja-jp/news/dev/dev-blog-jungle-changes";
+  const imageUrl = "https://cmsassets.rgpub.io/sanity/images/dev-blog-banner.jpg";
+
+  it("imageUrlがあれば先頭にimageブロック(alt=タイトル・credit)が入る", async () => {
+    const stub = new StubLLMClient(JSON.stringify({ summary: "ジャングルの経験値バランスを見直す方針が示された。" }));
+    const body = await composeArticleBody(
+      { sourceType: "riot-news", title: newsTitle, content: newsContent, sourceUrl, imageUrl },
+      stub,
+    );
+    expect(body[0]).toMatchObject({ type: "image", url: imageUrl, alt: newsTitle, credit: "画像: Riot Games 公式サイトより" });
+  });
+
+  it("imageUrlが無ければimageブロックを含まない(見出しから始まる)", async () => {
+    const stub = new StubLLMClient(JSON.stringify({ summary: "ジャングルの経験値バランスを見直す方針が示された。" }));
+    const body = await composeArticleBody({ sourceType: "riot-news", title: newsTitle, content: newsContent, sourceUrl }, stub);
+    expect(body[0]).toMatchObject({ type: "heading", text: newsTitle });
+  });
+
+  it("見出し(タイトル)→要約段落(AI成功時)→公式リンクボタンの順で構成される", async () => {
+    const summaryText = "ジャングルの経験値バランスを見直す方針が示された。序盤の駆け引きの多様化を狙う。";
+    const stub = new StubLLMClient(JSON.stringify({ summary: summaryText }));
+    const body = await composeArticleBody({ sourceType: "riot-news", title: newsTitle, content: newsContent, sourceUrl }, stub);
+
+    expect(body).toEqual([
+      { type: "heading", text: newsTitle },
+      { type: "paragraph", text: summaryText },
+      { type: "linkButton", url: sourceUrl, label: "▶ 公式サイトで読む" },
+    ]);
+  });
+
+  it("AI要約が失敗(不正JSON)した場合はクリーンな定型文にフォールバックする(捏造しない)", async () => {
+    const stub = new StubLLMClient("これはJSONではない応答です");
+    const body = await composeArticleBody({ sourceType: "riot-news", title: newsTitle, content: newsContent, sourceUrl }, stub);
+    const paragraph = body.find((b) => b.type === "paragraph");
+    expect(paragraph).toMatchObject({
+      type: "paragraph",
+      text: `Riot Games 公式より「${newsTitle}」に関するニュースが公開されました。詳しくは公式サイトをご覧ください。`,
+    });
+  });
+
+  it("AI要約が空文字を返す場合もクリーンな定型文にフォールバックする", async () => {
+    const stub = new StubLLMClient("");
+    const body = await composeArticleBody({ sourceType: "riot-news", title: newsTitle, content: newsContent, sourceUrl }, stub);
+    const paragraph = body.find((b) => b.type === "paragraph");
+    expect(paragraph!.type === "paragraph" && paragraph!.text).toContain("詳しくは公式サイトをご覧ください。");
+  });
+
+  it("mock LLM(MockLLMClient、実運用のmockモード相当)でも定型文フォールバックで壊れない", async () => {
+    const body = await composeArticleBody(
+      { sourceType: "riot-news", title: newsTitle, content: newsContent, sourceUrl },
+      new MockLLMClient(),
+    );
+    expect(body.some((b) => b.type === "heading" && b.text === newsTitle)).toBe(true);
+    expect(body.some((b) => b.type === "linkButton" && b.url === sourceUrl)).toBe(true);
+  });
+
+  it("sourceUrlが無い/httpsでない場合はlinkButtonを含まない", async () => {
+    const stub = new StubLLMClient(JSON.stringify({ summary: "要約テキスト。" }));
+    const body = await composeArticleBody({ sourceType: "riot-news", title: newsTitle, content: newsContent }, stub);
+    expect(body.some((b) => b.type === "linkButton")).toBe(false);
+  });
+});

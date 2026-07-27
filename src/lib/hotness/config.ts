@@ -45,11 +45,16 @@ function envBool(name: string, fallback: boolean): boolean {
   return raw === "true" || raw === "1";
 }
 
-/** ソース別の現在値ルール既定（reddit=score主体、5ch=score恒常0のためcomment主体）。 */
+/**
+ * ソース別の現在値ルール既定（reddit=score主体、5ch=score恒常0のためcomment主体）。
+ * riot-news（リファクタリングS7b）は既定でhotness免除（getExemptSourceTypes）のため通常は未使用だが、
+ * env `HOTNESS_EXEMPT_SOURCE_TYPES` で免除から外された場合に備えてriotと同じ既定値を用意する。
+ */
 const SOURCE_CURRENT_VALUE_DEFAULTS = {
   reddit: { minScore: 100, minComments: 30 },
   "5ch": { minScore: 0, minComments: 30 },
   riot: { minScore: 100, minComments: 30 },
+  "riot-news": { minScore: 100, minComments: 30 },
 } as const satisfies Record<SourceType, { minScore: number; minComments: number }>;
 
 /**
@@ -85,6 +90,13 @@ export function getHotnessConfig(sourceType?: SourceType): HotnessConfig {
       ...base,
       minScore: envInt("HOTNESS_RIOT_MIN_SCORE", SOURCE_CURRENT_VALUE_DEFAULTS.riot.minScore),
       minComments: envInt("HOTNESS_RIOT_MIN_COMMENTS", SOURCE_CURRENT_VALUE_DEFAULTS.riot.minComments),
+    };
+  }
+  if (sourceType === "riot-news") {
+    return {
+      ...base,
+      minScore: envInt("HOTNESS_RIOT_NEWS_MIN_SCORE", SOURCE_CURRENT_VALUE_DEFAULTS["riot-news"].minScore),
+      minComments: envInt("HOTNESS_RIOT_NEWS_MIN_COMMENTS", SOURCE_CURRENT_VALUE_DEFAULTS["riot-news"].minComments),
     };
   }
   // sourceType省略時: 汎用既定値（reddit相当の値をそのまま使う）。
@@ -125,14 +137,17 @@ export function getArticleUpdateConfig(): ArticleUpdateConfig {
   };
 }
 
-/** hotness免除ソース種別の既定値（リファクタリング S5c F-S5c-1）。 */
-const DEFAULT_EXEMPT_SOURCE_TYPES: SourceType[] = ["riot"];
+/**
+ * hotness免除ソース種別の既定値（リファクタリング S5c F-S5c-1、S7bで riot-news を追加）。
+ */
+const DEFAULT_EXEMPT_SOURCE_TYPES: SourceType[] = ["riot", "riot-news"];
 
 /**
  * hotness判定を経ずに常に記事化対象とする免除ソース種別の一覧を返す（リファクタリング S5c F-S5c-1）。
- * 公式パッチノート（riot）のように"話題性"で測るべきでない公式ニュースをhotness判定の対象外にするための
- * 設定。既定は `["riot"]`。env `HOTNESS_EXEMPT_SOURCE_TYPES` にカンマ区切りで指定すると上書きできる
- * （前後空白は除去し、`SourceType` として無効な値は無視する。有効な値が1つも無ければ既定値にフォールバックする）。
+ * 公式パッチノート（riot）・公式ニュース（riot-news、リファクタリングS7b）のように"話題性"で測るべきで
+ * ない公式情報をhotness判定の対象外にするための設定。既定は `["riot", "riot-news"]`。env
+ * `HOTNESS_EXEMPT_SOURCE_TYPES` にカンマ区切りで指定すると上書きできる（前後空白は除去し、
+ * `SourceType` として無効な値は無視する。有効な値が1つも無ければ既定値にフォールバックする）。
  */
 export function getExemptSourceTypes(): SourceType[] {
   const raw = process.env.HOTNESS_EXEMPT_SOURCE_TYPES;

@@ -1,0 +1,26 @@
+[
+  {
+    "sourceUrl": "https://www.leagueoflegends.com/ja-jp/news/dev/dev-mock-jungle-changes/",
+    "title": "開発者ノート: ジャングルの今後の方向性について",
+    "content": "本記事では今後のジャングルアイテム調整の方向性について開発チームが解説する。序盤の経験値バランスや対面ジャングラーとの駆け引きを見直し、より多様なプレイスタイルを支援することを目指す。",
+    "fetchedAt": "2026-07-20T00:00:00.000Z",
+    "imageUrl": null,
+    "category": "パッチ/メタ"
+  },
+  {
+    "sourceUrl": "https://www.leagueoflegends.com/ja-jp/news/esports/mock-worlds-2026-groups-announced/",
+    "title": "World Championship 2026 グループステージ組み合わせ発表",
+    "content": "今年のWorld Championshipのグループステージ組み合わせが発表された。世界各地域から集まった強豪チームが激突する。",
+    "fetchedAt": "2026-07-21T00:00:00.000Z",
+    "imageUrl": "https://cmsassets.rgpub.io/sanity/images/mock-worlds-banner.jpg",
+    "category": "eスポーツ"
+  },
+  {
+    "sourceUrl": "https://www.leagueoflegends.com/ja-jp/news/game-updates/mock-new-champion-reveal/",
+    "title": "新チャンピオン『氷雪の狩人』が登場",
+    "content": "新チャンピオン『氷雪の狩人』のスキル・世界観が公開された。氷の力を操るジャングラーとしてリリース予定。",
+    "fetchedAt": "2026-07-22T00:00:00.000Z",
+    "imageUrl": "https://cmsassets.rgpub.io/sanity/images/mock-champion-banner.jpg",
+    "category": "Riot公式"
+  }
+]

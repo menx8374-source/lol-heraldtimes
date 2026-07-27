@@ -67,4 +67,13 @@ describe("isRelevantItem", () => {
     expect(isRelevantItem(relevant, config)).toBe(true);
     expect(isRelevantItem(irrelevant, config)).toBe(false);
   });
+
+  it("riot-newsはキーワード一致有無に関わらず常に関連ありと判定する(リファクタリングS7b、出典が公式ニュースドメインのため)", () => {
+    const item = {
+      sourceType: "riot-news" as const,
+      sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/dev/dev-blog-jungle-changes",
+      title: "開発者ノート: ジャングルの今後の方向性について", // DEFAULT_LOL_KEYWORDSに一致しない見出し
+    };
+    expect(isRelevantItem(item, config)).toBe(true);
+  });
 });

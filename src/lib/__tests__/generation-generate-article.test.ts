@@ -663,3 +663,69 @@ describe("generateArticleForCandidate（SEO生成、リファクタリングS5b 
     expect(result.seo).toBeNull();
   });
 });
+
+describe("generateArticleForCandidate（riot-news: Riot公式ニュース、リファクタリングS7b F-S7b-3）", () => {
+  function newsCandidate(overrides: Partial<GenerationCandidate> = {}): GenerationCandidate {
+    return candidate({
+      sourceType: "riot-news",
+      sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/dev/dev-blog-jungle-changes",
+      title: "開発者ノート: ジャングルの今後の方向性について",
+      content: "本記事では今後のジャングルアイテム調整の方向性について開発チームが解説する。",
+      ...overrides,
+    });
+  }
+
+  it("タイトルはcandidate.title(og:title)そのまま。煽りタイトルLLMを経由しない(捏造防止)", async () => {
+    class TitleCallTrackingLLMClient implements LLMClient {
+      public titleCallCount = 0;
+      private readonly mock = new MockLLMClient();
+      async generate(messages: LLMMessage[]): Promise<string> {
+        if (messages.some((m) => m.role === "system" && m.content === LLM_TITLE_SYSTEM_PROMPT)) {
+          this.titleCallCount++;
+          return "【速報】これはテスト用のLLM生成タイトルだよ";
+        }
+        return this.mock.generate(messages);
+      }
+    }
+    const tracker = new TitleCallTrackingLLMClient();
+    const result = await generateArticleForCandidate(newsCandidate(), tracker);
+    expect(result.title).toBe("開発者ノート: ジャングルの今後の方向性について");
+    expect(tracker.titleCallCount).toBe(0);
+  });
+
+  it("candidate.category(item.category)があればそれが優先され、未指定ならソース既定「Riot公式」にフォールバックする", async () => {
+    const withCategory = await generateArticleForCandidate(newsCandidate({ category: "eスポーツ" }), llm);
+    expect(withCategory.category).toBe("eスポーツ");
+    const withoutCategory = await generateArticleForCandidate(newsCandidate({ category: undefined }), llm);
+    expect(withoutCategory.category).toBe("Riot公式");
+  });
+
+  it("本文が短くても(300字未満)最低文字数チェック対象外でGenerationErrorにならない(image→見出し→要約→リンクの定型構成のため)", async () => {
+    const result = await generateArticleForCandidate(
+      newsCandidate({ content: "短いニュース本文。", imageUrl: null }),
+      llm, // mockはニュース要約に失敗する応答(kind無し)を返すため定型文フォールバックになり、全体で300字未満になり得る
+    );
+    const totalLength = result.body.reduce((sum, b) => sum + blockText(b).length, 0);
+    expect(totalLength).toBeLessThan(MIN_BODY_LENGTH);
+    expect(result.body.some((b) => b.type === "heading")).toBe(true);
+  });
+
+  it("出典URLが本文にlinkButtonとして付き、sources(出典)にも「Riot公式」ラベルで付与される", async () => {
+    const result = await generateArticleForCandidate(newsCandidate(), llm);
+    expect(result.body.some((b) => b.type === "linkButton" && b.url === newsCandidate().sourceUrl)).toBe(true);
+    expect(result.sources).toEqual([{ label: "Riot公式", url: newsCandidate().sourceUrl }]);
+  });
+
+  it("imageUrlがあれば本文先頭がimageブロックになりthumbnailUrlにも反映される", async () => {
+    const imageUrl = "https://cmsassets.rgpub.io/sanity/images/dev-blog-banner.jpg";
+    const result = await generateArticleForCandidate(newsCandidate({ imageUrl }), llm);
+    expect(result.body[0]).toMatchObject({ type: "image", url: imageUrl });
+    expect(result.thumbnailUrl).toBe(imageUrl);
+  });
+
+  it("出典URLが無い候補はGenerationErrorになる(既存の共通チェック、回帰なし)", async () => {
+    await expect(
+      generateArticleForCandidate(newsCandidate({ sourceUrl: "" }), llm),
+    ).rejects.toBeInstanceOf(GenerationError);
+  });
+});

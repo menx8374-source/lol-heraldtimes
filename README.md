@@ -43,9 +43,10 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
 | `DATABASE_URL` | 必須 | SQLite ファイルの場所。既定値 `file:./dev.db`（秘密情報ではない） |
 | `ANTHROPIC_API_KEY` | live接続(拡張E24)を使うなら必須 | LLM本接続用のAnthropic APIキー（https://console.anthropic.com で発行）。**秘密情報のため必ず`.env`のみに設定しコミットしない**。未設定時は`GENERATION_MODE=live`でも自動でMockLLMClientにフォールバックする（未課金） |
 | `ANTHROPIC_MODEL` | 任意 | 使用モデル。既定 `claude-haiku-4-5`（コスト最小のHaiku固定） |
-| `COLLECTION_MODE` | 任意 | `mock`（既定）／`live`。`live` は全3ソース(riot=拡張E15, reddit=拡張E16, 5ch=拡張E18)が本接続で収集する。「eスポーツ」単独ソース(clip、YouTube/Twitch無差別検索型)は質が低いため拡張E45で削除した（反応記事内の動画埋め込みは別機能で不変） |
-| `COLLECTION_REDDIT_MAX_ITEMS` / `COLLECTION_5CH_MAX_ITEMS` / `COLLECTION_RIOT_MAX_ITEMS` | 任意 | ソースごとの1回の収集実行あたりの取得件数上限（既定: reddit/5ch=10, riot=20） |
-| `COLLECTION_REDDIT_MIN_INTERVAL_MS` / `COLLECTION_5CH_MIN_INTERVAL_MS` / `COLLECTION_RIOT_MIN_INTERVAL_MS` | 任意 | ソースごとの最小実行間隔(ミリ秒)。既定: reddit/5ch=600000(10分), riot=1800000(30分) |
+| `COLLECTION_MODE` | 任意 | `mock`（既定）／`live`。`live` は全4ソース(riot=拡張E15, reddit=拡張E16, 5ch=拡張E18, riot-news=リファクタリングS7b)が本接続で収集する。「eスポーツ」単独ソース(clip、YouTube/Twitch無差別検索型)は質が低いため拡張E45で削除した（反応記事内の動画埋め込みは別機能で不変） |
+| `COLLECTION_REDDIT_MAX_ITEMS` / `COLLECTION_5CH_MAX_ITEMS` / `COLLECTION_RIOT_MAX_ITEMS` / `COLLECTION_RIOT_NEWS_MAX_ITEMS` | 任意 | ソースごとの1回の収集実行あたりの取得件数上限（既定: reddit/5ch=10, riot=20, riot-news=4） |
+| `COLLECTION_REDDIT_MIN_INTERVAL_MS` / `COLLECTION_5CH_MIN_INTERVAL_MS` / `COLLECTION_RIOT_MIN_INTERVAL_MS` / `COLLECTION_RIOT_NEWS_MIN_INTERVAL_MS` | 任意 | ソースごとの最小実行間隔(ミリ秒)。既定: reddit/5ch=600000(10分), riot/riot-news=1800000(30分) |
+| `RIOT_NEWS_MAX_ITEMS` / `RIOT_NEWS_REQUEST_DELAY_MS` | 任意 | Riot公式ニュース収集(リファクタリングS7b、`leagueoflegends.com/ja-jp/news/`・キー不要)の1回あたり最新記事取得件数上限（既定4）・連続fetch間ディレイ(ms、既定1000) |
 | `REDDIT_CLIENT_ID` / `REDDIT_CLIENT_SECRET` | reddit live収集(拡張E16)を使うなら必須 | Reddit アプリ（https://www.reddit.com/prefs/apps ）のクレデンシャル。Application-only OAuth2(client_credentials)でトークン取得に使う。**秘密情報のため必ず `.env` のみに設定しコミットしない**。未設定時はReddit収集のみ空配列＋ログでスキップ（他ソースは継続） |
 | `REDDIT_USER_AGENT` | reddit live収集(拡張E16)を使うなら必須 | Reddit規約で必須の説明的User-Agent文字列（秘密ではない。例 `lol-matome/1.0 by <運用者>`） |
 | `FIVECH_BOARDS` | 任意 | 5ch live収集(拡張E18)の対象板。`"server/board"` をカンマ区切りで指定（例 `egg.5ch.net/livegame`）。秘密情報ではない。未設定時は既定板を使用。取得失敗/板無効時は空配列＋ログでスキップ（他ソースは継続） |
@@ -66,7 +67,7 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
 ## 外部サービス接続の方針（現時点）
 当面はすべて **モック実装** で全スプリントを通し、将来の実運用時に順次本接続へ差し替える。いずれも差し替え可能な抽象越しに呼ぶ設計。
 - **LLM 記事・タイトル生成（F7・F8、拡張E24で本接続対応）**: `LLMClient` 抽象越し。既定は決定論的モック実装（API キー不要）。`GENERATION_MODE=live`＋`ANTHROPIC_API_KEY`設定時のみ Anthropic Claude（既定 `claude-haiku-4-5`）へ本接続する。タイトル生成（F8）はLLM生成→NGワード除去→品質検証を行い、検証不通過・空文字・APIエラー時は必ずルールベース(`generateHookTitle`)にフォールバックする（タイトルが空や例外になることはない）。
-- **ソース収集（Reddit／5ch／Riot 公式・F5）**: `SourceAdapter` 抽象越しの fixture モック（既定）。`COLLECTION_MODE=live` で riot（拡張E15）・reddit（拡張E16）・5ch（拡張E18、subject.txt/datスクレイピング・ベストエフォート）の全3ソースが本接続で収集する。5chは公式APIが無くHTML/dat仕様変更で壊れやすい前提のため、取得失敗は空配列＋ログでスキップし他ソースを止めない。逐語転載リスクがあるため削除依頼（`CONTACT_EMAIL`）への即応が運営者の安全弁。「eスポーツ」単独ソース（clip、YouTube/Twitch無差別検索型）は質が低く空カテゴリになりがちだったため拡張E45で削除した。反応記事(5ch/reddit)本文中のYouTube/Twitch URLを検出し埋め込む機能（拡張E22）は別機能として不変。
+- **ソース収集（Reddit／5ch／Riot 公式・F5）**: `SourceAdapter` 抽象越しの fixture モック（既定）。`COLLECTION_MODE=live` で riot（拡張E15）・reddit（拡張E16）・5ch（拡張E18、subject.txt/datスクレイピング・ベストエフォート）・riot-news（リファクタリングS7b、Riot公式ニュース `leagueoflegends.com/ja-jp/news/`・キー不要）の全4ソースが本接続で収集する。5chは公式APIが無くHTML/dat仕様変更で壊れやすい前提のため、取得失敗は空配列＋ログでスキップし他ソースを止めない。逐語転載リスクがあるため削除依頼（`CONTACT_EMAIL`）への即応が運営者の安全弁。「eスポーツ」単独ソース（clip、YouTube/Twitch無差別検索型）は質が低く空カテゴリになりがちだったため拡張E45で削除した。反応記事(5ch/reddit)本文中のYouTube/Twitch URLを検出し埋め込む機能（拡張E22）は別機能として不変。
 - **AdSense 広告（F12）**: アカウント開設・審査は Non-Goal。広告タグを差し込める枠と、設定でタグ文字列を受け取る仕組みまで（未設定時はプレースホルダー枠）。
 
 ## 回遊・エンゲージメントUI（拡張E1）

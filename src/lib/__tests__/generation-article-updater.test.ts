@@ -62,6 +62,7 @@ const CATEGORY_BY_SOURCE: Record<SourceType, string> = {
   "5ch": "5chの反応",
   reddit: "海外の反応",
   riot: "パッチ/メタ",
+  "riot-news": "Riot公式",
 };
 
 /** Post+Article(1対1)+PostMetricsHistory+(任意)ArticleUpdateHistoryをまとめて用意するヘルパ。 */

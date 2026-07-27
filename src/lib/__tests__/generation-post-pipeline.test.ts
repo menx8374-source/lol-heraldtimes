@@ -407,6 +407,49 @@ describe("generateArticlesFromHotPosts（取得元ルールによるカテゴリ
   });
 });
 
+describe("generateArticlesFromHotPosts（riot-news: hotness免除＋カテゴリ付与、リファクタリングS7b）", () => {
+  it("riot-newsは既定でhotness免除され、score0/comment0でも記事化される。カテゴリはPost.category(取得元ルール)がそのまま反映される", async () => {
+    const post = await createPost({
+      sourceType: "riot-news",
+      title: "World Championship 2026 グループステージ組み合わせ発表",
+      body: "今年のWorld Championshipのグループステージ組み合わせが発表された。",
+      sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/esports/worlds-2026-groups-announced",
+      category: "eスポーツ",
+      metrics: [{ score: 0, commentCount: 0, capturedAt: T0 }],
+    });
+
+    const summary = await generateArticlesFromHotPosts(llm, { now: T0, championMap: null });
+    const result = summary.results.find((r) => r.postId === post.id);
+    expect(result).toMatchObject({ status: "success", publicationStatus: "published" });
+
+    const article = await prisma.article.findUnique({ where: { postId: post.id } });
+    expect(article).not.toBeNull();
+    expect(article?.category).toBe("eスポーツ");
+    expect(article?.title).toBe("World Championship 2026 グループステージ組み合わせ発表"); // og:title事実そのまま
+  });
+
+  it("既記事化済みのriot-news Postは対象から除外される(1投稿1回)", async () => {
+    const post = await createPost({
+      sourceType: "riot-news",
+      category: "Riot公式",
+      metrics: [{ score: 0, commentCount: 0, capturedAt: T0 }],
+    });
+    await prisma.article.create({
+      data: {
+        slug: "already-articled-riot-news",
+        title: "既存ニュース記事タイトル",
+        category: "Riot公式",
+        body: [],
+        publishedAt: T0,
+        postId: post.id,
+      },
+    });
+
+    const summary = await generateArticlesFromHotPosts(llm, { now: T0, championMap: null });
+    expect(summary.results.find((r) => r.postId === post.id)).toBeUndefined();
+  });
+});
+
 describe("generateArticlesFromHotPosts（Post経路の画像取りこぼし修正、リファクタリング S5c F-S5c-2／ブリーフ テスト4）", () => {
   it("Post.media.imageUrlを持つriot Postから生成したArticleのthumbnailUrlに画像URLが反映される", async () => {
     const imageUrl = "https://www.leagueoflegends.com/og-image-patch-26-14.png";

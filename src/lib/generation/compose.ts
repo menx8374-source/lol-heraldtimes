@@ -691,6 +691,8 @@ const QUOTE_SOURCE_LABEL: Record<SourceType, string> = {
   "5ch": "5chの反応",
   reddit: "Redditの反応",
   riot: "Riot公式",
+  // riot-newsは引用(quote)ブロックを使わない構成のため未使用だが、型充足のため用意する。
+  "riot-news": "Riot公式",
 };
 
 async function askLLM(llmClient: LLMClient, task: GenerationTask): Promise<string> {
@@ -1101,11 +1103,106 @@ function patchArticleMode(): "fact" | "summary" {
 }
 
 /**
+ * riot-newsの要約LLMへのsystem指示（リファクタリングS7b F-S7b-3）。捏造禁止・出力形式(JSON)・
+ * 2〜4文の短い要約に固定する。composePatchSummaryBodyと同様に、失敗（APIエラー・空応答・解析不能）
+ * 時は呼び出し側がクリーンな定型文にフォールバックする。渡す本文はページ全体のテキストダンプで
+ * ナビ・著作権表記・関連リンク等のノイズを含みうるため、composePatchSummaryBody同様それらを
+ * 無視するよう明示する（実データ確認: lolesports.com記事は著作権/規約フッターを含む）。
+ */
+const NEWS_SUMMARY_SYSTEM_PROMPT =
+  "あなたはLoLまとめサイトの編集者です。次に渡す本文はRiot Games公式ニュース記事ページ全体のテキスト" +
+  "ダンプで、ナビゲーションメニュー・著作権表記・利用規約リンク・関連記事へのリンクなど、記事内容とは" +
+  "無関係なノイズを含むことがあります。それらのノイズは無視し、記事本文の内容を日本語で2〜4文の" +
+  "簡潔な要約にしてください。本文に書かれていない事実・数値・固有名詞を作ってはいけません(捏造禁止)。" +
+  "本文の趣旨を忠実に伝える要約にしてください。" +
+  '出力はJSONのみとし、{"summary": "2〜4文の要約"} の形式にしてください' +
+  "（説明文・前置き・コードブロックは付けない）。";
+
+/** LLMの生出力（JSON、コードフェンス付きの可能性あり）を要約文字列に検証・正規化する。失敗時はnull。 */
+function parseNewsSummary(raw: string): string | null {
+  const jsonStr = extractJsonObject(raw);
+  if (!jsonStr) return null;
+  try {
+    const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
+    if (typeof parsed.summary === "string" && parsed.summary.trim().length > 0) {
+      return parsed.summary.trim();
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * riot-newsの本文からLLMに2〜4文の忠実な要約を生成させる（リファクタリングS7b F-S7b-3）。
+ * APIエラー・空応答・JSON解析失敗など、うまく要約できない場合は例外を投げずnullを返し、
+ * 呼び出し側（composeRiotNewsBody）がクリーンな定型文にフォールバックする（本体を止めない）。
+ */
+async function composeNewsSummaryText(
+  candidate: GenerationCandidateInput,
+  llmClient: LLMClient,
+): Promise<string | null> {
+  try {
+    const raw = await llmClient.generate([
+      { role: "system", content: NEWS_SUMMARY_SYSTEM_PROMPT },
+      { role: "user", content: JSON.stringify({ title: candidate.title, content: candidate.content }) },
+    ]);
+    if (typeof raw !== "string" || raw.trim().length === 0) return null;
+    return parseNewsSummary(raw);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Riot公式ニュース（riot-news）記事を組み立てる（リファクタリングS7b F-S7b-3）。
+ * 1. `candidate.imageUrl`（og:image）が安全なhttps画像URLなら先頭に画像ブロック
+ *    （alt=タイトル、credit「画像: Riot Games 公式サイトより」）。
+ * 2. 見出し（記事タイトル＝og:title、事実そのまま。generate-article.ts側で煽りLLMは通さない）。
+ * 3. 短い要約（AI・2〜4文、composeNewsSummaryText）。失敗時はクリーンな定型文にフォールバック
+ *    （捏造せず壊れない）。
+ * 4. 出典URLが安全なhttpsなら公式リンクボタン（linkButton）。
+ */
+async function composeRiotNewsBody(
+  candidate: GenerationCandidateInput,
+  llmClient: LLMClient,
+): Promise<ArticleBodyBlock[]> {
+  const blocks: ArticleBodyBlock[] = [];
+
+  if (isSafeImageUrl(candidate.imageUrl)) {
+    blocks.push({
+      type: "image",
+      url: candidate.imageUrl,
+      alt: candidate.title,
+      credit: "画像: Riot Games 公式サイトより",
+    });
+  }
+
+  blocks.push({ type: "heading", text: candidate.title });
+
+  const summary = await composeNewsSummaryText(candidate, llmClient);
+  blocks.push({
+    type: "paragraph",
+    text:
+      summary ??
+      `Riot Games 公式より「${candidate.title}」に関するニュースが公開されました。詳しくは公式サイトをご覧ください。`,
+  });
+
+  const sourceUrl = candidate.sourceUrl?.trim();
+  if (sourceUrl && isHttpsUrl(sourceUrl)) {
+    blocks.push({ type: "linkButton", url: sourceUrl, label: "▶ 公式サイトで読む" });
+  }
+
+  return blocks;
+}
+
+/**
  * 記事化候補から構造化された本文ブロック配列を組み立てる（F7）。
  * sourceType が "riot" なら、既定(env `PATCH_ARTICLE_MODE`未設定/"fact")では本文の長短に関わらず
  * 事実速報（拡張E41 F-E41-2）。"summary" なら従来のE40の3段（LLM要約のまとめ記事→決定的抽出→
- * クリーン定型フォールバック、contentが短い汎用文なら速報＋要点整理）。それ以外（5ch/reddit）なら
- * まとめ速報レス形式にする。
+ * クリーン定型フォールバック、contentが短い汎用文なら速報＋要点整理）。
+ * "riot-news"（リファクタリングS7b）なら image→見出し→短い要約→公式リンクの定型構成
+ * （composeRiotNewsBody）。それ以外（5ch/reddit）ならまとめ速報レス形式にする。
  */
 export async function composeArticleBody(
   candidate: GenerationCandidateInput,
@@ -1134,6 +1231,9 @@ export async function composeArticleBody(
     // 本文が無い（短い汎用content）の場合は従来どおり速報＋要点整理（composeFactBody）でよい。
     const sentences = splitIntoSentences(candidate.content);
     return composeFactBody(candidate, sentences, llmClient);
+  }
+  if (candidate.sourceType === "riot-news") {
+    return composeRiotNewsBody(candidate, llmClient);
   }
   return composeReactionBody(candidate, candidate.sourceType, llmClient);
 }
