@@ -17,7 +17,7 @@ import type { SourceType } from "@/lib/collection/types";
 import type { LLMClient, GenerationTask } from "@/lib/generation/llm-client";
 import { splitIntoSentences, excerptForQuote } from "@/lib/generation/text-utils";
 import { parseThreadReses, extractAnchors, computeLineEmphasis, type ThreadRes } from "@/lib/generation/thread-format";
-import { isAllowedEmbedUrl, embedProviderForUrl } from "@/lib/embed";
+import { isAllowedEmbedUrl, embedProviderForUrl, isValidTweetStatusUrl } from "@/lib/embed";
 import { findNgWord } from "@/lib/moderation/ng-words";
 import { PATCH_NOTES_MIN_LENGTH } from "@/lib/collection/adapters/riot-datadragon";
 import { CHAMPIONS } from "@/lib/generation/title";
@@ -33,6 +33,8 @@ export type GenerationCandidateInput = {
   sourceUrl?: string;
   /** riot由来（拡張E42）: 公式パッチノートのメイン画像URL（og:image）。安全なhttps URLのみ本文冒頭の画像ブロックに使う。 */
   imageUrl?: string | null;
+  /** 成長G7（F-G7-4）: x由来の投稿者（Post.author）。引用フォールバック時の出典表記に使う。 */
+  author?: string | null;
 };
 
 /** レス投稿者の匿名化ハンドル（実名・個人特定情報は出さない）。ソース種別ごとに固定。 */
@@ -707,6 +709,8 @@ const QUOTE_SOURCE_LABEL: Record<SourceType, string> = {
   riot: "Riot公式",
   // riot-newsは引用(quote)ブロックを使わない構成のため未使用だが、型充足のため用意する。
   "riot-news": "Riot公式",
+  // 成長G7（F-G7-4）: xの引用フォールバック（tweet status URLが無効/取得不可時）の出典ラベル。
+  x: "Xの反応",
 };
 
 async function askLLM(llmClient: LLMClient, task: GenerationTask): Promise<string> {
@@ -1600,6 +1604,67 @@ async function composeRiotNewsBody(
   return blocks;
 }
 
+/** テキストに日本語（ひらがな・カタカナ・常用漢字域）が含まれるか判定する簡易純関数（lang:ja判定の補助）。 */
+function containsJapaneseText(text: string): boolean {
+  return /[぀-ヿ一-龯]/.test(text);
+}
+
+/**
+ * lang:en相当（日本語を含まない）のX投稿本文を、既存reddit経路のレス翻訳バッチ
+ * （`translateReactionBatch`）に合流させて日本語化する（成長G7 F-G7-4「翻訳は既存reddit経路に合流」。
+ * 追加のAI呼び出し種別は増やさない）。日本語を含む場合（lang:ja）は翻訳不要のためそのまま返す。
+ * 翻訳失敗（APIエラー・空応答・mock等）時は原文をそのまま返す（本体を止めない）。
+ */
+async function translateXContentIfNeeded(llmClient: LLMClient, text: string): Promise<string> {
+  const trimmed = text.trim();
+  if (trimmed.length === 0 || containsJapaneseText(trimmed)) return trimmed;
+  const translated = await translateReactionBatch(llmClient, [{ index: 0, text: trimmed }]);
+  const result = translated?.get(0);
+  return result && result.trim().length > 0 ? result.trim() : trimmed;
+}
+
+/**
+ * X（旧Twitter）投稿を「独自の見出し・導入・要約が主、tweet埋め込み/短い引用＋出典が従」の構成で
+ * 組み立てる（成長G7 F-G7-4）。著作権法32条の適法引用（明瞭区別・主従関係・出典明記）に配慮し、
+ * tweet全文コピペ・スクショ多用はしない。
+ * 1. 見出し「Xでの反応」。
+ * 2. 独自の導入段落（LLM、既存の`intro`タスクに合流。riot以外の汎用テンプレをそのまま使う）。
+ * 3. tweet URLが有効なステータスURL（`isValidTweetStatusUrl`）なら twitter provider の embedブロック
+ *    （公式の埋め込み表示。原文そのまま・翻訳不要）。無効/取得できない場合のみ、短い引用
+ *    （`excerptForQuote`でtweet全文コピペを避ける。日本語を含まない本文はreddit経路の翻訳に合流してから
+ *    抜粋する）＋出典（カテゴリラベル＋作者名）。
+ * 4. 独自の結び段落（LLM、既存の`context`タスクに合流）。
+ */
+async function composeXBody(
+  candidate: GenerationCandidateInput,
+  llmClient: LLMClient,
+): Promise<ArticleBodyBlock[]> {
+  const blocks: ArticleBodyBlock[] = [];
+  blocks.push({ type: "heading", text: "Xでの反応" });
+  blocks.push({
+    type: "paragraph",
+    text: await askLLM(llmClient, { kind: "intro", sourceType: "x", title: candidate.title }),
+  });
+
+  const sourceUrl = candidate.sourceUrl?.trim();
+  if (sourceUrl && isValidTweetStatusUrl(sourceUrl)) {
+    blocks.push({ type: "embed", provider: "twitter", url: sourceUrl });
+  } else {
+    const displayText = await translateXContentIfNeeded(llmClient, candidate.content);
+    const citation = candidate.author
+      ? `${QUOTE_SOURCE_LABEL.x}（${candidate.author}）`
+      : QUOTE_SOURCE_LABEL.x;
+    blocks.push({ type: "quote", text: excerptForQuote(displayText || candidate.content), source: citation });
+  }
+
+  blocks.push({
+    type: "paragraph",
+    text: await askLLM(llmClient, { kind: "context", sourceType: "x", title: candidate.title }),
+  });
+
+  return blocks;
+}
+
 /**
  * 記事化候補から構造化された本文ブロック配列を組み立てる（F7）。
  * sourceType が "riot" なら、既定(env `PATCH_ARTICLE_MODE`未設定/"detailed")では、実パッチノート本文
@@ -1608,7 +1673,8 @@ async function composeRiotNewsBody(
  * "fact" では本文の長短に関わらず常に事実速報（拡張E41 F-E41-2）。"summary" なら従来のE40の3段
  * （LLM要約のまとめ記事→決定的抽出→クリーン定型フォールバック、contentが短い汎用文なら速報＋要点整理）。
  * "riot-news"（リファクタリングS7b）なら image→見出し→短い要約→公式リンクの定型構成
- * （composeRiotNewsBody）。それ以外（5ch/reddit）ならまとめ速報レス形式にする。
+ * （composeRiotNewsBody）。"x"（成長G7）なら見出し→独自導入→tweet埋め込み/短い引用＋出典→独自結び
+ * の構成（composeXBody、著作権法32条の適法引用に配慮）。それ以外（5ch/reddit）ならまとめ速報レス形式にする。
  */
 export async function composeArticleBody(
   candidate: GenerationCandidateInput,
@@ -1653,6 +1719,9 @@ export async function composeArticleBody(
   }
   if (candidate.sourceType === "riot-news") {
     return composeRiotNewsBody(candidate, llmClient);
+  }
+  if (candidate.sourceType === "x") {
+    return composeXBody(candidate, llmClient);
   }
   return composeReactionBody(candidate, candidate.sourceType, llmClient);
 }

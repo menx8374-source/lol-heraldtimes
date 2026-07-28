@@ -37,6 +37,11 @@ status: active
 - 差し替え点をアダプタ1層に閉じ込め、パイプライン本体（重複排除→生成→タイトル→安全→公開）は収集元に非依存。
 - 取得件数上限・実行間隔（レート制限）は設定として各アダプタが保持（F5）。1ソース失敗が全体を止めない設計はパイプライン側で担保（F11）。
 
+### x（X/旧Twitter）ソース: GetXAPI採用（成長G7）
+- **選定結果**: サードパーティ GetXAPI（`GET /twitter/tweet/advanced_search`）を採用。理由: (a) 実行環境制約=Mac/管理者権限不要・新規npm依存なし（fetch標準のみ）でWindows含む任意環境から呼べる。(b) 運用コスト=$0.05/1,000tweets・$0.10無料クレジットあり（月額固定費なし、従量課金のみ）。min_favesクエリで課金対象を絞れるため低コストに抑えやすい。
+- x のみ他ソースと異なり有料APIキー必須のため、`X_API_KEY` 未設定時は live モードでも自動的にmock(fixture)にフォールバックする専用の分岐を `adapters/index.ts` に持つ（他4ソースのlive/mock判定とは独立）。
+- フェイルオーバー(TwitterAPI.io等)・2系統冗長化は非目標（PoC後の検討事項）。
+
 ### 実装詳細（Sprint 3 確定）
 - 実装場所: `src/lib/collection/`（`types.ts`/`normalize.ts`/`similarity.ts`/`filter.ts`/`rate-limit.ts`/`collect-source.ts`（DB非依存の純ロジック）/`dedupe.ts`（同）/`pipeline.ts`・`queue.ts`（DB連携）/`adapters/`）。単独実行は `scripts/collect.ts`（`npm run collect`）。
 - データモデル: `CollectedItem`（`normalizedUrl` に unique 制約で同一URL取込みを自然に1件化）・`SourceFetchLog`（実行間隔判定・失敗記録）を Prisma に追加。`CollectedItem.status`: pending/queued/duplicate/articled。

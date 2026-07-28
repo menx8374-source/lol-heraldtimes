@@ -74,6 +74,22 @@ export function isAllowedEmbedUrl(provider: EmbedProvider, url: string): boolean
 }
 
 /**
+ * ツイートのステータスURL（`x.com`/`twitter.com` の `/<username>/status/<id>` 形式）かどうかを
+ * 判定する純関数（成長G7 F-G7-4）。ホスト・スキーム検証は既存の `embedProviderForUrl`/
+ * `isAllowedEmbedUrl`（"twitter" provider）を再利用し、加えてパスがステータスURL形式であることも
+ * 要求する（無関係な x.com/twitter.com ページ（プロフィール・設定等）を誤って埋め込まないため）。
+ */
+export function isValidTweetStatusUrl(url: string): boolean {
+  if (embedProviderForUrl(url) !== "twitter" || !isAllowedEmbedUrl("twitter", url)) return false;
+  try {
+    const pathname = new URL(url).pathname;
+    return /^\/[^/]+\/status\/\d+/.test(pathname);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 実iframe埋め込み（拡張E22）: URLからID/slugを抽出しiframe用srcを組み立てる純関数群。
  * いずれも embedProviderForUrl + isAllowedEmbedUrl の許可判定を必ず経由したうえで、
  * 抽出したID/slugを英数・ハイフン・アンダースコアの厳格な形式検証にかける。

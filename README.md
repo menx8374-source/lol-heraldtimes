@@ -43,7 +43,7 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
 | `DATABASE_URL` | 必須 | SQLite ファイルの場所。既定値 `file:./dev.db`（秘密情報ではない） |
 | `ANTHROPIC_API_KEY` | live接続(拡張E24)を使うなら必須 | LLM本接続用のAnthropic APIキー（https://console.anthropic.com で発行）。**秘密情報のため必ず`.env`のみに設定しコミットしない**。未設定時は`GENERATION_MODE=live`でも自動でMockLLMClientにフォールバックする（未課金） |
 | `ANTHROPIC_MODEL` | 任意 | 使用モデル。既定 `claude-haiku-4-5`（コスト最小のHaiku固定） |
-| `COLLECTION_MODE` | 任意 | `mock`（既定）／`live`。`live` は全4ソース(riot=拡張E15, reddit=拡張E16, 5ch=拡張E18, riot-news=リファクタリングS7b)が本接続で収集する。「eスポーツ」単独ソース(clip、YouTube/Twitch無差別検索型)は質が低いため拡張E45で削除した（反応記事内の動画埋め込みは別機能で不変） |
+| `COLLECTION_MODE` | 任意 | `mock`（既定）／`live`。`live` は全5ソース(riot=拡張E15, reddit=拡張E16, 5ch=拡張E18, riot-news=リファクタリングS7b, x=成長G7)が本接続で収集する。ただし x のみ `X_API_KEY` 未設定時は mock(fixture)に自動フォールバックする。「eスポーツ」単独ソース(clip、YouTube/Twitch無差別検索型)は質が低いため拡張E45で削除した（反応記事内の動画埋め込みは別機能で不変） |
 | `COLLECTION_REDDIT_MAX_ITEMS` / `COLLECTION_5CH_MAX_ITEMS` / `COLLECTION_RIOT_MAX_ITEMS` / `COLLECTION_RIOT_NEWS_MAX_ITEMS` | 任意 | ソースごとの1回の収集実行あたりの取得件数上限（既定: reddit/5ch=10, riot=20, riot-news=4） |
 | `COLLECTION_REDDIT_MIN_INTERVAL_MS` / `COLLECTION_5CH_MIN_INTERVAL_MS` / `COLLECTION_RIOT_MIN_INTERVAL_MS` / `COLLECTION_RIOT_NEWS_MIN_INTERVAL_MS` | 任意 | ソースごとの最小実行間隔(ミリ秒)。既定: reddit/5ch=600000(10分), riot/riot-news=1800000(30分) |
 | `RIOT_NEWS_MAX_ITEMS` / `RIOT_NEWS_REQUEST_DELAY_MS` | 任意 | Riot公式ニュース収集(リファクタリングS7b、`leagueoflegends.com/ja-jp/news/`・キー不要)の1回あたり最新記事取得件数上限（既定4）・連続fetch間ディレイ(ms、既定1000) |
@@ -51,6 +51,8 @@ npm run dev                # 開発サーバー起動（http://localhost:3000）
 | `REDDIT_USER_AGENT` | reddit live収集(拡張E16)を使うなら必須 | Reddit規約で必須の説明的User-Agent文字列（秘密ではない。例 `lol-matome/1.0 by <運用者>`） |
 | `FIVECH_BOARDS` | 任意 | 5ch live収集(拡張E18)の対象板。`"server/board"` をカンマ区切りで指定（例 `egg.5ch.net/livegame`）。秘密情報ではない。未設定時は既定板を使用。取得失敗/板無効時は空配列＋ログでスキップ（他ソースは継続） |
 | `FIVECH_USER_AGENT` | 任意 | 5ch側が空/既定UAを弾くことがあるための説明的User-Agent文字列（秘密ではない）。未設定時は既定の説明的UAを使用 |
+| `X_API_KEY` | x live収集(成長G7)を使うなら必須 | GetXAPI（サードパーティ、$0.05/1,000tweets・$0.10無料クレジット）のAPIキー。**秘密情報のため必ず`.env`のみに設定しコミットしない**。未設定時はxソースのみ自動でmock(fixture)にフォールバック（無課金・他ソースは継続） |
+| `X_API_PROVIDER` / `X_SEARCH_QUERIES` / `X_SINCE_HOURS` / `X_REQUEST_DELAY_MS` | 任意 | GetXAPI検索クエリ設定（秘密情報ではない）。`X_API_PROVIDER`既定`getxapi`、`X_SEARCH_QUERIES`は`\|\|\|`区切りで複数クエリ指定（未設定時は既定の国内/海外2クエリ）、`X_SINCE_HOURS`は重複取得防止のsince:窓(既定24時間)、`X_REQUEST_DELAY_MS`は連続fetch間ディレイ(既定1000ms) |
 | `GENERATION_MODE` | 任意 | `mock`（既定、APIキー不要の決定論的モックLLM）／`live`（拡張E24: `ANTHROPIC_API_KEY`設定時のみAnthropic Claude(Haiku)へ本接続。未設定ならmockに自動フォールバック） |
 | `PATCH_ARTICLE_MODE` | 任意 | riot（パッチ）記事の構成モード（拡張E41、拡張E53で`detailed`を追加し既定化）。`detailed`（既定）: lol-times風の詳細記事（バナー画像＋見出し＋チャンピオンごとの画像＋変更前後(A ⇒ B)を逐語で・末尾に公式リンク。変更点が抽出できない/本文が無い場合は`fact`相当にフォールバック。LLM不使用・捏造なし）／`fact`: 事実速報（見出し「パッチ<番号>が公開」＋一般的事実段落＋出典URL、LLM不使用・捏造なし）／`summary`: 従来のLLM要約→決定的抽出→クリーン定型の3段フォールバック |
 | `REACTION_SELECT_MODE` | 任意 | 反応記事(5ch/reddit)のレス選別モード（リファクタリングS3 F-S3-3）。`rules`（既定）: 数値ルール（アンカー会話クラスタ選定＋決定論強調、AI不使用）／`llm`: 従来どおりAI(`selectReactionReses`)で選別する旧挙動（質の比較用に残置） |

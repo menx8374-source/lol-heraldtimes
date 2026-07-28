@@ -45,6 +45,9 @@ function renderIntro(task: Extract<GenerationTask, { kind: "intro" }>): string {
   if (task.sourceType === "riot") {
     return `【速報】Riot Gamesは「${task.title}」に関する新たな情報を公式に発表した。この一報を受けて、日本国内外のLoLプレイヤーコミュニティでは早くも話題が広がっており、SNSや掲示板でも取り沙汰されている。`;
   }
+  if (task.sourceType === "x") {
+    return `「${task.title}」という投稿がX（旧Twitter）上で話題になっている。LoLプレイヤーの間で反応が広がっているこの投稿について、内容と反響をまとめて紹介する。`;
+  }
   return `「${task.title}」というスレッドが投稿され、SNSや掲示板上で複数のユーザーから多様な反応が寄せられている。ここではその反応をまとめて要約し、要点を整理してお届けする。`;
 }
 
@@ -55,6 +58,9 @@ function renderFactSummary(task: Extract<GenerationTask, { kind: "fact-summary" 
 function renderContext(task: Extract<GenerationTask, { kind: "context" }>): string {
   if (task.sourceType === "riot") {
     return `今回の発表内容は今後のゲームバランスや大会展開にも影響を与える可能性があり、続報が入り次第この記事も更新される見込みだ。プレイヤーからは歓迎と懸念の両方の声が上がると見られ、引き続き公式情報を注視したい。`;
+  }
+  if (task.sourceType === "x") {
+    return `この投稿はX上で多くのプレイヤーの目に留まり、リプライや引用を通じてさらに議論が広がっている。投稿の全文や他のユーザーの反応については、下記の出典（元投稿）を参照してほしい。`;
   }
   return `この話題はLoLプレイヤーの間で幅広く注目されており、今後さらに反応が広がったり、公式からの言及が入る可能性もある。元スレッドの詳細やその他のコメントについては出典を参照してほしい。`;
 }

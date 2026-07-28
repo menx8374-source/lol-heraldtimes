@@ -104,6 +104,17 @@ export function getDefaultSourceConfigs(): Record<SourceType, SourceConfig> {
       },
       relevance: { keywords: DEFAULT_LOL_KEYWORDS },
     },
+    // 成長G7: X（旧Twitter、GetXAPI）。検索クエリ自体がmin_faves/langで絞り込み済みだが、
+    // isRelevantItem の既定分岐（タイトルキーワード一致）もそのまま適用する（riot-newsのような
+    // URLドメインバイパスは行わない。既存の意味を壊さない）。
+    x: {
+      sourceType: "x",
+      rateLimit: {
+        maxItemsPerRun: envInt("COLLECTION_X_MAX_ITEMS", 10),
+        minIntervalMsBetweenRuns: envInt("COLLECTION_X_MIN_INTERVAL_MS", 15 * 60 * 1000),
+      },
+      relevance: { keywords: DEFAULT_LOL_KEYWORDS },
+    },
   };
 }
 

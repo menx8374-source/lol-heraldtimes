@@ -12,8 +12,10 @@ import type { CategoryLabel } from "@/lib/categories";
  * 反応記事内の動画埋め込み（別機能）は不変。
  * リファクタリングS7b: `riot-news`（Riot公式ニュース、`RiotNewsAdapter`）を追加。パッチノート以外の
  * 公式ニュース（Dev Blog/チャンピオン・スキン/eスポーツ/ゲームアップデート）を取得元ルールで分類し記事化する。
+ * 成長G7: `x`（X/旧Twitter、`XAdapter`）を追加。GetXAPI（advanced_search）でmin_favesを満たす
+ * LoL関連tweetを収集し、カテゴリ「Xの反応」として記事化する。
  */
-export const SOURCE_TYPES = ["reddit", "5ch", "riot", "riot-news"] as const;
+export const SOURCE_TYPES = ["reddit", "5ch", "riot", "riot-news", "x"] as const;
 
 /** 収集元ソースの種別。`SOURCE_TYPES` から導出。 */
 export type SourceType = (typeof SOURCE_TYPES)[number];

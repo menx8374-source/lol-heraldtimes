@@ -6,12 +6,12 @@ import {
   isReactionCategory,
 } from "@/lib/categories";
 
-describe("カテゴリ整理（拡張E19 F-E19-1/2、拡張E45で「eスポーツ」を削除→リファクタリングS7aで再追加）", () => {
-  it("「公式ニュース」「動画・クリップ」は廃止されたまま、Riot公式・eスポーツを含む5カテゴリになる（S7a）", () => {
+describe("カテゴリ整理（拡張E19 F-E19-1/2、拡張E45で「eスポーツ」を削除→リファクタリングS7aで再追加、成長G7で「Xの反応」追加）", () => {
+  it("「公式ニュース」「動画・クリップ」は廃止されたまま、Riot公式・eスポーツ・Xの反応を含む6カテゴリになる", () => {
     expect(CATEGORY_LABELS).not.toContain("公式ニュース");
     expect(CATEGORY_LABELS).not.toContain("動画・クリップ");
     expect(CATEGORY_LABELS.sort()).toEqual(
-      ["パッチ/メタ", "Riot公式", "eスポーツ", "5chの反応", "海外の反応"].sort(),
+      ["パッチ/メタ", "Riot公式", "eスポーツ", "5chの反応", "海外の反応", "Xの反応"].sort(),
     );
   });
 
@@ -21,9 +21,10 @@ describe("カテゴリ整理（拡張E19 F-E19-1/2、拡張E45で「eスポー�
     expect(categorySlugFor("海外の反応")).toBe("overseas");
   });
 
-  it("新設カテゴリ（Riot公式・eスポーツ）のスラッグが定義される", () => {
+  it("新設カテゴリ（Riot公式・eスポーツ・Xの反応）のスラッグが定義される", () => {
     expect(categorySlugFor("Riot公式")).toBe("riot-official");
     expect(categorySlugFor("eスポーツ")).toBe("esports");
+    expect(categorySlugFor("Xの反応")).toBe("x");
   });
 });
 
@@ -52,10 +53,13 @@ describe("isReactionCategory（拡張E38 テスト2）", () => {
     expect(isReactionCategory("海外の反応")).toBe(true);
   });
 
-  it("「パッチ/メタ」「Riot公式」「eスポーツ」「未知」はfalse（反応カテゴリではない）", () => {
+  it("「パッチ/メタ」「Riot公式」「eスポーツ」「Xの反応」「未知」はfalse（反応カテゴリではない）", () => {
     expect(isReactionCategory("パッチ/メタ")).toBe(false);
     expect(isReactionCategory("Riot公式")).toBe(false);
     expect(isReactionCategory("eスポーツ")).toBe(false);
+    // 「Xの反応」は独自見出し・要約が主・埋め込み/引用が従の構成(composeXBody)のため、
+    // 5ch/reddit反応記事のチャンピオンスプラッシュ・フォールバック対象には含めない。
+    expect(isReactionCategory("Xの反応")).toBe(false);
     expect(isReactionCategory("未知のカテゴリ")).toBe(false);
   });
 

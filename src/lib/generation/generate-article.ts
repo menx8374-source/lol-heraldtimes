@@ -58,6 +58,11 @@ export type GenerationCandidate = {
    * 議論寄りのタイトルを優先させる。未指定時はfalse扱い。
    */
   isControversial?: boolean;
+  /**
+   * 成長G7（F-G7-4）: 投稿者（Post.author由来）。X（旧Twitter）由来の記事で、引用フォールバック時の
+   * 出典表記（tweet URL・作者名）に使う。他ソースは既存どおり匿名化ハンドルを使うため未使用。
+   */
+  author?: string | null;
 };
 
 export type GeneratedArticle = {
@@ -92,6 +97,8 @@ const CATEGORY_BY_SOURCE: Record<SourceType, CategoryLabel> = {
   // リファクタリングS7b: Riot公式ニュースの既定カテゴリ（未指定時の保険）。実際は取得元ルールで
   // 明示された candidate.category（item.category）を優先する。
   "riot-news": "Riot公式",
+  // 成長G7: X（旧Twitter）由来の記事の既定カテゴリ（未指定時の保険。実際はXAdapterが明示するcategoryを使う）。
+  x: "Xの反応",
 };
 
 const ARTICLE_SOURCE_LABEL: Record<SourceType, string> = {
@@ -99,6 +106,7 @@ const ARTICLE_SOURCE_LABEL: Record<SourceType, string> = {
   reddit: "Reddit",
   riot: "Riot公式",
   "riot-news": "Riot公式",
+  x: "X（旧Twitter）",
 };
 
 /**
@@ -130,15 +138,19 @@ export async function generateArticleForCandidate(
   // 短い要約が主体でAI要約段落の逐語コピーを問題にする形式ではないため、300字下限・逐語一致率・
   // 引用主従比率のチェックは対象外にし、見出しが1件以上あることだけを最低条件にする。
   const isRiotNewsFormat = candidate.sourceType === "riot-news";
+  // 成長G7（F-G7-4）: x(独自の見出し・導入・要約が主、tweet埋め込み/短い引用＋出典が従の構成、
+  // composeXBody)もriot-newsと同様に、逐語一致率・引用主従比率(元々1tweetの短文が対象で無意味)・
+  // 300字下限のチェックは対象外にし、見出しが1件以上あることだけを最低条件にする。
+  const isXFormat = candidate.sourceType === "x";
 
   if (isReactionFormat) {
     const reactionCount = body.filter((b) => b.type === "reaction").length;
     if (reactionCount === 0) {
       throw new GenerationError("反応まとめ記事にレス(reactionブロック)が1件もありません");
     }
-  } else if (isRiotNewsFormat) {
+  } else if (isRiotNewsFormat || isXFormat) {
     if (!body.some((b) => b.type === "heading")) {
-      throw new GenerationError("ニュース記事に見出し(heading)がありません");
+      throw new GenerationError(`${isXFormat ? "X" : "ニュース"}記事に見出し(heading)がありません`);
     }
   } else {
     const totalLength = body.reduce((sum, b) => sum + blockText(b).length, 0);

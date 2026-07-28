@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isAllowedEmbedUrl,
+  isValidTweetStatusUrl,
   EMBED_PROVIDER_LABELS,
   extractYoutubeVideoId,
   extractTwitchClipSlug,
@@ -49,6 +50,24 @@ describe("isAllowedEmbedUrl（埋め込みURLのホワイトリスト検証, 拡
     expect(EMBED_PROVIDER_LABELS.twitter).toBeTruthy();
     expect(EMBED_PROVIDER_LABELS.youtube).toBeTruthy();
     expect(EMBED_PROVIDER_LABELS.clip).toBeTruthy();
+  });
+});
+
+describe("isValidTweetStatusUrl（tweetステータスURL検証、成長G7 F-G7-4）", () => {
+  it("x.com/twitter.comのstatus URLはtrue", () => {
+    expect(isValidTweetStatusUrl("https://x.com/example_user/status/1234567890")).toBe(true);
+    expect(isValidTweetStatusUrl("https://twitter.com/example_user/status/1234567890")).toBe(true);
+  });
+
+  it("status URLでない同ホストのページ(プロフィール・設定等)はfalse", () => {
+    expect(isValidTweetStatusUrl("https://x.com/example_user")).toBe(false);
+    expect(isValidTweetStatusUrl("https://x.com/settings/profile")).toBe(false);
+  });
+
+  it("無関係なドメイン・URL不正・httpはfalse", () => {
+    expect(isValidTweetStatusUrl("https://youtube.com/example_user/status/123")).toBe(false);
+    expect(isValidTweetStatusUrl("not a url")).toBe(false);
+    expect(isValidTweetStatusUrl("http://x.com/example_user/status/123")).toBe(false);
   });
 });
 

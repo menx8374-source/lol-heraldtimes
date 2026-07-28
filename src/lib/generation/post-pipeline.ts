@@ -242,6 +242,8 @@ export async function generateArticlesFromHotPosts(
       category: (post.category as CategoryLabel | null) ?? undefined,
       // 成長G1（F-G1-4）: 論争フラグをタイトル生成（generateHookTitleLLM/generateHookTitle）に渡す。
       isControversial: hotness.isControversial,
+      // 成長G7（F-G7-4）: x由来の引用フォールバック出典表記（作者名）に使う。他ソースは未使用。
+      author: post.author ?? undefined,
     };
 
     try {

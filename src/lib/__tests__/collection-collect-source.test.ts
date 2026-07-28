@@ -63,6 +63,33 @@ describe("toCollectionItems", () => {
     const result = toCollectionItems("reddit", raw);
     expect(result[0].upvoteRatio).toBe(0.42);
   });
+
+  it("x由来のscore/commentCount/author/media/categoryを漏れなく共通フォーマットに転記する（成長G7、S7cの転記漏れ教訓の再確認）", () => {
+    const raw: RawCollectionItem[] = [
+      {
+        sourceUrl: "https://x.com/lol_jp_fan/status/1810000000000000099",
+        title: "今日のLJLがヤバい",
+        content: "今日のLJLが本当にヤバい試合だった。",
+        fetchedAt: new Date(),
+        externalId: "1810000000000000099",
+        score: 320,
+        commentCount: 48,
+        author: "lol_jp_fan",
+        media: [{ type: "photo", url: "https://pbs.twimg.com/mock.jpg" }],
+        category: "Xの反応",
+      },
+    ];
+    const result = toCollectionItems("x", raw);
+    expect(result[0]).toMatchObject({
+      sourceType: "x",
+      score: 320,
+      commentCount: 48,
+      author: "lol_jp_fan",
+      media: [{ type: "photo", url: "https://pbs.twimg.com/mock.jpg" }],
+      category: "Xの反応",
+      externalId: "1810000000000000099",
+    });
+  });
 });
 
 describe("collectFromSource", () => {

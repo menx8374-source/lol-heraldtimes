@@ -10,6 +10,8 @@ const ENV_KEYS = [
   "HOTNESS_REDDIT_MIN_COMMENTS",
   "HOTNESS_RIOT_MIN_SCORE",
   "HOTNESS_RIOT_MIN_COMMENTS",
+  "HOTNESS_X_MIN_SCORE",
+  "HOTNESS_X_MIN_COMMENTS",
   "HOTNESS_MIN_SCORE_GROWTH_PER_HOUR",
   "HOTNESS_MIN_COMMENT_GROWTH_PER_HOUR",
   "HOTNESS_MIN_AGE_MINUTES",
@@ -52,6 +54,19 @@ describe("getHotnessConfig（話題性判定の設定ファイル、リファク
     expect(getHotnessConfig("riot").minScore).toBe(100);
     expect(getHotnessConfig("5ch").minScore).toBe(0);
     expect(getHotnessConfig("5ch").minComments).toBe(30);
+  });
+
+  it("xはreddit相当のscore主体既定になる（成長G7、min_favesで発見済み前提）", () => {
+    expect(getHotnessConfig("x").minScore).toBe(100);
+    expect(getHotnessConfig("x").minComments).toBe(30);
+  });
+
+  it("x専用envで個別に上書きできる", () => {
+    process.env.HOTNESS_X_MIN_SCORE = "150";
+    process.env.HOTNESS_X_MIN_COMMENTS = "20";
+    expect(getHotnessConfig("x").minScore).toBe(150);
+    expect(getHotnessConfig("x").minComments).toBe(20);
+    expect(getHotnessConfig("reddit").minScore).toBe(100); // 他ソースに影響しない
   });
 
   it("envで汎用既定値を上書きできる", () => {

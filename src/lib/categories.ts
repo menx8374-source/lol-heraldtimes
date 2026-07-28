@@ -9,6 +9,8 @@ export const CATEGORY_GRADIENTS = {
   "eスポーツ": "from-rose-600 to-rose-900",
   "5chの反応": "from-amber-600 to-amber-800",
   "海外の反応": "from-emerald-600 to-emerald-800",
+  // 成長G7: X（旧Twitter）由来の反応記事のカテゴリ。
+  "Xの反応": "from-slate-700 to-slate-950",
 } as const;
 
 /** 定義済みカテゴリの表示ラベル。 */
@@ -31,6 +33,7 @@ export const CATEGORY_SLUGS: Record<CategoryLabel, string> = {
   "eスポーツ": "esports",
   "5chの反応": "5ch",
   "海外の反応": "overseas",
+  "Xの反応": "x",
 };
 
 const SLUG_TO_CATEGORY_LABEL: Record<string, CategoryLabel> = Object.fromEntries(

@@ -18,6 +18,7 @@ describe("ArticleThumbnail（拡張E31 テスト4: カテゴリ別既定画像�
       ["海外の反応", "/default-thumb-overseas.svg"],
       ["Riot公式", "/default-thumb-riot-official.svg"],
       ["eスポーツ", "/default-thumb-esports.svg"],
+      ["Xの反応", "/default-thumb-x.svg"],
     ];
     for (const [category, expectedSrc] of cases) {
       const html = renderToStaticMarkup(<ArticleThumbnail thumbnailUrl={null} category={category} />);

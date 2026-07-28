@@ -73,6 +73,10 @@ const SOURCE_CURRENT_VALUE_DEFAULTS = {
   "5ch": { minScore: 0, minComments: 30 },
   riot: { minScore: 100, minComments: 30 },
   "riot-news": { minScore: 100, minComments: 30 },
+  // 成長G7: xはGetXAPI検索クエリのmin_faves(国内100/海外1000)で発見段階を既に絞り込み済みのため、
+  // reddit相当のscore主体既定をそのまま使う（G1論争度=replyCount/likeCount比が自然に効く。
+  // 5chのような無効化はしない）。
+  x: { minScore: 100, minComments: 30 },
 } as const satisfies Record<SourceType, { minScore: number; minComments: number }>;
 
 /**
@@ -124,6 +128,13 @@ export function getHotnessConfig(sourceType?: SourceType): HotnessConfig {
       ...base,
       minScore: envInt("HOTNESS_RIOT_NEWS_MIN_SCORE", SOURCE_CURRENT_VALUE_DEFAULTS["riot-news"].minScore),
       minComments: envInt("HOTNESS_RIOT_NEWS_MIN_COMMENTS", SOURCE_CURRENT_VALUE_DEFAULTS["riot-news"].minComments),
+    };
+  }
+  if (sourceType === "x") {
+    return {
+      ...base,
+      minScore: envInt("HOTNESS_X_MIN_SCORE", SOURCE_CURRENT_VALUE_DEFAULTS.x.minScore),
+      minComments: envInt("HOTNESS_X_MIN_COMMENTS", SOURCE_CURRENT_VALUE_DEFAULTS.x.minComments),
     };
   }
   // sourceType省略時: 汎用既定値（reddit相当の値をそのまま使う）。
