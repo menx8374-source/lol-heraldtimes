@@ -5,7 +5,11 @@ import {
   getArticleBySlug,
   incrementViewCount,
   listRelatedArticles,
+  fetchSameCategoryLatestCandidates,
+  fetchSameTagPopularCandidates,
 } from "@/lib/articles";
+import { selectSameCategoryLatest, selectSameTagPopular } from "@/lib/related-articles";
+import { buildHubLinks } from "@/lib/hub-links";
 import { categorySlugFor, isReactionCategory } from "@/lib/categories";
 import { pickDeterministicChampionSplashUrl } from "@/lib/generation/champion-splash";
 import { shouldShowHeroThumbnail } from "@/lib/article-body";
@@ -88,13 +92,47 @@ export default async function ArticlePage({ params }: Props) {
     notFound();
   }
 
-  // 閲覧数の加算（書き込み）・関連記事・コメント一覧の取得は互いに独立なので並列化する。
-  const [, related, comments] = await Promise.all([
+  // 閲覧数の加算（書き込み）・関連記事・記事末回遊（同カテゴリ最新／同タグ人気）の候補プール・
+  // コメント一覧の取得は互いに独立なDBアクセスなので並列化する（成長G2 F-G2-2。逐次化しない）。
+  const [, related, sameCategoryCandidates, sameTagPopularFetch, comments] = await Promise.all([
     incrementViewCount(article.slug),
-    listRelatedArticles(article, 3),
+    listRelatedArticles(article, 6),
+    fetchSameCategoryLatestCandidates(article),
+    fetchSameTagPopularCandidates(article),
     listPublishedCommentsBySlug(article.slug),
   ]);
+
+  // 候補プールの取得（DBアクセス）は並列で終えた後、選定（純関数・同期処理）だけを
+  // 「関連記事 → 同カテゴリ最新 → 同タグ人気」の順に既出slugを積み上げながら行う
+  // （3ウィジェット間の重複表示防止。決定論的で追加のDBアクセスは発生しない）。
+  const currentCandidate = {
+    slug: article.slug,
+    category: article.category,
+    tags: article.tags,
+    publishedAt: article.publishedAt,
+    viewCount: article.viewCount,
+  };
+  const relatedSlugs = new Set(related.map((a) => a.slug));
+  const sameCategoryLatest = selectSameCategoryLatest(
+    currentCandidate,
+    sameCategoryCandidates,
+    6,
+    relatedSlugs,
+  );
+  const seenSlugs = new Set([...relatedSlugs, ...sameCategoryLatest.map((a) => a.slug)]);
+  const sameTagPopular = selectSameTagPopular(
+    currentCandidate,
+    sameTagPopularFetch.candidates,
+    6,
+    seenSlugs,
+  );
+
   const categorySlug = categorySlugFor(article.category);
+  const hubLinks = buildHubLinks({
+    category: article.category,
+    categorySlug,
+    tags: article.tags,
+  });
 
   const siteUrl = getSiteUrl();
   const articleUrl = `${siteUrl}/articles/${article.slug}`;
@@ -225,6 +263,45 @@ export default async function ArticlePage({ params }: Props) {
                   広告枠を併設する（AdSense Matched Content相当）。 */}
               <AdSlot position="matched-content" />
             </section>
+
+            {/* 同じカテゴリの最新記事（成長G2 F-G2-3）。候補が0件のときはセクションごと非表示。 */}
+            {sameCategoryLatest.length > 0 && (
+              <section className="mt-8 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+                <h2 className="mb-3 text-sm font-bold text-neutral-600 dark:text-neutral-300">
+                  『{article.category}』の最新記事
+                </h2>
+                <ArticleList articles={sameCategoryLatest} emptyMessage="" />
+              </section>
+            )}
+
+            {/* 同じタグの人気記事（成長G2 F-G2-3）。候補が0件のときはセクションごと非表示。 */}
+            {sameTagPopular.length > 0 && (
+              <section className="mt-8 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+                <h2 className="mb-3 text-sm font-bold text-neutral-600 dark:text-neutral-300">
+                  #{sameTagPopularFetch.mainTagName} の人気記事
+                </h2>
+                <ArticleList articles={sameTagPopular} emptyMessage="" />
+              </section>
+            )}
+
+            {/* ハブ導線（成長G2 F-G2-3/F-G2-4・R7）。キーワード（カテゴリ名/タグ名）を含む
+                アンカーテキストで /category/<slug>・/tags/<tag> へ誘導する「まとめて見る」導線。 */}
+            {hubLinks.length > 0 && (
+              <nav
+                aria-label="関連ハブへの導線"
+                className="mt-6 flex flex-wrap gap-2 border-t border-neutral-200 pt-4 dark:border-neutral-800"
+              >
+                {hubLinks.map((link) => (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className="rounded-full border border-sky-300 px-3 py-1 text-xs text-sky-700 hover:bg-sky-50 dark:border-sky-700 dark:text-sky-400 dark:hover:bg-sky-950"
+                  >
+                    {link.label}
+                  </Link>
+                ))}
+              </nav>
+            )}
 
             <div className="mt-6">
               <Link

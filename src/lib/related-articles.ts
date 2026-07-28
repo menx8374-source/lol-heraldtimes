@@ -8,6 +8,8 @@ export type RelatedCandidate = {
   category: string;
   tags: string[];
   publishedAt: Date;
+  /** 同タグ人気ウィジェット（成長G2）のソートキー。既存呼び出し側は未使用なら0を渡してよい。 */
+  viewCount: number;
 };
 
 /**
@@ -46,4 +48,55 @@ export function selectRelatedArticles<T extends RelatedCandidate>(
     .sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime());
 
   return [...scored, ...fallback].slice(0, limit);
+}
+
+/**
+ * 「同じカテゴリの最新記事」ウィジェット（成長G2 F-G2-1）用の純関数。
+ * category が一致し自分自身ではない候補を publishedAt 降順で limit 件選ぶ。フォールバックは無く、
+ * 同カテゴリの候補が無ければ空配列を返す（呼び出し側でウィジェットごと非表示にする）。
+ *
+ * excludeSlugs は他ウィジェット（関連記事など）で既に表示済みの slug の集合。3ウィジェット間で
+ * 同一記事が重複表示されないよう、呼び出し側が「関連 → 同カテゴリ最新 → 同タグ人気」の順に
+ * 既出 slug を積み上げて渡すことを想定する。
+ */
+export function selectSameCategoryLatest<T extends RelatedCandidate>(
+  current: RelatedCandidate,
+  candidates: T[],
+  limit: number,
+  excludeSlugs: ReadonlySet<string> = new Set(),
+): T[] {
+  return candidates
+    .filter(
+      (c) => c.slug !== current.slug && c.category === current.category && !excludeSlugs.has(c.slug),
+    )
+    .sort((a, b) => b.publishedAt.getTime() - a.publishedAt.getTime())
+    .slice(0, limit);
+}
+
+/**
+ * 「同じタグの人気記事」ウィジェット（成長G2 F-G2-1）用の純関数。
+ * current.tags と1つ以上一致する候補を「①一致タグ数降順 → ②viewCount降順 → ③publishedAt降順」で
+ * limit 件選ぶ。一致タグが0件の候補はフォールバック無しで除外する（人気＝閲覧数の高い同タグ記事だけを
+ * 拾う。無理に無関係な記事で水増ししない）。excludeSlugs の扱いは selectSameCategoryLatest と同じ。
+ */
+export function selectSameTagPopular<T extends RelatedCandidate>(
+  current: RelatedCandidate,
+  candidates: T[],
+  limit: number,
+  excludeSlugs: ReadonlySet<string> = new Set(),
+): T[] {
+  return candidates
+    .filter((c) => c.slug !== current.slug && !excludeSlugs.has(c.slug))
+    .map((c) => ({
+      candidate: c,
+      matchCount: c.tags.filter((t) => current.tags.includes(t)).length,
+    }))
+    .filter((s) => s.matchCount > 0)
+    .sort((a, b) => {
+      if (b.matchCount !== a.matchCount) return b.matchCount - a.matchCount;
+      if (b.candidate.viewCount !== a.candidate.viewCount) return b.candidate.viewCount - a.candidate.viewCount;
+      return b.candidate.publishedAt.getTime() - a.candidate.publishedAt.getTime();
+    })
+    .map((s) => s.candidate)
+    .slice(0, limit);
 }

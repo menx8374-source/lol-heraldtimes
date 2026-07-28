@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { selectRelatedArticles, type RelatedCandidate } from "@/lib/related-articles";
+import {
+  selectRelatedArticles,
+  selectSameCategoryLatest,
+  selectSameTagPopular,
+  type RelatedCandidate,
+} from "@/lib/related-articles";
 
-function make(slug: string, category: string, tags: string[], publishedAt: string): RelatedCandidate {
-  return { slug, category, tags, publishedAt: new Date(publishedAt) };
+function make(
+  slug: string,
+  category: string,
+  tags: string[],
+  publishedAt: string,
+  viewCount = 0,
+): RelatedCandidate {
+  return { slug, category, tags, publishedAt: new Date(publishedAt), viewCount };
 }
 
 describe("selectRelatedArticles", () => {
@@ -58,5 +69,142 @@ describe("selectRelatedArticles", () => {
 
     expect(result[0].slug).toBe("c");
     expect(result[1].slug).toBe("b");
+  });
+});
+
+describe("selectSameCategoryLatest", () => {
+  it("同カテゴリのみ・自分除外・publishedAt降順で limit 件を選ぶ", () => {
+    const current = make("a", "patch", [], "2026-07-20");
+    const candidates = [
+      current,
+      make("b", "patch", [], "2026-07-18"),
+      make("c", "patch", [], "2026-07-19"),
+      make("d", "esports", [], "2026-07-25"), // 別カテゴリなので除外
+    ];
+
+    const result = selectSameCategoryLatest(current, candidates, 10);
+
+    expect(result.map((r) => r.slug)).toEqual(["c", "b"]);
+  });
+
+  it("limit を超える件数は切り詰める", () => {
+    const current = make("a", "patch", [], "2026-07-20");
+    const candidates = [
+      current,
+      make("b", "patch", [], "2026-07-19"),
+      make("c", "patch", [], "2026-07-18"),
+      make("d", "patch", [], "2026-07-17"),
+    ];
+
+    const result = selectSameCategoryLatest(current, candidates, 2);
+
+    expect(result).toHaveLength(2);
+    expect(result.map((r) => r.slug)).toEqual(["b", "c"]);
+  });
+
+  it("同カテゴリの候補が0件なら空配列を返す（フォールバックしない）", () => {
+    const current = make("a", "patch", [], "2026-07-20");
+    const candidates = [current, make("b", "esports", [], "2026-07-19")];
+
+    const result = selectSameCategoryLatest(current, candidates, 5);
+
+    expect(result).toEqual([]);
+  });
+
+  it("excludeSlugs で指定した slug は除外する（ウィジェット間の重複防止）", () => {
+    const current = make("a", "patch", [], "2026-07-20");
+    const candidates = [
+      current,
+      make("b", "patch", [], "2026-07-19"),
+      make("c", "patch", [], "2026-07-18"),
+    ];
+
+    const result = selectSameCategoryLatest(current, candidates, 5, new Set(["b"]));
+
+    expect(result.map((r) => r.slug)).toEqual(["c"]);
+  });
+});
+
+describe("selectSameTagPopular", () => {
+  it("一致タグ数 → viewCount → publishedAt の順で並べる", () => {
+    const current = make("a", "patch", ["jungle", "meta"], "2026-07-20");
+    const candidates = [
+      current,
+      make("b", "esports", ["jungle"], "2026-07-10", 100), // 一致1・viewCount100
+      make("c", "esports", ["jungle", "meta"], "2026-07-05", 10), // 一致2（最優先）
+      make("d", "esports", ["jungle"], "2026-07-15", 200), // 一致1・viewCount200（bより優先）
+      make("e", "esports", [], "2026-07-25", 999), // 一致0件は除外
+    ];
+
+    const result = selectSameTagPopular(current, candidates, 10);
+
+    expect(result.map((r) => r.slug)).toEqual(["c", "d", "b"]);
+  });
+
+  it("一致タグ0件の候補は含めない（フォールバック無し）", () => {
+    const current = make("a", "patch", ["jungle"], "2026-07-20");
+    const candidates = [current, make("b", "esports", [], "2026-07-19", 500)];
+
+    const result = selectSameTagPopular(current, candidates, 5);
+
+    expect(result).toEqual([]);
+  });
+
+  it("自分自身は除外する", () => {
+    const current = make("a", "patch", ["jungle"], "2026-07-20", 999);
+    const candidates = [current, make("b", "esports", ["jungle"], "2026-07-19", 1)];
+
+    const result = selectSameTagPopular(current, candidates, 5);
+
+    expect(result.map((r) => r.slug)).toEqual(["b"]);
+  });
+
+  it("limit を遵守する", () => {
+    const current = make("a", "patch", ["jungle"], "2026-07-20");
+    const candidates = [
+      current,
+      make("b", "esports", ["jungle"], "2026-07-19", 300),
+      make("c", "esports", ["jungle"], "2026-07-18", 200),
+      make("d", "esports", ["jungle"], "2026-07-17", 100),
+    ];
+
+    const result = selectSameTagPopular(current, candidates, 2);
+
+    expect(result).toHaveLength(2);
+    expect(result.map((r) => r.slug)).toEqual(["b", "c"]);
+  });
+
+  it("excludeSlugs で指定した slug は除外する（ウィジェット間の重複防止）", () => {
+    const current = make("a", "patch", ["jungle"], "2026-07-20");
+    const candidates = [
+      current,
+      make("b", "esports", ["jungle"], "2026-07-19", 300),
+      make("c", "esports", ["jungle"], "2026-07-18", 200),
+    ];
+
+    const result = selectSameTagPopular(current, candidates, 5, new Set(["b"]));
+
+    expect(result.map((r) => r.slug)).toEqual(["c"]);
+  });
+});
+
+describe("3ウィジェット間の既出slug除外（成長G2）", () => {
+  it("関連記事で選ばれた記事は同カテゴリ最新に重複しない", () => {
+    const current = make("a", "patch", ["jungle"], "2026-07-20");
+    const candidates = [
+      current,
+      make("b", "patch", ["jungle"], "2026-07-19"), // 関連(同カテゴリ+同タグ)で選ばれる想定
+      make("c", "patch", [], "2026-07-18"), // 同カテゴリ最新の候補
+      make("d", "patch", [], "2026-07-17"),
+    ];
+
+    const related = selectRelatedArticles(current, candidates, 1);
+    expect(related.map((r) => r.slug)).toEqual(["b"]);
+
+    const relatedSlugs = new Set(related.map((r) => r.slug));
+    const sameCategoryLatest = selectSameCategoryLatest(current, candidates, 10, relatedSlugs);
+
+    expect(sameCategoryLatest.map((r) => r.slug)).not.toContain("b");
+    expect(sameCategoryLatest.map((r) => r.slug)).toEqual(["c", "d"]);
   });
 });

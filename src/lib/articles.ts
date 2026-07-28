@@ -321,7 +321,13 @@ export async function listRelatedArticles(
   }));
 
   const selected = selectRelatedArticles(
-    { slug: article.slug, category: article.category, tags: article.tags, publishedAt: article.publishedAt },
+    {
+      slug: article.slug,
+      category: article.category,
+      tags: article.tags,
+      publishedAt: article.publishedAt,
+      viewCount: article.viewCount,
+    },
     candidates,
     limit,
   );
@@ -340,4 +346,76 @@ export async function listRelatedArticles(
     pinned: s.pinned,
     excerpt: s.excerpt,
   }));
+}
+
+/** 記事末回遊ウィジェット（成長G2）の候補プールサイズ。件数上限＋他ウィジェットとの重複除外後も
+ * 十分な件数が残るよう、表示件数（6件目安）より十分大きく取る。 */
+const SAME_CATEGORY_CANDIDATE_POOL = 30;
+const SAME_TAG_CANDIDATE_POOL = 30;
+/** 同タグ人気ウィジェットで使う「主要タグ」の最大数（クエリ数を抑えるため全タグは引かない）。 */
+const MAIN_TAG_LIMIT = 2;
+
+/**
+ * 記事末「同じカテゴリの最新記事」ウィジェット（成長G2 F-G2-2）用の候補プールを取得する。
+ * 選定（自分自身の除外・publishedAt降順・件数上限・他ウィジェットとの重複除外）は
+ * lib/related-articles.ts の selectSameCategoryLatest（純関数）に委譲し、ここでは DB から
+ * published のみの候補プールを取得するだけにする。この関数自体は excludeSlugs 等に依存しない
+ * 独立した非同期処理なので、記事詳細ページ側で他の並列フェッチと Promise.all できる。
+ */
+export async function fetchSameCategoryLatestCandidates(
+  article: ArticleDetail,
+  poolSize: number = SAME_CATEGORY_CANDIDATE_POOL,
+): Promise<(ArticleSummary & { tags: string[] })[]> {
+  const { items } = await listArticlesByCategory(article.category, 1, poolSize);
+  // カテゴリ最新の並び替えには tags を使わないため、RelatedCandidate 型を満たすためだけの空配列。
+  return items.map((a) => ({ ...a, tags: [] as string[] }));
+}
+
+/**
+ * article.tags のうち、サイト全体で（公開記事に限定して）記事数の多い順に上位 limit 個を選ぶ。
+ * 「主要タグ」＝人気の高いタグを優先することで、同タグ人気ウィジェットの候補プールがレアタグに
+ * 偏って0件になりやすくなるのを避ける。
+ */
+async function selectMainTagNames(tagNames: string[], limit: number = MAIN_TAG_LIMIT): Promise<string[]> {
+  if (tagNames.length === 0) return [];
+  const rows = await prisma.tag.findMany({
+    where: { name: { in: tagNames } },
+    select: { name: true, _count: { select: { articles: { where: { article: PUBLISHED_ONLY } } } } },
+  });
+  return rows
+    .sort((a, b) => b._count.articles - a._count.articles || a.name.localeCompare(b.name))
+    .slice(0, limit)
+    .map((r) => r.name);
+}
+
+/**
+ * 記事末「同じタグの人気記事」ウィジェット（成長G2 F-G2-2）用の候補プールを取得する。
+ * 全タグを引くとタグ数に比例してクエリ・候補が膨らむため、記事の主要タグ（最大 MAIN_TAG_LIMIT 個）
+ * に限定して候補を集める（クエリは主要タグ選定＋候補取得の2回で有界）。主要タグが無い（記事に
+ * タグが1つも付いていない）場合は候補0件を返し、呼び出し側でウィジェットごと非表示にする
+ * （フォールバック無し）。選定（一致タグ数→viewCount→publishedAt・件数上限・重複除外）は
+ * selectSameTagPopular（純関数）に委譲する。
+ */
+export async function fetchSameTagPopularCandidates(
+  article: ArticleDetail,
+  poolSize: number = SAME_TAG_CANDIDATE_POOL,
+): Promise<{ mainTagName: string; candidates: (ArticleSummary & { tags: string[] })[] }> {
+  const mainTags = await selectMainTagNames(article.tags);
+  if (mainTags.length === 0) return { mainTagName: "", candidates: [] };
+
+  const rows = await prisma.article.findMany({
+    where: {
+      slug: { not: article.slug },
+      ...PUBLISHED_ONLY,
+      tags: { some: { tag: { name: { in: mainTags } } } },
+    },
+    select: { ...summarySelect, tags: { include: { tag: true } } },
+    orderBy: { viewCount: "desc" },
+    take: poolSize,
+  });
+
+  return {
+    mainTagName: mainTags[0],
+    candidates: rows.map((r) => ({ ...toSummary(r), tags: r.tags.map((t) => t.tag.name) })),
+  };
 }
