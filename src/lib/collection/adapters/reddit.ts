@@ -5,9 +5,16 @@
  * 無認証の公式JSONは403、RSSはレート制限が厳しく無人運用に不向き（検証済み）。PullPushはデータが
  * 約14か月古く不採用。**Arctic Shift**（`arctic-shift.photon-reddit.com`・無認証・無料）は最新データが
  * あるが、スコアはAPI側でソート/絞込できず（`created_utc`順のみ）、作成直後はスコアが未反映で
- * 2日程度でバックフィルされる特性がある。そのため「2〜4日前の投稿」を取得しクライアント側でスコア降順に
- * 選抜し、各スレの上位コメントを取得して「OP＋上位コメント」のスレッドダンプに整形する
- * （翻訳は次スプリントE47。本スプリントは英語のまま実データ化する）。
+ * 2日程度でバックフィルされる特性がある。
+ *
+ * 成長G8（速報性向上）: 実測で「投稿直後0〜6時間はscore中央値=1・最大=1」を確認済み。窓を単純短縮すると
+ * 新規投稿はscore足切りに全滅するため、**「収集の足切り」と「記事化の判定」を分離**する。
+ * 取得窓（`computeFetchWindow`）は前寄せしつつ、窓内の投稿を「監視ウィンドウ内（新しい）」と
+ * 「監視ウィンドウ外（古い）」に分け、古い投稿だけ従来どおりscore足切りを適用し、新しい投稿は
+ * score足切りをせず（num_comments下限のみで無反応/bot投稿を除く）Postとして保存・監視対象に入れる
+ * （`selectPostsForCollection`）。記事化はあくまで既存 HotnessEvaluator（増加率＝初速判定を含む）に
+ * 委ねるため、本アダプタ・`persist-posts.ts`・記事化ロジックには一切手を入れない。
+ * 監視対象の暴走防止に、新しい投稿側の選抜件数に上限（`maxMonitorCandidates`）を設ける。
  *
  * 信頼境界（外部API）: `fetchJsonSafe`（タイムアウト付き）。HTTPエラー・不正JSON・ネットワーク断は
  * いずれも例外を投げず握り潰して空配列を返す（1ソースの失敗が収集パイプライン全体を止めない方針。
@@ -24,16 +31,44 @@ const ARCTIC_SHIFT_BASE = "https://arctic-shift.photon-reddit.com/api";
 /** 5chアダプタ同様、説明的な既定UA（env `REDDIT_USER_AGENT` で上書き可）。 */
 const DEFAULT_USER_AGENT = "lol-matome-sokuhou-collector/1.0 (bot; +contact via operator CONTACT_EMAIL)";
 
-/** 投稿選別の下限スコア（既定50。env `REDDIT_MIN_SCORE` で上書き可）。 */
+/** 投稿選別の下限スコア（既定50、監視ウィンドウ外＝古い投稿にのみ適用。env `REDDIT_MIN_SCORE` で上書き可）。 */
 const DEFAULT_MIN_SCORE = 50;
-/** 収集対象にする投稿数の上限（既定5。env `REDDIT_MAX_THREADS` で上書き可）。 */
+/** 収集対象にする「古い」投稿数の上限（既定5。env `REDDIT_MAX_THREADS` で上書き可）。 */
 const DEFAULT_MAX_THREADS = 5;
 /** 1投稿あたり取り込むコメント数の上限（既定20。env `REDDIT_MAX_COMMENTS` で上書き可）。 */
 const DEFAULT_MAX_COMMENTS = 20;
-/** 取得窓の下限（何日前までを対象にするか。既定2。env `REDDIT_MIN_AGE_DAYS` で上書き可）。 */
-const DEFAULT_MIN_AGE_DAYS = 2;
-/** 取得窓の上限（何日前から遡るか。既定4。env `REDDIT_MAX_AGE_DAYS` で上書き可）。 */
-const DEFAULT_MAX_AGE_DAYS = 4;
+/**
+ * 取得窓の下限（何時間前までを対象にするか。成長G8で日粒度(2日)から時間粒度・前寄せに変更、既定12時間。
+ * env `REDDIT_MIN_AGE_HOURS` で上書き可）。
+ */
+const DEFAULT_MIN_AGE_HOURS = 12;
+/**
+ * 取得窓の上限（何時間前から遡るか。成長G8で日粒度(4日)から時間粒度に変更、既定72時間(約3日)。
+ * env `REDDIT_MAX_AGE_HOURS` で上書き可）。
+ */
+const DEFAULT_MAX_AGE_HOURS = 72;
+/**
+ * 監視ウィンドウ（成長G8 F-G8-2）: 投稿からこの時間以内なら「新しい投稿」としてscore足切りをせず
+ * Post保存・監視対象に入れる（既定24時間。env `REDDIT_MONITOR_MAX_AGE_HOURS` で上書き可）。
+ */
+const DEFAULT_MONITOR_MAX_AGE_HOURS = 24;
+/**
+ * 監視ウィンドウ内の投稿に適用する最低限のノイズ抑制フィルタ（成長G8 F-G8-2）:
+ * `num_comments` がこれ未満の投稿（bot投稿・無反応投稿）は監視対象にしない（既定1。
+ * env `REDDIT_MONITOR_MIN_COMMENTS` で上書き可）。
+ */
+const DEFAULT_MONITOR_MIN_COMMENTS = 1;
+/**
+ * 監視ウィンドウ内（新しい投稿）から選抜する件数の上限（成長G8 F-G8-2、監視対象の暴走防止）。
+ * 既定5。env `REDDIT_MAX_MONITOR_CANDIDATES` で上書き可。
+ */
+const DEFAULT_MAX_MONITOR_CANDIDATES = 5;
+/**
+ * コメント選抜で「議論(返信の多い)コメント」に確保する枠数（成長G8 F-G8-3）。
+ * 既定2。env `REDDIT_DISCUSSION_COMMENT_SLOTS` で上書き可。コメントに返信数データが1件も無ければ
+ * この枠は使わず現状どおりscore降順のみになる（回帰なし）。
+ */
+const DEFAULT_DISCUSSION_COMMENT_SLOTS = 2;
 /** 連続fetch間のディレイ(ms)（既定1000。env `REDDIT_REQUEST_DELAY_MS` で上書き可）。 */
 const DEFAULT_REQUEST_DELAY_MS = 1000;
 /** 投稿本文(selftext)抜粋の最大長（有界化）。 */
@@ -77,6 +112,12 @@ export type RedditCommentData = {
   body?: string;
   score?: number;
   author?: string;
+  /**
+   * 返信数（成長G8 F-G8-3: 議論＝賛否が割れているコメントの選抜に使う）。Arctic Shiftが返す場合のみ
+   * 設定される想定。無ければ未設定のままでよい（このフィールドを持つコメントが1件も無ければ
+   * 議論コメント枠は使わず、現状どおりscore降順のみで選抜する）。
+   */
+  num_replies?: number;
 };
 
 type ArcticShiftPostsResponse = { data?: RedditPostData[] };
@@ -119,14 +160,15 @@ export function buildPostUrl(post: Pick<RedditPostData, "id" | "permalink">): st
 export type FetchWindow = { afterIso: string; beforeIso: string };
 
 /**
- * 取得窓（after/before）を計算する純関数（拡張E46 F-E46-1）。
- * Arctic Shiftはスコアが作成直後は未反映で2日程度でバックフィルされる特性があるため、
- * 「`maxAgeDays`日前〜`minAgeDays`日前」の投稿だけを対象にする。`now` はテスト注入可能。
+ * 取得窓（after/before）を計算する純関数（拡張E46 F-E46-1、成長G8 F-G8-1で日粒度→時間粒度に変更）。
+ * Arctic Shiftはスコアが作成直後は未反映でバックフィルされる特性があるため取得窓自体は必要だが、
+ * 「収集の足切り」は監視ウィンドウ（`selectPostsForCollection`）側で分離したため、この窓は前寄せできる
+ * （既定 `maxAgeHours前`〜`minAgeHours前`）。`now` はテスト注入可能。
  */
-export function computeFetchWindow(now: Date, minAgeDays: number, maxAgeDays: number): FetchWindow {
-  const msPerDay = 24 * 60 * 60 * 1000;
-  const after = new Date(now.getTime() - maxAgeDays * msPerDay);
-  const before = new Date(now.getTime() - minAgeDays * msPerDay);
+export function computeFetchWindow(now: Date, minAgeHours: number, maxAgeHours: number): FetchWindow {
+  const msPerHour = 60 * 60 * 1000;
+  const after = new Date(now.getTime() - maxAgeHours * msPerHour);
+  const before = new Date(now.getTime() - minAgeHours * msPerHour);
   return { afterIso: after.toISOString(), beforeIso: before.toISOString() };
 }
 
@@ -158,6 +200,64 @@ export function selectRelevantPosts(
   return sorted.slice(0, Math.max(0, limit));
 }
 
+export type SelectPostsForCollectionOptions = {
+  keywords: string[];
+  /** 古い投稿（監視ウィンドウ外）に適用するscore下限。 */
+  minScore: number;
+  /** 古い投稿から選抜する件数の上限。 */
+  maxThreads: number;
+  /** 現在時刻（投稿からの経過時間の算出に使う）。 */
+  now: Date;
+  /** これ以内なら「新しい投稿」として監視ウィンドウ内に分類する時間数。 */
+  monitorMaxAgeHours: number;
+  /** 新しい投稿に適用する`num_comments`下限（ノイズ抑制）。 */
+  monitorMinComments: number;
+  /** 新しい投稿から選抜する件数の上限（監視対象の暴走防止）。 */
+  maxMonitorCandidates: number;
+};
+
+/**
+ * 投稿を「収集の足切り」（記事化の質ゲートとは別）で選抜する純関数（成長G8 F-G8-2）。
+ * stickied/over_18除外・キーワード一致は共通で適用したうえで、投稿を経過時間で
+ * 「古い投稿（監視ウィンドウ外）」と「新しい投稿（監視ウィンドウ内）」に分ける。
+ *
+ * - 古い投稿: 従来どおり `selectRelevantPosts` と同じ規則（score下限＋降順＋`maxThreads`件）。
+ *   バックフィルが効いており伸びなかった投稿を今さら拾わない。
+ * - 新しい投稿: score下限を適用せず、`num_comments >= monitorMinComments` のみでノイズ抑制し、
+ *   `maxMonitorCandidates`件まで選抜する（監視対象として早期にPost保存し、記事化は既存
+ *   HotnessEvaluatorの増加率判定に委ねる）。
+ *
+ * 戻り値は「古い投稿の選抜結果＋新しい投稿の選抜結果」の結合（重複は無い。経過時間で排他的に分類するため）。
+ */
+export function selectPostsForCollection(
+  posts: RedditPostData[],
+  options: SelectPostsForCollectionOptions,
+): RedditPostData[] {
+  const candidates = posts.filter((p) => !p.stickied && !p.over_18);
+  const keywordMatched = matchKeywordPosts(candidates, options.keywords);
+
+  const oldPosts: RedditPostData[] = [];
+  const newPosts: RedditPostData[] = [];
+  for (const p of keywordMatched) {
+    const ageHours = (options.now.getTime() - p.created_utc * 1000) / 3600000;
+    if (ageHours <= options.monitorMaxAgeHours) {
+      newPosts.push(p);
+    } else {
+      oldPosts.push(p);
+    }
+  }
+
+  // 古い投稿: 既にsticky/nsfw/キーワードは適用済みのため、selectRelevantPostsのscore下限/降順/limitのみが効く。
+  const oldSelected = selectRelevantPosts(oldPosts, options.keywords, options.minScore, options.maxThreads);
+
+  // 新しい投稿: score足切りはせず、num_comments下限のみでノイズ抑制。監視上限で頭打ち。
+  const newQualified = newPosts.filter((p) => (p.num_comments ?? 0) >= options.monitorMinComments);
+  const newSorted = [...newQualified].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const newSelected = newSorted.slice(0, Math.max(0, options.maxMonitorCandidates));
+
+  return [...oldSelected, ...newSelected];
+}
+
 /** コメント本文が実質空（削除・除去・空白のみ）かどうか。 */
 function isEmptyOrRemovedBody(body: string | undefined): boolean {
   if (!body) return true;
@@ -165,16 +265,50 @@ function isEmptyOrRemovedBody(body: string | undefined): boolean {
   return trimmed.length === 0 || trimmed === "[deleted]" || trimmed === "[removed]";
 }
 
+export type SelectTopCommentsOptions = {
+  /**
+   * 返信数上位から確保する「議論(賛否が割れている)コメント」の枠数（成長G8 F-G8-3）。
+   * 未指定/0、または対象コメントに `num_replies` を持つものが1件も無ければこの枠は使わず、
+   * 従来どおりscore降順のみで選抜する（回帰なし）。
+   */
+  discussionSlots?: number;
+};
+
 /**
- * コメントを整形する純関数（拡張E46 F-E46-1）。`[deleted]`/`[removed]`/空本文/`AutoModerator` を除外し、
- * score降順で上位 `limit` 件を返す（逐語は不変・選定のみ）。
+ * コメントを整形する純関数（拡張E46 F-E46-1、成長G8 F-G8-3で議論コメント枠を追加）。
+ * `[deleted]`/`[removed]`/空本文/`AutoModerator` を除外し、score降順で上位 `limit` 件を返す
+ * （逐語は不変・選定のみ）。`options.discussionSlots` が指定され、かつ対象コメントのいずれかに
+ * `num_replies`（返信数）が設定されている場合は、末尾の`discussionSlots`件を「score上位に
+ * 含まれない中で返信数が多いコメント」に差し替える（賛否両論の議論を拾う）。返信数データが
+ * 無ければ現状どおりscore降順のみ（回帰しない）。
  */
-export function selectTopComments(comments: RedditCommentData[], limit: number): RedditCommentData[] {
+export function selectTopComments(
+  comments: RedditCommentData[],
+  limit: number,
+  options: SelectTopCommentsOptions = {},
+): RedditCommentData[] {
   const filtered = comments.filter(
     (c) => !isEmptyOrRemovedBody(c.body) && c.author?.toLowerCase() !== "automoderator",
   );
-  const sorted = [...filtered].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-  return sorted.slice(0, Math.max(0, limit));
+  const effectiveLimit = Math.max(0, limit);
+  const byScoreDesc = [...filtered].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+
+  const discussionSlots = options.discussionSlots ?? 0;
+  const hasReplyData = filtered.some((c) => typeof c.num_replies === "number");
+  if (discussionSlots <= 0 || !hasReplyData || effectiveLimit === 0) {
+    return byScoreDesc.slice(0, effectiveLimit);
+  }
+
+  const scoreSlots = Math.max(0, effectiveLimit - discussionSlots);
+  const topByScore = byScoreDesc.slice(0, scoreSlots);
+  const usedIds = new Set(topByScore.map((c) => c.id));
+
+  const discussionSorted = filtered
+    .filter((c) => !usedIds.has(c.id) && typeof c.num_replies === "number")
+    .sort((a, b) => (b.num_replies ?? 0) - (a.num_replies ?? 0));
+  const discussionPicked = discussionSorted.slice(0, effectiveLimit - topByScore.length);
+
+  return [...topByScore, ...discussionPicked];
 }
 
 /** OP本文（title＋selftext冒頭抜粋）を組み立てる（有界化。改行はスペースに畳んで1レス化）。 */
@@ -261,11 +395,21 @@ export type RedditAdapterOptions = {
   keywords?: string[];
   /** 現在時刻の注入点（テスト用）。既定は実時刻。 */
   now?: () => Date;
-  minAgeDays?: number;
-  maxAgeDays?: number;
+  /** 取得窓の下限（何時間前まで。成長G8で日粒度から変更）。既定は env `REDDIT_MIN_AGE_HOURS`。 */
+  minAgeHours?: number;
+  /** 取得窓の上限（何時間前から遡るか）。既定は env `REDDIT_MAX_AGE_HOURS`。 */
+  maxAgeHours?: number;
   minScore?: number;
   maxThreads?: number;
   maxComments?: number;
+  /** 監視ウィンドウ（成長G8 F-G8-2）。既定は env `REDDIT_MONITOR_MAX_AGE_HOURS`。 */
+  monitorMaxAgeHours?: number;
+  /** 監視ウィンドウ内投稿のnum_comments下限（成長G8 F-G8-2）。既定は env `REDDIT_MONITOR_MIN_COMMENTS`。 */
+  monitorMinComments?: number;
+  /** 監視ウィンドウ内から選抜する件数上限（成長G8 F-G8-2）。既定は env `REDDIT_MAX_MONITOR_CANDIDATES`。 */
+  maxMonitorCandidates?: number;
+  /** 議論コメント枠数（成長G8 F-G8-3）。既定は env `REDDIT_DISCUSSION_COMMENT_SLOTS`。 */
+  discussionCommentSlots?: number;
   /** 連続fetch間のディレイ(ms)。既定は env `REDDIT_REQUEST_DELAY_MS`（既定1000）。 */
   delayMs?: number;
   /** ディレイの実処理の注入点（テスト用）。既定は実 setTimeout ベースの sleep。 */
@@ -284,11 +428,15 @@ export class RedditAdapter implements SourceAdapter {
   private readonly subreddits: string[];
   private readonly keywords: string[];
   private readonly now: () => Date;
-  private readonly minAgeDays: number;
-  private readonly maxAgeDays: number;
+  private readonly minAgeHours: number;
+  private readonly maxAgeHours: number;
   private readonly minScore: number;
   private readonly maxThreads: number;
   private readonly maxComments: number;
+  private readonly monitorMaxAgeHours: number;
+  private readonly monitorMinComments: number;
+  private readonly maxMonitorCandidates: number;
+  private readonly discussionCommentSlots: number;
   private readonly delayMs: number;
   private readonly sleep: (ms: number) => Promise<void>;
   /** 実行全体で最初のfetchかどうか（最初のfetch前はディレイ不要のため）。 */
@@ -300,11 +448,19 @@ export class RedditAdapter implements SourceAdapter {
     this.subreddits = options.subreddits ?? defaults.relevance.allowedSubreddits ?? [];
     this.keywords = options.keywords ?? defaults.relevance.keywords;
     this.now = options.now ?? (() => new Date());
-    this.minAgeDays = options.minAgeDays ?? envIntLocal("REDDIT_MIN_AGE_DAYS", DEFAULT_MIN_AGE_DAYS);
-    this.maxAgeDays = options.maxAgeDays ?? envIntLocal("REDDIT_MAX_AGE_DAYS", DEFAULT_MAX_AGE_DAYS);
+    this.minAgeHours = options.minAgeHours ?? envIntLocal("REDDIT_MIN_AGE_HOURS", DEFAULT_MIN_AGE_HOURS);
+    this.maxAgeHours = options.maxAgeHours ?? envIntLocal("REDDIT_MAX_AGE_HOURS", DEFAULT_MAX_AGE_HOURS);
     this.minScore = options.minScore ?? envIntLocal("REDDIT_MIN_SCORE", DEFAULT_MIN_SCORE);
     this.maxThreads = options.maxThreads ?? envIntLocal("REDDIT_MAX_THREADS", DEFAULT_MAX_THREADS);
     this.maxComments = options.maxComments ?? envIntLocal("REDDIT_MAX_COMMENTS", DEFAULT_MAX_COMMENTS);
+    this.monitorMaxAgeHours =
+      options.monitorMaxAgeHours ?? envIntLocal("REDDIT_MONITOR_MAX_AGE_HOURS", DEFAULT_MONITOR_MAX_AGE_HOURS);
+    this.monitorMinComments =
+      options.monitorMinComments ?? envIntLocal("REDDIT_MONITOR_MIN_COMMENTS", DEFAULT_MONITOR_MIN_COMMENTS);
+    this.maxMonitorCandidates =
+      options.maxMonitorCandidates ?? envIntLocal("REDDIT_MAX_MONITOR_CANDIDATES", DEFAULT_MAX_MONITOR_CANDIDATES);
+    this.discussionCommentSlots =
+      options.discussionCommentSlots ?? envIntLocal("REDDIT_DISCUSSION_COMMENT_SLOTS", DEFAULT_DISCUSSION_COMMENT_SLOTS);
     this.delayMs = options.delayMs ?? envIntLocal("REDDIT_REQUEST_DELAY_MS", DEFAULT_REQUEST_DELAY_MS);
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }
@@ -319,7 +475,7 @@ export class RedditAdapter implements SourceAdapter {
   }
 
   private async fetchPosts(subreddit: string): Promise<RedditPostData[]> {
-    const { afterIso, beforeIso } = computeFetchWindow(this.now(), this.minAgeDays, this.maxAgeDays);
+    const { afterIso, beforeIso } = computeFetchWindow(this.now(), this.minAgeHours, this.maxAgeHours);
     await this.waitBeforeFetch();
     const json = await fetchJsonSafe<ArcticShiftPostsResponse>(
       buildPostsSearchUrl(subreddit, afterIso, beforeIso),
@@ -341,20 +497,28 @@ export class RedditAdapter implements SourceAdapter {
 
   private async fetchSubredditItems(subreddit: string): Promise<RawCollectionItem[]> {
     const posts = await this.fetchPosts(subreddit);
-    const candidates = posts.filter((p) => !p.stickied && !p.over_18);
-    const relevantCount = matchKeywordPosts(candidates, this.keywords).filter(
-      (p) => (p.score ?? 0) >= this.minScore,
-    ).length;
-    const selected = selectRelevantPosts(posts, this.keywords, this.minScore, this.maxThreads);
+    // 成長G8（F-G8-2）: 「収集の足切り」と「記事化の判定」を分離。古い投稿はscore足切り、
+    // 新しい投稿（監視ウィンドウ内）はscore足切りをせず監視対象に入れる（selectPostsForCollection）。
+    const selected = selectPostsForCollection(posts, {
+      keywords: this.keywords,
+      minScore: this.minScore,
+      maxThreads: this.maxThreads,
+      now: this.now(),
+      monitorMaxAgeHours: this.monitorMaxAgeHours,
+      monitorMinComments: this.monitorMinComments,
+      maxMonitorCandidates: this.maxMonitorCandidates,
+    });
 
     const items: RawCollectionItem[] = [];
     for (const post of selected) {
       const comments = await this.fetchComments(post);
-      const topComments = selectTopComments(comments, this.maxComments);
+      const topComments = selectTopComments(comments, this.maxComments, {
+        discussionSlots: this.discussionCommentSlots,
+      });
       items.push(buildRedditItem(post, topComments));
     }
     console.log(
-      `[reddit] sub=${subreddit} fetched=${posts.length} relevant=${relevantCount} selected=${selected.length} collected=${items.length}`,
+      `[reddit] sub=${subreddit} fetched=${posts.length} selected=${selected.length} collected=${items.length}`,
     );
     return items;
   }
@@ -403,7 +567,9 @@ export class RedditAdapter implements SourceAdapter {
     if (!postData) return null;
 
     const comments = await this.fetchComments(postData);
-    const topComments = selectTopComments(comments, this.maxComments);
+    const topComments = selectTopComments(comments, this.maxComments, {
+      discussionSlots: this.discussionCommentSlots,
+    });
     return {
       title: postData.title,
       content: buildRedditThreadDump(postData, topComments),

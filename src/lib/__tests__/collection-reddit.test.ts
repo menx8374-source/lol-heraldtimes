@@ -9,6 +9,7 @@ import {
   computeFetchWindow,
   extractRedditImageUrl,
   matchKeywordPosts,
+  selectPostsForCollection,
   selectRelevantPosts,
   selectTopComments,
   type RedditCommentData,
@@ -50,12 +51,19 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 const KEYWORDS = ["patch", "jungle", "lol"];
 
-describe("純関数: computeFetchWindow（取得窓、拡張E46 テスト5）", () => {
-  it("nowから2〜4日前相当のISO日時を算出する（境界の計算が正しい）", () => {
+describe("純関数: computeFetchWindow（取得窓、拡張E46 テスト5・成長G8 F-G8-1で時間粒度化）", () => {
+  it("nowから指定時間前相当のISO日時を算出する（境界の計算が正しい・時間粒度）", () => {
     const now = new Date("2026-07-27T00:00:00.000Z");
-    const window = computeFetchWindow(now, 2, 4);
-    expect(window.afterIso).toBe("2026-07-23T00:00:00.000Z"); // 4日前
-    expect(window.beforeIso).toBe("2026-07-25T00:00:00.000Z"); // 2日前
+    const window = computeFetchWindow(now, 12, 72);
+    expect(window.afterIso).toBe("2026-07-24T00:00:00.000Z"); // 72時間(3日)前
+    expect(window.beforeIso).toBe("2026-07-26T12:00:00.000Z"); // 12時間前
+  });
+
+  it("既定値相当(min12h/max72h)で前寄せされた窓になる(旧既定min2日/max4日より広く新しい側に寄る)", () => {
+    const now = new Date("2026-07-27T00:00:00.000Z");
+    const window = computeFetchWindow(now, 12, 72);
+    // 旧既定(2日=48h前〜4日=96h前)より新しい投稿まで対象に入ることを確認。
+    expect(new Date(window.beforeIso).getTime()).toBeGreaterThan(now.getTime() - 48 * 3600000);
   });
 });
 
@@ -89,6 +97,103 @@ describe("純関数: 投稿選抜（拡張E46 テスト1）", () => {
   });
 });
 
+describe("純関数: selectPostsForCollection（成長G8 F-G8-2、収集の足切りと記事化の判定の分離）", () => {
+  const NOW = new Date("2026-07-27T00:00:00.000Z");
+  /** NOWから`hoursAgo`時間前のUNIX秒（created_utc）を作る。 */
+  function createdUtcHoursAgo(hoursAgo: number): number {
+    return Math.floor((NOW.getTime() - hoursAgo * 3600000) / 1000);
+  }
+  const baseOptions = {
+    keywords: KEYWORDS,
+    minScore: 50,
+    maxThreads: 5,
+    now: NOW,
+    monitorMaxAgeHours: 24,
+    monitorMinComments: 1,
+    maxMonitorCandidates: 5,
+  };
+
+  it("新しい投稿(監視ウィンドウ内)はscore<minScoreでも足切りされず選抜される(num_comments>=1は満たす)", () => {
+    const newLowScorePost = post({
+      id: "new-1",
+      title: "patch discussion fresh",
+      created_utc: createdUtcHoursAgo(2), // 監視ウィンドウ内(24h以内)
+      score: 1, // Arctic Shiftのバックフィル遅延実測どおりscore=1
+      num_comments: 3,
+    });
+    const selected = selectPostsForCollection([newLowScorePost], baseOptions);
+    expect(selected.map((p) => p.id)).toEqual(["new-1"]);
+  });
+
+  it("古い投稿(監視ウィンドウ外)は従来どおりscore足切りされる", () => {
+    const oldLowScorePost = post({
+      id: "old-1",
+      title: "patch discussion old",
+      created_utc: createdUtcHoursAgo(48), // 監視ウィンドウ外(24h超)
+      score: 10, // minScore=50未満
+      num_comments: 20,
+    });
+    const oldHighScorePost = post({
+      id: "old-2",
+      title: "patch discussion old hot",
+      created_utc: createdUtcHoursAgo(48),
+      score: 100,
+      num_comments: 20,
+    });
+    const selected = selectPostsForCollection([oldLowScorePost, oldHighScorePost], baseOptions);
+    expect(selected.map((p) => p.id)).toEqual(["old-2"]); // score不足のold-1は除外
+  });
+
+  it("新しい投稿でもnum_comments下限未満(無反応/bot投稿)は除外される", () => {
+    const noReactionPost = post({
+      id: "new-noreaction",
+      title: "patch discussion silent",
+      created_utc: createdUtcHoursAgo(1),
+      score: 1,
+      num_comments: 0,
+    });
+    const selected = selectPostsForCollection([noReactionPost], baseOptions);
+    expect(selected).toEqual([]);
+  });
+
+  it("新しい投稿の選抜件数はmaxMonitorCandidatesで頭打ちになる(監視対象の暴走防止)", () => {
+    const manyNewPosts = Array.from({ length: 10 }, (_, i) =>
+      post({
+        id: `new-${i}`,
+        title: `patch discussion ${i}`,
+        created_utc: createdUtcHoursAgo(1),
+        score: i, // score降順で選抜されることも兼ねて確認
+        num_comments: 5,
+      }),
+    );
+    const selected = selectPostsForCollection(manyNewPosts, { ...baseOptions, maxMonitorCandidates: 3 });
+    expect(selected).toHaveLength(3);
+    // score降順: 9,8,7 のid
+    expect(selected.map((p) => p.id)).toEqual(["new-9", "new-8", "new-7"]);
+  });
+
+  it("古い投稿・新しい投稿の両方が混在しても、それぞれの規則で選抜され結果が結合される", () => {
+    const oldHot = post({ id: "old-hot", created_utc: createdUtcHoursAgo(48), score: 200, num_comments: 50 });
+    const newFresh = post({ id: "new-fresh", created_utc: createdUtcHoursAgo(1), score: 1, num_comments: 2 });
+    const selected = selectPostsForCollection([oldHot, newFresh], baseOptions);
+    expect(selected.map((p) => p.id).sort()).toEqual(["new-fresh", "old-hot"]);
+  });
+
+  it("stickied/over_18/キーワード不一致は新しい投稿でも除外される(ノイズ抑制は不変)", () => {
+    const sticky = post({ id: "s1", created_utc: createdUtcHoursAgo(1), score: 1, num_comments: 5, stickied: true });
+    const nsfw = post({ id: "n1", created_utc: createdUtcHoursAgo(1), score: 1, num_comments: 5, over_18: true });
+    const unrelated = post({
+      id: "u1",
+      title: "totally unrelated cooking",
+      created_utc: createdUtcHoursAgo(1),
+      score: 1,
+      num_comments: 5,
+    });
+    const selected = selectPostsForCollection([sticky, nsfw, unrelated], baseOptions);
+    expect(selected).toEqual([]);
+  });
+});
+
 describe("純関数: コメント整形（拡張E46 テスト2）", () => {
   it("[deleted]/[removed]/空/AutoModerator除外・score降順・件数上限が効く", () => {
     const comments = [
@@ -110,6 +215,39 @@ describe("純関数: コメント整形（拡張E46 テスト2）", () => {
       comment({ id: "3", score: 20 }),
     ];
     expect(selectTopComments(comments, 2).map((c) => c.id)).toEqual(["2", "3"]);
+  });
+});
+
+describe("純関数: 議論コメント選抜（成長G8 F-G8-3）", () => {
+  it("num_repliesを持つコメントがあれば、score上位に加えて返信数上位の議論コメントも確保する", () => {
+    const comments = [
+      comment({ id: "top1", score: 100, num_replies: 0 }),
+      comment({ id: "top2", score: 90, num_replies: 1 }),
+      comment({ id: "controversial", score: 5, num_replies: 40 }), // scoreは低いが議論が活発
+      comment({ id: "low", score: 1, num_replies: 2 }),
+    ];
+    const selected = selectTopComments(comments, 3, { discussionSlots: 1 });
+    // score上位2件(top1,top2)＋議論コメント枠1件(controversial、score上位に含まれない中で返信数最多)
+    expect(selected.map((c) => c.id)).toEqual(["top1", "top2", "controversial"]);
+  });
+
+  it("num_repliesを誰も持たない場合は現状どおりscore降順のみになる(回帰なし)", () => {
+    const comments = [
+      comment({ id: "a", score: 10 }),
+      comment({ id: "b", score: 30 }),
+      comment({ id: "c", score: 20 }),
+    ];
+    const selected = selectTopComments(comments, 3, { discussionSlots: 1 });
+    expect(selected.map((c) => c.id)).toEqual(["b", "c", "a"]); // score降順のみ
+  });
+
+  it("discussionSlots未指定(既定0)ならnum_repliesがあってもscore降順のみになる(明示的opt-inのみ有効)", () => {
+    const comments = [
+      comment({ id: "top1", score: 100, num_replies: 0 }),
+      comment({ id: "controversial", score: 1, num_replies: 40 }),
+    ];
+    const selected = selectTopComments(comments, 2);
+    expect(selected.map((c) => c.id)).toEqual(["top1", "controversial"]); // score降順(100,1)のまま
   });
 });
 
@@ -356,6 +494,46 @@ describe("RedditAdapter.fetchItems（拡張E46 テスト6・7）", () => {
     });
     const items = await adapter.fetchItems();
     expect(items).toHaveLength(1);
+  });
+
+  it("成長G8 F-G8-2: 新しい低スコア投稿でも監視ウィンドウ内ならfetchItemsの結果に含まれる(記事化ゲートではなく収集段階では捨てない)", async () => {
+    const now = () => new Date("2026-07-27T00:00:00.000Z");
+    const freshLowScoreCreatedUtc = Math.floor(
+      (now().getTime() - 2 * 3600000) / 1000, // 2時間前(監視ウィンドウ24h以内)
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes("/posts/search")) {
+          return jsonResponse({
+            data: [
+              post({
+                id: "fresh-1",
+                title: "patch notes fresh discussion",
+                created_utc: freshLowScoreCreatedUtc,
+                score: 1, // 実測どおりバックフィル遅延でscore=1
+                num_comments: 3,
+              }),
+            ],
+          });
+        }
+        return jsonResponse({ data: [] });
+      }),
+    );
+    const adapter = new RedditAdapter({
+      subreddits: ["leagueoflegends"],
+      keywords: KEYWORDS,
+      now,
+      minScore: 50, // 通常ならこのscore=1は足切りされるはずだが、監視ウィンドウ内なのでバイパスされる
+      monitorMaxAgeHours: 24,
+      monitorMinComments: 1,
+      maxMonitorCandidates: 5,
+      delayMs: 0,
+      sleep: async () => {},
+    });
+    const items = await adapter.fetchItems();
+    expect(items).toHaveLength(1);
+    expect(items[0].score).toBe(1);
   });
 
   it("対象サブレディットが無い場合は空配列を返し、fetchを一切呼ばずスキップログを1度残す", async () => {
