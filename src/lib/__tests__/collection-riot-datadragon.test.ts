@@ -280,6 +280,35 @@ describe("fetchPatchNotesData（本文とog:imageを1回のfetchで取得, 拡�
     const text = await fetchPatchNotesText("14.6.1");
     expect(text).toContain(paragraph);
   });
+
+  it("生HTML(html)を平テキスト化前のまま保持して返す(パッチ刷新S1 F-S1-1: DOM構造パーサ用の取得経路)", async () => {
+    const paragraph = "本パッチではヤスオが強化され、ゼドが弱体化された。".repeat(15);
+    const html =
+      `<html><body><div class="patch-change-block"><h3 class="change-title">テストチャンピオン</h3>` +
+      `<p>${paragraph}</p></div></body></html>`;
+    vi.stubGlobal("fetch", vi.fn(async () => textResponse(html)));
+    const data = await fetchPatchNotesData("14.6.1");
+    expect(data).not.toBeNull();
+    // タグ構造が残ったまま(stripHtmlToTextを経由していない)であることを確認する
+    expect(data!.html).toBe(html);
+    expect(data!.html).toContain("<h3 class=\"change-title\">");
+  });
+
+  it("末尾スラッシュ無しURLへのリクエストが307リダイレクトされても、fetch標準の追従によりリダイレクト後の本文/生HTMLを取得できる(research未確認事項2)", async () => {
+    const paragraph = "本パッチではヤスオが強化され、ゼドが弱体化された。".repeat(15);
+    const html = `<p>${paragraph}</p>`;
+    // fetch(undici)は既定でリダイレクトを追うため、テストのfetchモックは常に最終レスポンスを返せばよい
+    // （リダイレクト追従自体はNode標準fetchの既定動作であり、fetchTextSafe側で個別対応は不要なことの確認）。
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(init?.redirect).not.toBe("manual"); // 明示的にリダイレクトを無効化していないこと
+      return textResponse(html);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const data = await fetchPatchNotesData("16.14.1");
+    expect(data).not.toBeNull();
+    expect(data!.text).toContain(paragraph);
+    expect(data!.html).toBe(html);
+  });
 });
 
 describe("RiotDataDragonAdapter.fetchItems", () => {

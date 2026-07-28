@@ -139,10 +139,21 @@ export function extractOgImageUrl(html: string): string | null {
  * 場合は null を返す（例外は投げない）。本文はトークン節約のため PATCH_NOTES_MAX_LENGTH で切り詰める。
  * 画像は本文とは独立に判定し（本文が閾値未満でも og:image 自体は取得できることがあるが、本文が
  * 無ければ呼び出し側は従来どおりフォールバックするため、本文が短すぎる場合は imageUrl も含めて null にする）。
+ *
+ * パッチ記事刷新S1 F-S1-1: 平テキスト化前の生HTML（`html`）も併せて返す。DOM構造パーサ
+ * （`patch-notes-parser.ts`）が対象・スキルキー・変更前後を誤帰属ゼロで抽出するにはタグ構造が
+ * 必要なため、既存の平テキスト経路（`text`, フォールバック用に温存）とは別に、記事化(candidate)側が
+ * 使える「生HTMLを保持する経路」を追加する（S2でDOM抽出を配線するまではこの`html`は未使用のまま
+ * 後方互換）。本文と異なり切り詰めない（タグ構造の途中で切ると`parsePatchNotesHtml`の抽出が
+ * 部分的に失敗しうるため。パーサ自体は失敗ブロックを読み飛ばすbest-effortで本体を止めない）。
+ *
+ * 取得の堅牢性（research 未確認事項2）: 公式ノートURLは末尾スラッシュ有無で307リダイレクトするが、
+ * `fetch`（Node標準/undici）は既定でリダイレクトを追う（`redirect: "follow"`が既定値）ため、
+ * `fetchTextSafe` は追加対応なしでリダイレクト後のHTMLを取得できる（実URLで確認済み）。
  */
 export async function fetchPatchNotesData(
   version: string,
-): Promise<{ text: string; imageUrl: string | null } | null> {
+): Promise<{ text: string; imageUrl: string | null; html: string } | null> {
   const url = buildPatchNoteUrl(version);
   // 公式サイトが空/既定UAのbotアクセスを弾くことがあるため、ブラウザ相当のUAを付ける（拡張E34c）。
   const html = await fetchTextSafe(
@@ -160,7 +171,7 @@ export async function fetchPatchNotesData(
   const text = stripHtmlToText(html);
   if (text.length < PATCH_NOTES_MIN_LENGTH) return null;
   const truncated = text.length > PATCH_NOTES_MAX_LENGTH ? text.slice(0, PATCH_NOTES_MAX_LENGTH) : text;
-  return { text: truncated, imageUrl: extractOgImageUrl(html) };
+  return { text: truncated, imageUrl: extractOgImageUrl(html), html };
 }
 
 /**
