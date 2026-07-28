@@ -43,6 +43,9 @@ export function toCollectionItems(sourceType: SourceType, raw: RawCollectionItem
       category: r.category,
       // パッチ記事刷新S2（F-S2-2）: riot由来の生HTMLも同様にそのまま転記する(未設定は無視される)。
       html: r.html,
+      // パッチ記事刷新S5（F-S5-1）: 未適用パッチの先行速報フラグも同様にそのまま転記する
+      // (未設定は無視される。ここで漏らすとPost.mediaにpatchPreviewが伝わらず速報バッジが出ない)。
+      patchPreview: r.patchPreview,
     });
   }
   return items;

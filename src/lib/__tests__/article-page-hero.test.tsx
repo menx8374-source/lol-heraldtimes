@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { shouldShowHeroThumbnail } from "@/lib/article-body";
+import { PATCH_PREVIEW_BADGE_TEXT, shouldShowHeroThumbnail } from "@/lib/article-body";
 import { ArticleThumbnail } from "@/components/article-thumbnail";
 import { pickDeterministicChampionSplashUrl } from "@/lib/generation/champion-splash";
 import type { ArticleBodyBlock } from "@/lib/article-body";
@@ -21,6 +21,13 @@ const nonImageBody: ArticleBodyBlock[] = [
 ];
 
 const imageFirstBody: ArticleBodyBlock[] = [
+  { type: "image", url: "https://example.com/patch-banner.jpg", alt: "パッチバナー" },
+  { type: "heading", text: "パッチ見出し" },
+];
+
+/** パッチ記事刷新S5 F-S5-2: 速報バッジ段落＋バナー画像のpreview記事本文。 */
+const previewBadgeThenImageBody: ArticleBodyBlock[] = [
+  { type: "paragraph", text: PATCH_PREVIEW_BADGE_TEXT },
   { type: "image", url: "https://example.com/patch-banner.jpg", alt: "パッチバナー" },
   { type: "heading", text: "パッチ見出し" },
 ];
@@ -36,6 +43,10 @@ describe("shouldShowHeroThumbnail（拡張E50 F-E50-2）", () => {
 
   it("本文が空配列でも例外を投げずtrueを返す", () => {
     expect(shouldShowHeroThumbnail([])).toBe(true);
+  });
+
+  it("速報バッジ段落の次がimageブロックの記事(preview記事のバナー)はfalse(ヒーローを表示しない=二重画像防止、パッチ記事刷新S5 F-S5-2)を返す", () => {
+    expect(shouldShowHeroThumbnail(previewBadgeThenImageBody)).toBe(false);
   });
 });
 

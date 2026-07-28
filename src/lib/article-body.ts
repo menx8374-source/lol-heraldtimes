@@ -461,13 +461,35 @@ export function hasStructuredHeadings(blocks: ArticleBodyBlock[]): boolean {
 }
 
 /**
+ * 未適用パッチの速報バッジ本文（パッチ記事刷新S5 F-S5-2）。公式ノートの逐語＋この注意書きのみで、
+ * 未確定の内容を確定と偽らない（捏造しない・AI不使用）。`compose.ts`が本文先頭に追加し、
+ * `isPatchPreviewArticleBody`/`shouldShowHeroThumbnail`が検出に使う。
+ */
+export const PATCH_PREVIEW_BADGE_TEXT =
+  "【速報・未適用】このパッチはまだ本番環境に適用されていません。適用後に内容が変更される場合があります（公式パッチノートページの内容に基づく先行速報）。";
+
+/**
+ * 本文が速報バッジ付き(preview)かどうかを判定する（S5 F-S5-3）。DBスキーマを変更せず、
+ * 本文先頭ブロックの内容だけでpatchStage(preview/live)を表現する（brief方針）。
+ * 本番反映後の自動確定（`confirmPatchPreviewArticles`）が「まだpreviewのままの記事」を
+ * 見分けるために使う。
+ */
+export function isPatchPreviewArticleBody(blocks: ArticleBodyBlock[]): boolean {
+  const first = blocks[0];
+  return first?.type === "paragraph" && first.text === PATCH_PREVIEW_BADGE_TEXT;
+}
+
+/**
  * 記事冒頭にヒーロー用のサムネイル画像を表示すべきか（拡張E50 F-E50-2）。
  * 本文の先頭ブロックが image（パッチ記事の公式バナー、拡張E42）の場合は、ヒーローと本文冒頭の
  * 画像が二重表示になるため false（表示しない）を返す。それ以外（反応記事等、image で
  * 始まらない記事、本文が空の記事）は true。
+ * パッチ記事刷新S5 F-S5-2: 速報バッジ段落が本文最先頭に入る場合は、その次のブロックで判定する
+ * （バッジ＋バナー画像のpreview記事でもヒーロー画像との二重表示を避ける）。
  */
 export function shouldShowHeroThumbnail(blocks: ArticleBodyBlock[]): boolean {
-  return blocks[0]?.type !== "image";
+  const first = isPatchPreviewArticleBody(blocks) ? blocks[1] : blocks[0];
+  return first?.type !== "image";
 }
 
 /**

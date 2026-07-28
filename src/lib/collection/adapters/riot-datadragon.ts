@@ -212,6 +212,28 @@ export function buildPatchNoteUrl(version: string): string {
 }
 
 /**
+ * 未適用パッチの先行速報（パッチ記事刷新S5 F-S5-1）が有効かどうか。env `PATCH_PREVIEW_MODE`
+ * （既定 `off`）が `"on"` のときのみ true。off/未設定では本モジュールの収集・記事化は
+ * 現状と完全同一（このフラグを参照するコードパス自体が実行されない、回帰ゼロ）。
+ */
+export function isPatchPreviewModeEnabled(): boolean {
+  return process.env.PATCH_PREVIEW_MODE === "on";
+}
+
+/**
+ * Data Dragon の version（例 "16.14.1"）から「次パッチ」の version 文字列を組み立てる
+ * （パッチ記事刷新S5 F-S5-1）。minor を +1 し revision は "1" に固定する（例 "16.14.1" → "16.15.1"）。
+ * パース不能な形式（想定外の入力）は変更せずそのまま返す（例外を投げないフォールバック）。
+ */
+export function nextDdragonVersion(version: string): string {
+  const [major, minor] = version.split(".");
+  const majorNum = Number(major);
+  const minorNum = Number(minor);
+  if (!Number.isFinite(majorNum) || !Number.isFinite(minorNum)) return version;
+  return `${majorNum}.${minorNum + 1}.1`;
+}
+
+/**
  * 新パッチ検知アイテムを組み立てる（事実タイトル＋事実content）。
  * `patchNotesText` に PATCH_NOTES_MIN_LENGTH 以上の本文が渡された場合（拡張E34 F-E34-1）は、
  * それを content にそのまま格納し、タイトルも「まとめ」と分かる形にする（compose.ts側のLLM要約の
@@ -221,6 +243,10 @@ export function buildPatchNoteUrl(version: string): string {
  * `html`（パッチ記事刷新S2 F-S2-2）が渡された場合は `RawCollectionItem.html` に格納する
  * （DOM構造パーサ`parsePatchNotesHtml`が誤帰属ゼロで対象・スキルキー・変更前後を抽出するための
  * 生HTML。本文が短すぎてhasPatchNotesがfalseのときは併せて未設定にする＝汎用速報のみ）。
+ * `isPreview`（パッチ記事刷新S5 F-S5-1・opt-in、既定false）が true の場合、未適用（本番未反映）の
+ * 次パッチを表す先行速報アイテムとして、タイトルに「【速報】」接頭辞を付け
+ * `RawCollectionItem.patchPreview` を true にする（後段のcompose.tsが速報バッジを本文に追加する
+ * 材料になる）。未指定/false（既定）ではタイトル・contentとも従来と完全同一（回帰ゼロ）。
  */
 export function buildPatchItem(
   version: string,
@@ -228,15 +254,17 @@ export function buildPatchItem(
   patchNotesText?: string | null,
   imageUrl?: string | null,
   html?: string | null,
+  isPreview?: boolean,
 ): RawCollectionItem {
   // タイトル表示はユーザーが認識する公式番号（例 26.14）を使う（DDragonの16.14ではなく。拡張E34c）。
   const patchLabel = publicPatchNumber(version);
   const hasPatchNotes = typeof patchNotesText === "string" && patchNotesText.length >= PATCH_NOTES_MIN_LENGTH;
+  const previewPrefix = isPreview ? "【速報】" : "";
   return {
     sourceUrl: buildPatchNoteUrl(version),
     title: hasPatchNotes
-      ? `【パッチ】${patchLabel} の主な変更点まとめ`
-      : `【パッチ】${patchLabel} のゲームデータが公開`,
+      ? `${previewPrefix}【パッチ】${patchLabel} の主な変更点まとめ`
+      : `${previewPrefix}【パッチ】${patchLabel} のゲームデータが公開`,
     content: hasPatchNotes
       ? (patchNotesText as string)
       : `Riot Games の Data Dragon にて、パッチ ${patchLabel}（内部バージョン ${version}）のゲームデータが公開された。最新バージョンのチャンピオン・アイテム等のデータが利用可能になっている。`,
@@ -246,6 +274,7 @@ export function buildPatchItem(
     // リファクタリングS2（F-S2-1）: Post永続化用の外部ID(パッチ識別子)。score/commentCountは
     // Riotに概念が無いため未設定のまま(persist側で0扱い)。
     externalId: patchLabel,
+    ...(isPreview ? { patchPreview: true } : {}),
   };
 }
 
@@ -276,8 +305,26 @@ export class RiotDataDragonAdapter implements SourceAdapter {
     // buildPatchItem が従来の汎用contentにフォールバックする（画像も未設定になる）。
     const patchNotesData = await fetchPatchNotesData(latestVersion);
 
-    return [
+    const items: RawCollectionItem[] = [
       buildPatchItem(latestVersion, now, patchNotesData?.text, patchNotesData?.imageUrl, patchNotesData?.html),
     ];
+
+    // パッチ記事刷新S5 F-S5-1（opt-in・既定off）: 未適用（本番未反映）の次パッチの公式ノートが
+    // 既に公開されていれば、先行速報アイテムを追加する。envが無効（既定）ならこのブロック自体を
+    // 実行しないため、収集は現状と完全同一（回帰ゼロ）。取得失敗（404/未公開等）は
+    // fetchPatchNotesData が例外を投げずnullを返すため、そのまま現状（確定パッチのみ）にフォールバックする。
+    if (isPatchPreviewModeEnabled()) {
+      const nextVersion = nextDdragonVersion(latestVersion);
+      if (nextVersion !== latestVersion) {
+        const previewData = await fetchPatchNotesData(nextVersion);
+        if (previewData) {
+          items.push(
+            buildPatchItem(nextVersion, now, previewData.text, previewData.imageUrl, previewData.html, true),
+          );
+        }
+      }
+    }
+
+    return items;
   }
 }

@@ -84,7 +84,7 @@ function slugForPost(postId: string): string {
 }
 
 /** Post.media（JSON、形は収集アダプタ依存の`{ imageUrl, url }`等）からimageUrlだけを安全に取り出す。 */
-function extractPostImageUrl(media: Prisma.JsonValue | null): string | null {
+export function extractPostImageUrl(media: Prisma.JsonValue | null): string | null {
   if (media && typeof media === "object" && !Array.isArray(media)) {
     const value = (media as Record<string, unknown>).imageUrl;
     if (typeof value === "string") return value;
@@ -97,12 +97,24 @@ function extractPostImageUrl(media: Prisma.JsonValue | null): string | null {
  * DBスキーマ変更を避けるため既存のJSON列（media）にキー追加する形でpersist-posts.tsが保存している。
  * 他ソース・未設定時はnull（compose.ts側がDOM抽出をスキップし従来の平テキスト経路にフォールバックする）。
  */
-function extractPostHtml(media: Prisma.JsonValue | null): string | null {
+export function extractPostHtml(media: Prisma.JsonValue | null): string | null {
   if (media && typeof media === "object" && !Array.isArray(media)) {
     const value = (media as Record<string, unknown>).html;
     if (typeof value === "string") return value;
   }
   return null;
+}
+
+/**
+ * Post.media から未適用パッチの先行速報フラグ（`patchPreview`キー、パッチ記事刷新S5 F-S5-2）を
+ * 安全に取り出す。他ソース・未設定時はfalse（compose.tsは速報バッジを付与しない＝従来どおり）。
+ * `confirmPatchPreviewArticles`（S5 F-S5-3）が「Post側は既に本番反映済みか」の判定にも再利用する。
+ */
+export function extractPostPatchPreview(media: Prisma.JsonValue | null): boolean {
+  if (media && typeof media === "object" && !Array.isArray(media)) {
+    return (media as Record<string, unknown>).patchPreview === true;
+  }
+  return false;
 }
 
 /**
@@ -259,6 +271,10 @@ export async function generateArticlesFromHotPosts(
       isControversial: hotness.isControversial,
       // 成長G7（F-G7-4）: x由来の引用フォールバック出典表記（作者名）に使う。他ソースは未使用。
       author: post.author ?? undefined,
+      // パッチ記事刷新S5（F-S5-2, opt-in）: Post.mediaのpatchPreviewフラグが立っていれば
+      // 未適用パッチの先行速報記事として速報バッジを本文に付与する（compose.ts側）。
+      // 通常（フラグ無し）はfalseで従来と完全同一。
+      isPatchPreview: extractPostPatchPreview(post.media),
     };
 
     try {

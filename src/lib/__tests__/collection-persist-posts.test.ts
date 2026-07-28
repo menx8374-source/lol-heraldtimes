@@ -207,6 +207,76 @@ describe("persistPosts（リファクタリングS2 F-S2-2）", () => {
     expect(post.media).toEqual({ imageUrl: "https://example.com/og.png" });
   });
 
+  it("item.patchPreview=trueの場合、DBスキーマ変更なしでPost.media.patchPreviewにキー追加される(パッチ記事刷新S5 F-S5-2)", async () => {
+    const now = new Date("2026-07-28T10:00:00+09:00");
+    const html = '<div class="patch-change-block"><h3 class="change-title">コーキ</h3></div>';
+    await persistPosts(
+      [
+        item({
+          externalId: "patch-26-15-preview",
+          media: undefined,
+          imageUrl: "https://www.leagueoflegends.com/og-image.png",
+          html,
+          patchPreview: true,
+        }),
+      ],
+      "riot",
+      now,
+    );
+
+    const post = await prisma.post.findUniqueOrThrow({
+      where: { sourceType_externalId: { sourceType: "riot", externalId: "patch-26-15-preview" } },
+    });
+    expect(post.media).toEqual({
+      imageUrl: "https://www.leagueoflegends.com/og-image.png",
+      html,
+      patchPreview: true,
+    });
+  });
+
+  it("item.patchPreviewが未指定/falseの場合はPost.mediaにpatchPreviewキーが追加されない(回帰なし)", async () => {
+    const now = new Date("2026-07-28T10:00:00+09:00");
+    await persistPosts(
+      [item({ externalId: "patch-26-14-confirmed", media: undefined, imageUrl: "https://example.com/og.png" })],
+      "riot",
+      now,
+    );
+
+    const post = await prisma.post.findUniqueOrThrow({
+      where: { sourceType_externalId: { sourceType: "riot", externalId: "patch-26-14-confirmed" } },
+    });
+    expect(post.media).toEqual({ imageUrl: "https://example.com/og.png" });
+  });
+
+  it("本番反映後に再persistされる際、patchPreviewを伴わないアイテムでupdateすると既存のpatchPreviewフラグが外れる(F-S5-3の前提となるPost側の状態遷移)。" +
+    "実運用ではbuildPatchItemがhasPatchNotes=trueのとき常にhtmlも設定するため、確定パッチの再persistでも" +
+    "media列自体は(html付きで)明示的に上書きされる(Prismaのundefinedフィールドが更新をスキップする挙動を回避できる)", async () => {
+    const t0 = new Date("2026-07-28T10:00:00+09:00");
+    const previewHtml = "<p>preview html</p>";
+    await persistPosts(
+      [item({ externalId: "patch-26-15-transition", media: undefined, html: previewHtml, patchPreview: true })],
+      "riot",
+      t0,
+    );
+    const previewPost = await prisma.post.findUniqueOrThrow({
+      where: { sourceType_externalId: { sourceType: "riot", externalId: "patch-26-15-transition" } },
+    });
+    expect(previewPost.media).toEqual({ html: previewHtml, patchPreview: true });
+
+    // 本番反映後: 確定パッチとして同じexternalIdで再度persistされる(patchPreviewフラグ無し、html付き)。
+    const t1 = new Date("2026-07-29T10:00:00+09:00");
+    const confirmedHtml = "<p>confirmed html</p>";
+    await persistPosts(
+      [item({ externalId: "patch-26-15-transition", media: undefined, html: confirmedHtml })],
+      "riot",
+      t1,
+    );
+    const confirmedPost = await prisma.post.findUniqueOrThrow({
+      where: { sourceType_externalId: { sourceType: "riot", externalId: "patch-26-15-transition" } },
+    });
+    expect(confirmedPost.media).toEqual({ html: confirmedHtml });
+  });
+
   it("item.categoryが指定されていればPost.categoryに保存される(リファクタリングS7a F-S7a-3)", async () => {
     const now = new Date("2026-07-27T10:00:00+09:00");
     await persistPosts(

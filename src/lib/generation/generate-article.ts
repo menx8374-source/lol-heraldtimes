@@ -68,6 +68,12 @@ export type GenerationCandidate = {
    * 出典表記（tweet URL・作者名）に使う。他ソースは既存どおり匿名化ハンドルを使うため未使用。
    */
   author?: string | null;
+  /**
+   * パッチ記事刷新S5（F-S5-2, opt-in）: 未適用パッチの先行速報アイテムか（Post.mediaの
+   * patchPreviewフラグ由来）。compose.ts が本文先頭に速報バッジを付与するかの判定に使う。
+   * 未設定/false（既定）では従来と完全同一（回帰ゼロ）。
+   */
+  isPatchPreview?: boolean;
 };
 
 export type GeneratedArticle = {

@@ -7,12 +7,14 @@
  *   レス選別は既定でAI不使用（`REACTION_SELECT_MODE`、リファクタリングS3 F-S3-3）。
  * - Riot公式（riot）: 「事実の速報＋要点整理」構成（従来どおり、引用ブロックは主従関係を保つ）。
  */
-import type {
-  ArticleBodyBlock,
-  ArticleBodyEmbedBlock,
-  ArticleBodyEmphasisColor,
-  ArticleBodyPatchChangeBlock,
-  ArticleBodyReactionBlock,
+import {
+  PATCH_PREVIEW_BADGE_TEXT,
+  isPatchPreviewArticleBody,
+  type ArticleBodyBlock,
+  type ArticleBodyEmbedBlock,
+  type ArticleBodyEmphasisColor,
+  type ArticleBodyPatchChangeBlock,
+  type ArticleBodyReactionBlock,
 } from "@/lib/article-body";
 import type { SourceType } from "@/lib/collection/types";
 import type { LLMClient, GenerationTask } from "@/lib/generation/llm-client";
@@ -33,6 +35,11 @@ import {
   type PatchChangeTarget,
 } from "@/lib/generation/patch-notes-parser";
 
+// パッチ記事刷新S5 F-S5-3: 本文の速報バッジ検出は`article-body.ts`が単一の真実源（構造判定は
+// ArticleBodyBlock[]専用のヘルパの置き場所に揃える）。既存の呼び出し元（confirm-patch-preview等）が
+// `@/lib/generation/compose`からもimportできるよう、そのままここで再エクスポートする。
+export { isPatchPreviewArticleBody };
+
 export type GenerationCandidateInput = {
   sourceType: SourceType;
   title: string;
@@ -48,6 +55,12 @@ export type GenerationCandidateInput = {
    * `parsePatchNotesHtml`でDOM抽出できれば誤帰属ゼロの詳細本文を組み立てる。未取得/他ソースは未設定。
    */
   html?: string | null;
+  /**
+   * パッチ記事刷新S5（F-S5-2, opt-in）: 未適用パッチ（本番未反映の次パッチ）の先行速報アイテムか。
+   * `PATCH_PREVIEW_MODE=on` のときのみpost-pipeline.tsがPost.mediaのpatchPreviewフラグから渡す。
+   * trueのとき本文先頭に速報バッジ段落を追加する。未設定/false（既定）では従来と完全同一。
+   */
+  isPatchPreview?: boolean;
 };
 
 /** レス投稿者の匿名化ハンドル（実名・個人特定情報は出さない）。ソース種別ごとに固定。 */
@@ -1971,13 +1984,71 @@ async function composeXBody(
   return blocks;
 }
 
+/** 本文の先頭に速報バッジ段落を追加する（S5 F-S5-2、バッジ本文の定義は`article-body.ts`）。 */
+function prependPatchPreviewBadge(body: ArticleBodyBlock[]): ArticleBodyBlock[] {
+  return [{ type: "paragraph", text: PATCH_PREVIEW_BADGE_TEXT }, ...body];
+}
+
 /**
- * 記事化候補から構造化された本文ブロック配列を組み立てる（F7）。
- * sourceType が "riot" なら、既定(env `PATCH_ARTICLE_MODE`未設定/"detailed")では、実パッチノート本文
+ * riot（Riot公式データ/パッチノート）由来の本文組み立て（速報バッジを除く本体部分）。
+ * 既定(env `PATCH_ARTICLE_MODE`未設定/"detailed")では、実パッチノート本文
  * （PATCH_NOTES_MIN_LENGTH以上）からチャンピオンごとの変更点が決定的抽出できればlol-times風の詳細記事
  * （画像＋変更前後、拡張E53 F-E53-1）にし、抽出できない／本文が無い場合は事実速報にフォールバックする。
  * "fact" では本文の長短に関わらず常に事実速報（拡張E41 F-E41-2）。"summary" なら従来のE40の3段
  * （LLM要約のまとめ記事→決定的抽出→クリーン定型フォールバック、contentが短い汎用文なら速報＋要点整理）。
+ */
+async function composeRiotArticleBody(
+  candidate: GenerationCandidateInput,
+  llmClient: LLMClient,
+): Promise<ArticleBodyBlock[]> {
+  const mode = patchArticleMode();
+  if (mode === "fact") {
+    return composePatchFactFlashBody(candidate);
+  }
+  if (mode === "detailed") {
+    // パッチ記事刷新S2 F-S2-2: 優先順は DOM抽出 > 平テキスト抽出 > 事実速報。
+    // 生HTML（candidate.html、riot-datadragon.tsが保持・post-pipeline.tsが配線）があれば、
+    // まずDOM構造パーサ（誤帰属ゼロ）を試みる。DOM構造変化・未取得等で空配列の場合のみ
+    // 平テキスト経路（フォールバック、S1以前の既存ロジック）に落ちる。
+    if (candidate.html) {
+      const targets = parsePatchNotesHtml(candidate.html);
+      if (targets.length > 0) return composeDetailedPatchBody(candidate, targets);
+    }
+    // 実パッチノート本文（汎用の短いcontentではない）と見なせるときのみ、決定的（逐語）抽出を試みる。
+    // 拡張E54 F-E54-1: チャンピオン節に加え、チャンピオン以外（アイテム/システム等）の変更点も
+    // その回のパッチに存在するものだけ臨機応変に抽出する。
+    if (candidate.content.length >= PATCH_NOTES_MIN_LENGTH) {
+      const sections = extractPatchSectionsDeterministic(candidate.content);
+      if (sections) return composeDetailedPatchBodyFromText(candidate, sections);
+    }
+    // 変更点が抽出できない、または本文が無い（mock等）場合は事実速報にフォールバックする
+    // （壊れない・捏造しない、拡張E53 F-E53-1）。
+    return composePatchFactFlashBody(candidate);
+  }
+  // "summary"モード: 従来どおり、content が実パッチノート本文（汎用の短いcontentではない）と
+  // みなせるときのみLLM要約を試みる。
+  if (candidate.content.length >= PATCH_NOTES_MIN_LENGTH) {
+    const patchSummaryBody = await composePatchSummaryBody(candidate, llmClient);
+    if (patchSummaryBody) return patchSummaryBody;
+    // 要約失敗（mock・APIエラー・解析失敗・全カテゴリ空等）時は、まずLLM非依存の決定的（逐語）抽出
+    // （拡張E40 F-E40-2）を試みる。「⇒」を含む変更行がチャンピオン節から取れれば、ノイズ断片・
+    // 破綻文を含まない「主な変更点」本文をそのまま採用する（捏造無しの実用的な本文になる）。
+    const deterministicChanges = extractPatchChangesDeterministic(candidate.content);
+    console.log(`[patch] deterministic changes champions=${deterministicChanges?.length ?? 0}`);
+    if (deterministicChanges) return composeDeterministicPatchChangesBody(deterministicChanges);
+    // 決定的抽出も空（本文が取れていない可能性）の場合のみ、パッチノート本文
+    // （ページ全体ダンプでノイズ込み）を composeFactBody（逐文リライト）には渡さず、
+    // ノイズ断片・破綻文を含まないクリーンな簡易パッチ記事にする（拡張E35 F-E35-3）。
+    return composeCleanPatchFallbackBody(candidate);
+  }
+  // 本文が無い（短い汎用content）の場合は従来どおり速報＋要点整理（composeFactBody）でよい。
+  const sentences = splitIntoSentences(candidate.content);
+  return composeFactBody(candidate, sentences, llmClient);
+}
+
+/**
+ * 記事化候補から構造化された本文ブロック配列を組み立てる（F7）。
+ * sourceType が "riot" なら上記 `composeRiotArticleBody` を使う（S5 F-S5-2で速報バッジを付与）。
  * "riot-news"（リファクタリングS7b）なら image→見出し→短い要約→公式リンクの定型構成
  * （composeRiotNewsBody）。"x"（成長G7）なら見出し→独自導入→tweet埋め込み/短い引用＋出典→独自結び
  * の構成（composeXBody、著作権法32条の適法引用に配慮）。それ以外（5ch/reddit）ならまとめ速報レス形式にする。
@@ -1987,49 +2058,11 @@ export async function composeArticleBody(
   llmClient: LLMClient,
 ): Promise<ArticleBodyBlock[]> {
   if (candidate.sourceType === "riot") {
-    const mode = patchArticleMode();
-    if (mode === "fact") {
-      return composePatchFactFlashBody(candidate);
-    }
-    if (mode === "detailed") {
-      // パッチ記事刷新S2 F-S2-2: 優先順は DOM抽出 > 平テキスト抽出 > 事実速報。
-      // 生HTML（candidate.html、riot-datadragon.tsが保持・post-pipeline.tsが配線）があれば、
-      // まずDOM構造パーサ（誤帰属ゼロ）を試みる。DOM構造変化・未取得等で空配列の場合のみ
-      // 平テキスト経路（フォールバック、S1以前の既存ロジック）に落ちる。
-      if (candidate.html) {
-        const targets = parsePatchNotesHtml(candidate.html);
-        if (targets.length > 0) return composeDetailedPatchBody(candidate, targets);
-      }
-      // 実パッチノート本文（汎用の短いcontentではない）と見なせるときのみ、決定的（逐語）抽出を試みる。
-      // 拡張E54 F-E54-1: チャンピオン節に加え、チャンピオン以外（アイテム/システム等）の変更点も
-      // その回のパッチに存在するものだけ臨機応変に抽出する。
-      if (candidate.content.length >= PATCH_NOTES_MIN_LENGTH) {
-        const sections = extractPatchSectionsDeterministic(candidate.content);
-        if (sections) return composeDetailedPatchBodyFromText(candidate, sections);
-      }
-      // 変更点が抽出できない、または本文が無い（mock等）場合は事実速報にフォールバックする
-      // （壊れない・捏造しない、拡張E53 F-E53-1）。
-      return composePatchFactFlashBody(candidate);
-    }
-    // "summary"モード: 従来どおり、content が実パッチノート本文（汎用の短いcontentではない）と
-    // みなせるときのみLLM要約を試みる。
-    if (candidate.content.length >= PATCH_NOTES_MIN_LENGTH) {
-      const patchSummaryBody = await composePatchSummaryBody(candidate, llmClient);
-      if (patchSummaryBody) return patchSummaryBody;
-      // 要約失敗（mock・APIエラー・解析失敗・全カテゴリ空等）時は、まずLLM非依存の決定的（逐語）抽出
-      // （拡張E40 F-E40-2）を試みる。「⇒」を含む変更行がチャンピオン節から取れれば、ノイズ断片・
-      // 破綻文を含まない「主な変更点」本文をそのまま採用する（捏造無しの実用的な本文になる）。
-      const deterministicChanges = extractPatchChangesDeterministic(candidate.content);
-      console.log(`[patch] deterministic changes champions=${deterministicChanges?.length ?? 0}`);
-      if (deterministicChanges) return composeDeterministicPatchChangesBody(deterministicChanges);
-      // 決定的抽出も空（本文が取れていない可能性）の場合のみ、パッチノート本文
-      // （ページ全体ダンプでノイズ込み）を composeFactBody（逐文リライト）には渡さず、
-      // ノイズ断片・破綻文を含まないクリーンな簡易パッチ記事にする（拡張E35 F-E35-3）。
-      return composeCleanPatchFallbackBody(candidate);
-    }
-    // 本文が無い（短い汎用content）の場合は従来どおり速報＋要点整理（composeFactBody）でよい。
-    const sentences = splitIntoSentences(candidate.content);
-    return composeFactBody(candidate, sentences, llmClient);
+    const body = await composeRiotArticleBody(candidate, llmClient);
+    // パッチ記事刷新S5 F-S5-2（opt-in）: 未適用パッチの先行速報アイテム（post-pipeline.tsが
+    // Post.mediaのpatchPreviewフラグから渡す）のときだけ、本文の先頭に速報バッジ段落を追加する。
+    // 通常（isPatchPreview未設定/false）は従来と完全同一（回帰ゼロ）。
+    return candidate.isPatchPreview ? prependPatchPreviewBadge(body) : body;
   }
   if (candidate.sourceType === "riot-news") {
     return composeRiotNewsBody(candidate, llmClient);

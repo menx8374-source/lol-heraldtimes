@@ -6,6 +6,8 @@ import {
   extractOgImageUrl,
   fetchPatchNotesData,
   fetchPatchNotesText,
+  isPatchPreviewModeEnabled,
+  nextDdragonVersion,
   PATCH_NOTES_MIN_LENGTH,
   PATCH_NOTES_MAX_LENGTH,
 } from "@/lib/collection/adapters/riot-datadragon";
@@ -460,5 +462,138 @@ describe("RiotDataDragonAdapter.fetchItems", () => {
     );
     const adapter = new RiotDataDragonAdapter();
     await expect(adapter.fetchItems()).resolves.toEqual([]);
+  });
+});
+
+describe("純関数: isPatchPreviewModeEnabled / nextDdragonVersion（パッチ記事刷新S5 F-S5-1, opt-in）", () => {
+  const ORIGINAL_ENV = process.env.PATCH_PREVIEW_MODE;
+  afterEach(() => {
+    if (ORIGINAL_ENV === undefined) delete process.env.PATCH_PREVIEW_MODE;
+    else process.env.PATCH_PREVIEW_MODE = ORIGINAL_ENV;
+  });
+
+  it("PATCH_PREVIEW_MODE未設定/off時はfalse(既定・無効)", () => {
+    delete process.env.PATCH_PREVIEW_MODE;
+    expect(isPatchPreviewModeEnabled()).toBe(false);
+    process.env.PATCH_PREVIEW_MODE = "off";
+    expect(isPatchPreviewModeEnabled()).toBe(false);
+  });
+
+  it("PATCH_PREVIEW_MODE=on時のみtrue", () => {
+    process.env.PATCH_PREVIEW_MODE = "on";
+    expect(isPatchPreviewModeEnabled()).toBe(true);
+  });
+
+  it("nextDdragonVersionはminorを+1しrevisionを1に固定する", () => {
+    expect(nextDdragonVersion("16.14.1")).toBe("16.15.1");
+    expect(nextDdragonVersion("14.6.2")).toBe("14.7.1");
+  });
+
+  it("nextDdragonVersionはパース不能な形式をそのまま返す(例外を投げないフォールバック)", () => {
+    expect(nextDdragonVersion("invalid")).toBe("invalid");
+  });
+});
+
+describe("buildPatchItem（パッチ記事刷新S5 F-S5-2: isPreview引数）", () => {
+  it("isPreview未指定/falseでは従来と完全同一(回帰ゼロ)", () => {
+    const patchNotesText = "実際のパッチノート本文。".repeat(30);
+    const withoutArg = buildPatchItem("16.14.1", new Date(), patchNotesText);
+    const withFalse = buildPatchItem("16.14.1", new Date(), patchNotesText, null, null, false);
+    expect(withoutArg.title).toBe("【パッチ】26.14 の主な変更点まとめ");
+    expect(withoutArg.title).toBe(withFalse.title);
+    expect(withoutArg.patchPreview).toBeUndefined();
+    expect(withFalse.patchPreview).toBeUndefined();
+  });
+
+  it("isPreview=trueでは「【速報】」接頭辞が付きpatchPreview=trueになる(本文は逐語のまま変更しない)", () => {
+    const patchNotesText = "実際のパッチノート本文。".repeat(30);
+    const item = buildPatchItem("16.15.1", new Date(), patchNotesText, null, null, true);
+    expect(item.title).toBe("【速報】【パッチ】26.15 の主な変更点まとめ");
+    expect(item.content).toBe(patchNotesText);
+    expect(item.patchPreview).toBe(true);
+    expect(item.externalId).toBe("26.15");
+  });
+
+  it("isPreview=trueでも本文が短すぎる場合は汎用速報タイトルに接頭辞が付く", () => {
+    const item = buildPatchItem("16.15.1", new Date(), "短い本文", null, null, true);
+    expect(item.title).toBe("【速報】【パッチ】26.15 のゲームデータが公開");
+    expect(item.patchPreview).toBe(true);
+  });
+});
+
+describe("RiotDataDragonAdapter.fetchItems（パッチ記事刷新S5 F-S5-1, opt-in・未適用パッチの先行速報）", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete process.env.PATCH_PREVIEW_MODE;
+  });
+
+  const NEXT_PATCH_NOTE_URL = buildPatchNoteUrl("16.15.1"); // = 26.15 のURL
+  const CURRENT_PATCH_NOTE_URL = buildPatchNoteUrl("16.14.1"); // = 26.14 のURL
+
+  it("PATCH_PREVIEW_MODE未設定(既定off)では次パッチへのfetchが一切発生せず、確定パッチ1件のみを返す(回帰ゼロ)", async () => {
+    delete process.env.PATCH_PREVIEW_MODE;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === VERSIONS_URL) return jsonResponse(["16.14.1", "16.13.1"]);
+      if (url === CURRENT_PATCH_NOTE_URL) return textResponse("");
+      throw new Error(`unexpected url(オフ時は次パッチへのfetchが発生してはならない): ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new RiotDataDragonAdapter({ now: () => new Date("2026-07-25T00:00:00Z") });
+    const items = await adapter.fetchItems();
+
+    expect(items).toHaveLength(1);
+    expect(items[0].patchPreview).toBeUndefined();
+    const nextCall = fetchMock.mock.calls.find(([url]) => url === NEXT_PATCH_NOTE_URL);
+    expect(nextCall).toBeUndefined();
+  });
+
+  it("PATCH_PREVIEW_MODE=off(明示)でも次パッチへのfetchが発生せず確定パッチ1件のみ(回帰ゼロ)", async () => {
+    process.env.PATCH_PREVIEW_MODE = "off";
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === VERSIONS_URL) return jsonResponse(["16.14.1", "16.13.1"]);
+      throw new Error(`unexpected url: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new RiotDataDragonAdapter({ now: () => new Date("2026-07-25T00:00:00Z") });
+    const items = await adapter.fetchItems();
+    expect(items).toHaveLength(1);
+  });
+
+  it("PATCH_PREVIEW_MODE=onかつ次パッチノートが200(公開済み)ならpreviewアイテムが1件追加される", async () => {
+    process.env.PATCH_PREVIEW_MODE = "on";
+    const paragraph = "次パッチの実際の変更内容テキスト。".repeat(20); // 300字超
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === VERSIONS_URL) return jsonResponse(["16.14.1", "16.13.1"]);
+      if (url === CURRENT_PATCH_NOTE_URL) return textResponse("");
+      if (url === NEXT_PATCH_NOTE_URL) return textResponse(`<p>${paragraph}</p>`);
+      throw new Error(`unexpected url: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new RiotDataDragonAdapter({ now: () => new Date("2026-07-25T00:00:00Z") });
+    const items = await adapter.fetchItems();
+
+    expect(items).toHaveLength(2);
+    expect(items[0].patchPreview).toBeUndefined();
+    expect(items[1].patchPreview).toBe(true);
+    expect(items[1].title).toBe("【速報】【パッチ】26.15 の主な変更点まとめ");
+    expect(items[1].content).toContain(paragraph);
+    expect(items[1].externalId).toBe("26.15");
+  });
+
+  it("PATCH_PREVIEW_MODE=onだが次パッチノートが404(未公開)なら例外を投げず確定パッチ1件のみにフォールバックする", async () => {
+    process.env.PATCH_PREVIEW_MODE = "on";
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === VERSIONS_URL) return jsonResponse(["16.14.1", "16.13.1"]);
+      if (url === CURRENT_PATCH_NOTE_URL) return textResponse("");
+      if (url === NEXT_PATCH_NOTE_URL) return textResponse("", 404);
+      throw new Error(`unexpected url: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new RiotDataDragonAdapter({ now: () => new Date("2026-07-25T00:00:00Z") });
+    await expect(adapter.fetchItems()).resolves.toHaveLength(1);
   });
 });

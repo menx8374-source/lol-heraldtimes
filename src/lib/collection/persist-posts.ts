@@ -30,9 +30,16 @@ async function persistOneItem(item: RawCollectionItem, sourceType: SourceType, n
     const baseMedia = item.media ?? (item.imageUrl ? { imageUrl: item.imageUrl } : undefined);
     // パッチ記事刷新S2（F-S2-2）: DBスキーマ変更を避けるため、riot由来の生HTML（`item.html`）は
     // 既存のJSON列 `Post.media` にキー追加する形で保持する（未設定のソースは従来どおり無変更）。
+    // パッチ記事刷新S5（F-S5-2）: 同様に未適用パッチの先行速報フラグ（`item.patchPreview`）も
+    // `Post.media.patchPreview` として保持する。本番反映後に確定版として再persistされる際は
+    // このフラグが立たない（media全体が置き換わるため）ため、Post側のpreview/live状態を
+    // 「フラグの有無」でそのまま表現できる（DBスキーマ変更なし）。
+    const extraMediaKeys: Record<string, unknown> = {};
+    if (item.html) extraMediaKeys.html = item.html;
+    if (item.patchPreview) extraMediaKeys.patchPreview = true;
     const media = (
-      item.html
-        ? { ...((baseMedia && typeof baseMedia === "object" && !Array.isArray(baseMedia) ? baseMedia : {}) as object), html: item.html }
+      Object.keys(extraMediaKeys).length > 0
+        ? { ...((baseMedia && typeof baseMedia === "object" && !Array.isArray(baseMedia) ? baseMedia : {}) as object), ...extraMediaKeys }
         : baseMedia
     ) as Prisma.InputJsonValue | undefined;
     const post = await prisma.post.upsert({

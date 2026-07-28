@@ -69,6 +69,13 @@ export type RawCollectionItem = {
    * Post永続化ではDBスキーマ変更を避けるため`Post.media`（既存JSON列）に格納する。
    */
   html?: string;
+  /**
+   * パッチ記事刷新S5（F-S5-1・opt-in、既定未設定）: 未適用（本番未反映）の次パッチの
+   * 先行速報アイテムであることを示すフラグ。`riot-datadragon.ts`が`PATCH_PREVIEW_MODE=on`の
+   * ときのみ設定する。他ソース・offのときは未設定のまま（後方互換）。Post永続化ではDBスキーマ
+   * 変更を避けるため`Post.media`（既存JSON列）に格納する。
+   */
+  patchPreview?: boolean;
 };
 
 /** 出典URLを必ず持つ、保存可能な収集アイテム（共通フォーマット）。 */
@@ -98,6 +105,8 @@ export type CollectionItem = {
   category?: CategoryLabel;
   /** パッチ記事刷新S2（F-S2-2）: riot由来の平テキスト化前の生HTML。RawCollectionItemからそのまま引き継ぐ。 */
   html?: string;
+  /** パッチ記事刷新S5（F-S5-1・opt-in）: 未適用パッチの先行速報アイテムか。RawCollectionItemからそのまま引き継ぐ。 */
+  patchPreview?: boolean;
 };
 
 /** ソースごとのレート制限設定（F5: 取得件数上限・実行間隔）。 */
