@@ -921,9 +921,70 @@ function composeCleanPatchFallbackBody(candidate: GenerationCandidateInput): Art
  */
 export type PatchChampionChanges = { champion: string; changes: string[] };
 
+/**
+ * 決定的（逐語）抽出した「チャンピオン以外」の変更点セクション（拡張E54 F-E54-1）。
+ * アイテム/ルーン/アリーナ/システム/バグ修正等、チャンピオン節に属さない `⇒` 変更行を、
+ * 直前のセクション見出しらしい行でグルーピングしたもの。`heading` は本文中の実在する行
+ * （またはどの見出しにも紐づけられない場合の総称見出し）、`changes` は本文の部分文字列そのもの。
+ */
+export type PatchOtherSection = { heading: string; changes: string[] };
+
+/** `extractPatchSectionsDeterministic` の戻り値（拡張E54 F-E54-1）。 */
+export type PatchChangesSections = { champions: PatchChampionChanges[]; other: PatchOtherSection[] };
+
 /** チャンピオン節・変更行の有界化（読みやすさ・トークン節約）。 */
 const MAX_PATCH_CHAMPIONS = 12;
 const MAX_CHANGES_PER_CHAMPION = 5;
+
+/** チャンピオン以外のセクション・変更行の有界化（拡張E54 F-E54-1）。 */
+const MAX_OTHER_SECTIONS = 8;
+const MAX_CHANGES_PER_OTHER_SECTION = 8;
+
+/**
+ * セクション見出しらしい行の最大文字数（best-effort。長い文（intro/クレジット等）を誤って
+ * 見出し扱いしないための上限）。
+ */
+const OTHER_HEADING_MAX_LENGTH = 20;
+
+/**
+ * パッチノートの上位見出しに使われがちなキーワード（拡張E54 F-E54-1、best-effort。E54修正で
+ * アドホック見出し推定を廃止し、明示的なキーワードを含む行のみを見出しとみなす方式に一本化）。
+ * これらを含む短い行は、以降の `⇒` 変更行をグルーピングする新しいセクション見出しとみなす
+ * （チャンピオン節の途中でも、これに当たる行が来たらチャンピオン節を終えて非チャンピオン
+ * セクションへ切り替える）。スキル記号(Q/W/E/R/固有スキル/パッシブ)や「〜のダメージ/反映率/
+ * 移動距離/生成量」等の項目ラベルはここに含めない（見出し化しない）。
+ */
+const SECTION_KEYWORD_HEADING_TERMS = [
+  "アイテム",
+  "ルーン",
+  "アリーナ",
+  "メイヘム",
+  "システム",
+  "バグ修正",
+  "その他",
+];
+
+/** どの見出しキーワードにも該当しない変更点をまとめる総称見出し。 */
+const GENERIC_OTHER_HEADING = "その他の変更点";
+
+/** 行がセクション見出しキーワードを含む短い行か（大文字/表記ゆれの厳密一致は狙わないbest-effort）。 */
+function isSectionKeywordHeadingLine(line: string): boolean {
+  return line.length <= OTHER_HEADING_MAX_LENGTH && SECTION_KEYWORD_HEADING_TERMS.some((k) => line.includes(k));
+}
+
+/**
+ * 指定した見出しの非チャンピオンセクションを取得し、無ければ新規作成する（拡張E54修正:
+ * 同一見出し（例「バグ修正」が本文中に複数回現れる）はマージ/重複排除し、別々のセクションを
+ * 作らない）。上限 `MAX_OTHER_SECTIONS` に達していて新規作成できない場合は null を返す。
+ */
+function getOrCreateOtherSection(otherSections: PatchOtherSection[], heading: string): PatchOtherSection | null {
+  const existing = otherSections.find((s) => s.heading === heading);
+  if (existing) return existing;
+  if (otherSections.length >= MAX_OTHER_SECTIONS) return null;
+  const created: PatchOtherSection = { heading, changes: [] };
+  otherSections.push(created);
+  return created;
+}
 
 /**
  * 変更後の値が次行に割れた場合に連結してよい最大行数（拡張E40b）。
@@ -951,28 +1012,77 @@ function looksLikeValueContinuation(line: string): boolean {
 }
 
 /**
- * 公式パッチノート本文（テキストダンプ）から、チャンピオン別の変更点をLLMを使わず決定的・逐語で
- * 抽出する純関数（拡張E40 F-E40-2、拡張E40bで値分割の復元に対応）。単独行がチャンピオン名
- * （`title.ts` の `CHAMPIONS`）と完全一致する行を節の開始とみなし、節内で「⇒」を含む行（値変更
- * マーカー）をその章の変更点として集める。直前の非空行（スキル名/項目名。それ自体が「⇒」を含む
- * 変更行やチャンピオン名でない場合のみ）を文脈として前置する。
- * 拡張E40b: 実データの `stripHtmlToText` 出力では「レベルアップごとの攻撃力\n：2 ⇒\n2.5」のように
- * 変更後の値が次行以降に割れることがある。矢印の直後（行末まで）が空の場合は、後続の非空行のうち
- * 「値の続きらしい短い行」を最大 `MAX_VALUE_CONTINUATION_LINES` 行まで連結して復元する（次の
- * チャンピオン節・次の項目ラベルに達したらそこで止める）。連結後も値が空のまま（＝本当に値が
- * 無い異常系）の場合は、矢印だけの不完全な行を残さずその変更点自体を捨てる。
- * チャンピオン最大 `MAX_PATCH_CHAMPIONS` 体・1体あたり変更行最大 `MAX_CHANGES_PER_CHAMPION` 行に
- * 有界化する。変更点が1件も取れなければ null を返す。連結はすべて本文の行をそのまま繋ぐだけで、
- * 新しい数値・文言を作らない（逐語維持・捏造禁止）。「⇒」を含まないノイズ行（intro/クレジット/
- * TFT導線等）は変更点として拾わない。
+ * 「⇒」を含む変更行（と、値が次行以降に割れた場合の継続行）を、指定の変更点リストへ逐語で追加する
+ * 共通処理（拡張E40b、拡張E54 F-E54-1でチャンピオン節・非チャンピオン節の双方から共用できるよう
+ * 切り出した）。矢印の直後（行末まで）が空なら、後続の非空行のうち「値の続きらしい短い行」を最大
+ * `MAX_VALUE_CONTINUATION_LINES` 行まで連結して復元する（次のチャンピオン名に達したらそこで止める）。
+ * 連結後も値が空のまま（＝本当に値が無い異常系）の場合は、矢印だけの不完全な行を残さずその変更点
+ * 自体を捨てる。`headingLabel`（チャンピオン名 or セクション見出し）と同一の `prevLine` は前置しない
+ * （見出し自身の重複防止）。連結はすべて本文の行をそのまま繋ぐだけで、新しい数値・文言を作らない
+ * （逐語維持・捏造禁止）。戻り値は次に処理すべき行indexと、次のprevLineとして使う値。
  */
-export function extractPatchChangesDeterministic(text: string): PatchChampionChanges[] | null {
+function consumeChangeLine(
+  lines: string[],
+  index: number,
+  headingLabel: string,
+  prevLine: string,
+  changesOut: string[],
+): { nextIndex: number; nextPrevLine: string } {
+  const line = lines[index];
+  let combined = line;
+  let consumed = 0;
+  while (arrowTrailingIsEmpty(combined) && consumed < MAX_VALUE_CONTINUATION_LINES) {
+    const nextLine = lines[index + 1 + consumed];
+    if (nextLine === undefined) break;
+    if ((CHAMPIONS as readonly string[]).includes(nextLine)) break; // 次のチャンピオン節に到達
+    if (!looksLikeValueContinuation(nextLine)) break; // 次の項目ラベル等が来たらそこで止める
+    combined = `${combined} ${nextLine}`;
+    consumed++;
+  }
+
+  if (!arrowTrailingIsEmpty(combined)) {
+    const hasUsableContext = prevLine.length > 0 && prevLine !== headingLabel && !prevLine.includes("⇒");
+    changesOut.push(hasUsableContext ? `${prevLine} ${combined}` : combined);
+  }
+
+  return { nextIndex: index + 1 + consumed, nextPrevLine: lines[index + consumed] };
+}
+
+/**
+ * 公式パッチノート本文（テキストダンプ）から、チャンピオン別の変更点と、チャンピオン以外
+ * （アイテム/ルーン/アリーナ/システム/バグ修正等）の変更点の両方をLLMを使わず決定的・逐語で
+ * 抽出する純関数（拡張E40 F-E40-2の一般化、拡張E54 F-E54-1。実データ検証(パッチ26.14)で
+ * スキル/ステータスのラベルが見出しに誤昇格する不具合が見つかったため修正: アドホック見出し
+ * ヒューリスティックは廃止し、非チャンピオンの見出しは `SECTION_KEYWORD_HEADING_TERMS` を
+ * 含む行のみに限定した）。
+ * - チャンピオン節: 従来どおり（単独行がチャンピオン名〈`title.ts` の `CHAMPIONS`〉と完全一致する行を
+ *   節の開始とみなし、節内で「⇒」を含む行を変更点として集める。直前の非空行をスキル名/項目名として
+ *   前置する。チャンピオン最大 `MAX_PATCH_CHAMPIONS` 体・1体あたり変更行最大 `MAX_CHANGES_PER_CHAMPION`
+ *   行に有界化）。
+ * - チャンピオン以外の節: チャンピオン節に属さない「⇒」変更行を、直前のセクション見出しらしい行
+ *   （`SECTION_KEYWORD_HEADING_TERMS` を含む短い行のみ。チャンピオン節の途中でこれに当たる行が来たら
+ *   チャンピオン節を終えて切り替える）でグルーピングする。それ以外の短い行（スキル記号Q/W/E/R/
+ *   固有スキル/パッシブや「〜のダメージ/反映率/移動距離/生成量」等の項目ラベル、リスト外
+ *   チャンピオンの見出しらしき行）は見出しにせず、単に文脈行（`prevLine`）として扱う。
+ *   どのキーワード見出しにも属さない「⇒」変更（リスト外チャンピオン分・章見出し外の変更）は、
+ *   個別に見出し化せず単一の総称見出し（`GENERIC_OTHER_HEADING`＝「その他の変更点」）にまとめる。
+ *   **同一見出し（例「バグ修正」が本文中に複数回現れる場合）は `getOrCreateOtherSection` で
+ *   マージ/重複排除**する（別々のセクションを作らない）。非チャンピオンのセクション最大
+ *   `MAX_OTHER_SECTIONS` 個・1セクションあたり変更行最大 `MAX_CHANGES_PER_OTHER_SECTION` 行に
+ *   有界化する。
+ * どちらの節も、その回のパッチに存在するものだけを返す（無ければ空配列＝出さない）。連結・前置は
+ * すべて本文の行をそのまま繋ぐだけで、新しい数値・文言を作らない（逐語維持・捏造禁止）。「⇒」を
+ * 含まないノイズ行（intro/クレジット/TFT導線等）は変更点として拾わない。
+ */
+function extractPatchSectionsInternal(text: string): PatchChangesSections {
   const lines = text
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter((l) => l.length > 0);
   const champions: PatchChampionChanges[] = [];
-  let current: PatchChampionChanges | null = null;
+  const otherSections: PatchOtherSection[] = [];
+  let currentChampion: PatchChampionChanges | null = null;
+  let currentOther: PatchOtherSection | null = null;
   let prevLine = "";
 
   let i = 0;
@@ -980,44 +1090,108 @@ export function extractPatchChangesDeterministic(text: string): PatchChampionCha
     const line = lines[i];
 
     if ((CHAMPIONS as readonly string[]).includes(line)) {
-      current = champions.length < MAX_PATCH_CHAMPIONS ? { champion: line, changes: [] } : null;
-      if (current) champions.push(current);
+      currentChampion = champions.length < MAX_PATCH_CHAMPIONS ? { champion: line, changes: [] } : null;
+      if (currentChampion) champions.push(currentChampion);
+      currentOther = null; // チャンピオン節に入ったら非チャンピオンのグルーピング先はリセットする
       prevLine = line;
       i++;
       continue;
     }
 
-    if (current && line.includes("⇒") && current.changes.length < MAX_CHANGES_PER_CHAMPION) {
-      // 矢印の直後(行末まで)が空なら、後続の非空行から変更後の値を連結して復元する（拡張E40b）。
-      let combined = line;
-      let consumed = 0;
-      while (arrowTrailingIsEmpty(combined) && consumed < MAX_VALUE_CONTINUATION_LINES) {
-        const nextLine = lines[i + 1 + consumed];
-        if (nextLine === undefined) break;
-        if ((CHAMPIONS as readonly string[]).includes(nextLine)) break; // 次のチャンピオン節に到達
-        if (!looksLikeValueContinuation(nextLine)) break; // 次の項目ラベル等が来たらそこで止める
-        combined = `${combined} ${nextLine}`;
-        consumed++;
+    if (currentChampion) {
+      if (line.includes("⇒")) {
+        if (currentChampion.changes.length < MAX_CHANGES_PER_CHAMPION) {
+          const { nextIndex, nextPrevLine } = consumeChangeLine(
+            lines,
+            i,
+            currentChampion.champion,
+            prevLine,
+            currentChampion.changes,
+          );
+          prevLine = nextPrevLine;
+          i = nextIndex;
+          continue;
+        }
+        prevLine = line;
+        i++;
+        continue;
       }
-
-      // 連結後も値が空のまま（本当に値が無い異常系）なら、矢印だけの不完全な行を残さず捨てる。
-      if (!arrowTrailingIsEmpty(combined)) {
-        const hasUsableContext =
-          prevLine.length > 0 && prevLine !== current.champion && !prevLine.includes("⇒");
-        current.changes.push(hasUsableContext ? `${prevLine} ${combined}` : combined);
+      // セクション見出しキーワードに当たる行が来たら、チャンピオン節を終えて非チャンピオン節へ切り替える。
+      if (isSectionKeywordHeadingLine(line)) {
+        currentChampion = null;
+        currentOther = getOrCreateOtherSection(otherSections, line);
+        prevLine = line;
+        i++;
+        continue;
       }
-
-      prevLine = lines[i + consumed];
-      i += 1 + consumed;
+      // それ以外の短い行（スキル記号・項目ラベル・リスト外チャンピオン名等）は見出し化せず、
+      // 文脈行として次の「⇒」行に前置されるだけに留める（アドホック見出し推定は廃止）。
+      prevLine = line;
+      i++;
       continue;
     }
 
+    // ここに来るのは「チャンピオン節の外」（currentChampionがnull）。
+    if (line.includes("⇒")) {
+      if (!currentOther) {
+        currentOther = getOrCreateOtherSection(otherSections, GENERIC_OTHER_HEADING);
+      }
+      if (currentOther && currentOther.changes.length < MAX_CHANGES_PER_OTHER_SECTION) {
+        const { nextIndex, nextPrevLine } = consumeChangeLine(
+          lines,
+          i,
+          currentOther.heading,
+          prevLine,
+          currentOther.changes,
+        );
+        prevLine = nextPrevLine;
+        i = nextIndex;
+        continue;
+      }
+      prevLine = line;
+      i++;
+      continue;
+    }
+
+    if (isSectionKeywordHeadingLine(line)) {
+      currentOther = getOrCreateOtherSection(otherSections, line);
+      prevLine = line;
+      i++;
+      continue;
+    }
+
+    // キーワード見出しではない短い行（スキル記号・項目ラベル・リスト外チャンピオン名等）は見出しに
+    // 昇格しない（アドホック見出し推定を廃止）。文脈行としてのみ保持する。
     prevLine = line;
     i++;
   }
 
-  const withChanges = champions.filter((c) => c.changes.length > 0);
-  return withChanges.length > 0 ? withChanges : null;
+  return {
+    champions: champions.filter((c) => c.changes.length > 0),
+    other: otherSections.filter((s) => s.changes.length > 0),
+  };
+}
+
+/**
+ * 公式パッチノート本文からチャンピオン別の変更点のみを決定的・逐語で抽出する（拡張E40 F-E40-2）。
+ * 拡張E54 F-E54-1で内部実装は `extractPatchSectionsInternal`（チャンピオン以外の変更も併せて
+ * 抽出する一般化版）の薄いラッパーになったが、戻り値・挙動は従来どおり（チャンピオン配列のみ、
+ * 1件も無ければnull）。"summary"モード（`composeDeterministicPatchChangesBody`）はこちらを使い続ける。
+ */
+export function extractPatchChangesDeterministic(text: string): PatchChampionChanges[] | null {
+  const { champions } = extractPatchSectionsInternal(text);
+  return champions.length > 0 ? champions : null;
+}
+
+/**
+ * 公式パッチノート本文からチャンピオン別の変更点と、チャンピオン以外（アイテム/システム等）の
+ * 変更点セクションの両方を決定的・逐語で抽出する（拡張E54 F-E54-1、"detailed"モードが使う）。
+ * どちらも1件も取れなければ null を返す（呼び出し側が事実速報にフォールバックする）。
+ */
+export function extractPatchSectionsDeterministic(text: string): PatchChangesSections | null {
+  const sections = extractPatchSectionsInternal(text);
+  if (sections.champions.length === 0 && sections.other.length === 0) return null;
+  return sections;
 }
 
 /**
@@ -1038,19 +1212,23 @@ function composeDeterministicPatchChangesBody(
 }
 
 /**
- * detailed パッチ本文（拡張E53 F-E53-1、lol-times風の詳細記事）を組み立てる。
- * `extractPatchChangesDeterministic` が返した逐語の変更点をチャンピオンごとにセクション化し、
- * 各セクションにチャンピオンの公式スプラッシュ画像（`championNameToId` で解決できた場合のみ）を添える。
+ * detailed パッチ本文（拡張E53 F-E53-1、lol-times風の詳細記事。拡張E54 F-E54-1でチャンピオン以外の
+ * 変更点にも対応）を組み立てる。`extractPatchSectionsDeterministic` が返した逐語の変更点を
+ * チャンピオンごと・チャンピオン以外のセクションごとにグループ化して表示する。
  * 1. `candidate.imageUrl`（og:image バナー）が安全なhttps画像URLなら先頭に画像ブロック。
  * 2. 見出し「パッチ<番号> の変更点」＋短い導入段落（一般的事実のみ、捏造なし）。
- * 3. チャンピオンごと: 見出し（チャンピオン名）→ 画像ブロック（id解決できた場合のみ・省略時はテキストのみ）
- *    → 変更点の段落（本文の部分文字列そのまま、逐語維持）。
- * 4. 出典URLが安全なhttpsなら公式リンクボタン（linkButton）。
+ * 3. チャンピオンの変更（あれば）: チャンピオンごとに見出し（チャンピオン名）→ 画像ブロック
+ *    （`championNameToId` で解決できた場合のみ・省略時はテキストのみ）→ 変更点の段落
+ *    （本文の部分文字列そのまま、逐語維持）。
+ * 4. チャンピオン以外の変更（あれば）: セクションごとに見出し（アイテム/システム等の見出し）
+ *    → 変更点の段落（画像は付けない・テキストのみ）。
+ * 5. 出典URLが安全なhttpsなら公式リンクボタン（linkButton）。
+ * 3・4はその回のパッチに存在するものだけを出す（臨機応変。無い種類の節は出さない）。
  * AIは使わない（決定的抽出＋公式画像URLの組み立てのみ）。
  */
 function composeDetailedPatchBody(
   candidate: GenerationCandidateInput,
-  changes: PatchChampionChanges[],
+  sections: PatchChangesSections,
 ): ArticleBodyBlock[] {
   const patchNumber = extractPatchNumberLabel(candidate);
   const label = patchNumber ? `パッチ${patchNumber}` : "今回のパッチ";
@@ -1074,7 +1252,7 @@ function composeDetailedPatchBody(
       "公式パッチノートに記載されているチャンピオンごとの主な変更点を、変更前後の数値とあわせてまとめます。",
   });
 
-  for (const c of changes) {
+  for (const c of sections.champions) {
     blocks.push({ type: "heading", text: c.champion });
     const championId = championNameToId(c.champion);
     if (championId) {
@@ -1086,6 +1264,15 @@ function composeDetailedPatchBody(
       });
     }
     for (const change of c.changes) {
+      blocks.push({ type: "paragraph", text: change });
+    }
+  }
+
+  // チャンピオン以外の変更（アイテム/ルーン/アリーナ/システム/バグ修正等、拡張E54 F-E54-1）。
+  // 画像は付けずテキストのみ。存在するセクションだけを臨機応変に出す。
+  for (const s of sections.other) {
+    blocks.push({ type: "heading", text: s.heading });
+    for (const change of s.changes) {
       blocks.push({ type: "paragraph", text: change });
     }
   }
@@ -1287,9 +1474,11 @@ export async function composeArticleBody(
     }
     if (mode === "detailed") {
       // 実パッチノート本文（汎用の短いcontentではない）と見なせるときのみ、決定的（逐語）抽出を試みる。
+      // 拡張E54 F-E54-1: チャンピオン節に加え、チャンピオン以外（アイテム/システム等）の変更点も
+      // その回のパッチに存在するものだけ臨機応変に抽出する。
       if (candidate.content.length >= PATCH_NOTES_MIN_LENGTH) {
-        const deterministicChanges = extractPatchChangesDeterministic(candidate.content);
-        if (deterministicChanges) return composeDetailedPatchBody(candidate, deterministicChanges);
+        const sections = extractPatchSectionsDeterministic(candidate.content);
+        if (sections) return composeDetailedPatchBody(candidate, sections);
       }
       // 変更点が抽出できない、または本文が無い（mock等）場合は事実速報にフォールバックする
       // （壊れない・捏造しない、拡張E53 F-E53-1）。
