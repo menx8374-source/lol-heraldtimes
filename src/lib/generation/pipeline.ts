@@ -24,6 +24,9 @@ import { parseArticleBody } from "@/lib/article-body";
 import { bodyBlocksToText } from "@/lib/search";
 import { moderateArticleContent } from "@/lib/moderation/moderate";
 import { fetchChampionNameToIdMap, type ChampionNameToIdMap } from "@/lib/generation/champion-thumbnail";
+import { getExemptSourceTypes } from "@/lib/hotness/config";
+import { getPublishScheduleMode } from "@/lib/pipeline/config";
+import { nextPublishSlots } from "@/lib/generation/publish-schedule";
 
 /** 重複判定の比較対象にする既存公開記事の上限件数（記事数増加時のコスト有界化。related-articles.ts と同じ考え方）。 */
 const DUPLICATE_CHECK_POOL = 200;
@@ -56,8 +59,11 @@ export type GenerationRunResult =
       status: "success";
       articleId: string;
       slug: string;
-      /** F9の安全フィルタ判定結果。held のときは heldReason に理由コードが入る。 */
-      publicationStatus: "published" | "held";
+      /**
+       * F9の安全フィルタ判定結果＋成長G6の公開状態。held のときは heldReason に理由コードが入る。
+       * "scheduled": スケジュール分散モードで公開スロットへ予約された（まだ非公開。DBのstatus="scheduled"に対応）。
+       */
+      publicationStatus: "published" | "held" | "scheduled";
       heldReason?: string;
     }
   | { collectedItemId: string; status: "failure"; errorMessage: string };
@@ -96,6 +102,10 @@ export type GenerationRunOptions = {
    * - Mapを直接渡す: そのMapをそのまま使う（テストでのスタブ差し替え用）。
    */
   championMap?: ChampionNameToIdMap | null;
+  /**
+   * 投稿スケジュール分散（成長G6 F-G6-2）のスロット計算基準時刻（テスト注入用）。未指定時は new Date()。
+   */
+  now?: Date;
 };
 
 /**
@@ -135,6 +145,13 @@ export async function generateArticlesForQueue(
   const championMap: ChampionNameToIdMap | undefined =
     options.championMap === null ? undefined : options.championMap ?? (await fetchChampionNameToIdMap());
 
+  // 投稿スケジュール分散（成長G6 F-G6-2）: 既定"immediate"では以下は一切参照されず、
+  // 従来どおり即時publishedになる（挙動を1バイトも変えない）。
+  const now = options.now ?? new Date();
+  const scheduleMode = getPublishScheduleMode();
+  const exemptSourceTypes = getExemptSourceTypes();
+  let scheduledSlotCount = 0;
+
   for (const item of candidates) {
     const candidate: GenerationCandidate = {
       id: item.id,
@@ -156,6 +173,26 @@ export async function generateArticlesForQueue(
       );
       const isPublished = moderation.status === "published";
 
+      // 投稿スケジュール分散（成長G6 F-G6-2）: mode="immediate"（既定）では常にelse分岐に入り、
+      // 従来どおり status="published"/publishedAt=new Date() のまま（挙動は1バイトも変わらない）。
+      // mode="schedule"かつ免除ソース(riot/riot-news)以外の場合のみ、公開スロットへ予約する。
+      let articleStatus: "published" | "held" | "scheduled";
+      let publishedAt: Date;
+      let scheduledAt: Date | null = null;
+      if (!isPublished) {
+        articleStatus = "held";
+        publishedAt = new Date();
+      } else if (scheduleMode === "schedule" && !exemptSourceTypes.includes(candidate.sourceType)) {
+        scheduledSlotCount += 1;
+        const slot = nextPublishSlots(now, scheduledSlotCount)[scheduledSlotCount - 1];
+        articleStatus = "scheduled";
+        scheduledAt = slot;
+        publishedAt = slot;
+      } else {
+        articleStatus = "published";
+        publishedAt = new Date();
+      }
+
       // Article作成・ArticleSource作成・CollectedItemの状態同期(articleId+status)は
       // 一貫性が崩れると二重記事化を招くため、必ず1つのトランザクションで原子的に行う。
       // 安全フィルタ不通過(held)でも Article 自体は作成し、CollectedItem は articled のまま
@@ -168,8 +205,9 @@ export async function generateArticlesForQueue(
             category: generated.category,
             body: generated.body,
             thumbnailUrl: generated.thumbnailUrl,
-            publishedAt: new Date(),
-            status: isPublished ? "published" : "held",
+            publishedAt,
+            status: articleStatus,
+            scheduledAt,
             heldReason: isPublished ? null : moderation.reason,
             heldDetail: isPublished ? null : moderation.detail,
             unconfirmed: isPublished ? moderation.unconfirmed : false,
@@ -211,7 +249,7 @@ export async function generateArticlesForQueue(
         status: "success",
         articleId,
         slug,
-        publicationStatus: isPublished ? "published" : "held",
+        publicationStatus: articleStatus,
         ...(isPublished ? {} : { heldReason: moderation.reason }),
       });
     } catch (err) {

@@ -36,7 +36,8 @@ import {
   type HotnessResult,
 } from "@/lib/hotness/evaluator";
 import { getExemptSourceTypes, getHotnessConfig } from "@/lib/hotness/config";
-import { getPipelineConfig } from "@/lib/pipeline/config";
+import { getPipelineConfig, getPublishScheduleMode } from "@/lib/pipeline/config";
+import { nextPublishSlots } from "@/lib/generation/publish-schedule";
 
 /** metricsをincludeしたPostの型（Prismaの生成型から導出、DB非依存の純関数にも渡せる）。 */
 type PostWithMetrics = Prisma.PostGetPayload<{ include: { metrics: true } }>;
@@ -47,8 +48,11 @@ export type PostGenerationRunResult =
       status: "success";
       articleId: string;
       slug: string;
-      /** F9の安全フィルタ判定結果。held のときは heldReason に理由コードが入る。 */
-      publicationStatus: "published" | "held";
+      /**
+       * F9の安全フィルタ判定結果＋成長G6の公開状態。held のときは heldReason に理由コードが入る。
+       * "scheduled": スケジュール分散モードで公開スロットへ予約された（まだ非公開。DBのstatus="scheduled"に対応）。
+       */
+      publicationStatus: "published" | "held" | "scheduled";
       heldReason?: string;
     }
   | { postId: string; status: "failure"; errorMessage: string };
@@ -220,6 +224,11 @@ export async function generateArticlesFromHotPosts(
   const championMap: ChampionNameToIdMap | undefined =
     options.championMap === null ? undefined : options.championMap ?? (await fetchChampionNameToIdMap());
 
+  // 投稿スケジュール分散（成長G6 F-G6-2）: 既定"immediate"では以下は一切参照されず、
+  // 従来どおり即時publishedになる（挙動を1バイトも変えない）。
+  const scheduleMode = getPublishScheduleMode();
+  let scheduledSlotCount = 0;
+
   for (const { post, hotness } of targetPosts) {
     const candidate: GenerationCandidate = {
       id: post.id,
@@ -246,6 +255,26 @@ export async function generateArticlesFromHotPosts(
       );
       const isPublished = moderation.status === "published";
 
+      // 投稿スケジュール分散（成長G6 F-G6-2）: mode="immediate"（既定）では常にelse分岐に入り、
+      // 従来どおり status="published"/publishedAt=new Date() のまま（挙動は1バイトも変わらない）。
+      // mode="schedule"かつ免除ソース(riot/riot-news)以外の場合のみ、公開スロットへ予約する。
+      let articleStatus: "published" | "held" | "scheduled";
+      let publishedAt: Date;
+      let scheduledAt: Date | null = null;
+      if (!isPublished) {
+        articleStatus = "held";
+        publishedAt = new Date();
+      } else if (scheduleMode === "schedule" && !exemptSourceTypes.includes(candidate.sourceType)) {
+        scheduledSlotCount += 1;
+        const slot = nextPublishSlots(now, scheduledSlotCount)[scheduledSlotCount - 1];
+        articleStatus = "scheduled";
+        scheduledAt = slot;
+        publishedAt = slot;
+      } else {
+        articleStatus = "published";
+        publishedAt = new Date();
+      }
+
       // Article作成＋Post紐付け(postId)を1つのトランザクションで原子的に行う。postIdは@uniqueのため、
       // 万一同一Postに対する多重実行があってもDB制約が二重記事化を防ぐ最後の砦になる。
       const articleId = await prisma.$transaction(async (tx) => {
@@ -256,8 +285,9 @@ export async function generateArticlesFromHotPosts(
             category: generated.category,
             body: generated.body,
             thumbnailUrl: generated.thumbnailUrl,
-            publishedAt: new Date(),
-            status: isPublished ? "published" : "held",
+            publishedAt,
+            status: articleStatus,
+            scheduledAt,
             heldReason: isPublished ? null : moderation.reason,
             heldDetail: isPublished ? null : moderation.detail,
             unconfirmed: isPublished ? moderation.unconfirmed : false,
@@ -295,7 +325,7 @@ export async function generateArticlesFromHotPosts(
         status: "success",
         articleId,
         slug,
-        publicationStatus: isPublished ? "published" : "held",
+        publicationStatus: articleStatus,
         ...(isPublished ? {} : { heldReason: moderation.reason }),
       });
     } catch (err) {

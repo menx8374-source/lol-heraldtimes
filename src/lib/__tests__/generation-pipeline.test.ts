@@ -5,13 +5,14 @@
  * 生成の成功/失敗自体は本テストの関心事ではない(処理対象になったかどうかだけを見る)ため、
  * 候補の内容は最小限にとどめる。
  */
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { generateArticlesForQueue } from "@/lib/generation/pipeline";
 import { MockLLMClient, type LLMClient, type LLMMessage } from "@/lib/generation/llm-client";
 import { SEO_SYSTEM_PROMPT } from "@/lib/generation/seo";
 import { normalizeUrl } from "@/lib/collection/normalize";
 import type { SourceType } from "@/lib/collection/types";
+import { nextPublishSlots } from "@/lib/generation/publish-schedule";
 
 async function resetDb() {
   await prisma.articleSource.deleteMany();
@@ -138,5 +139,43 @@ describe("generateArticlesForQueue（SEO列・タグの保存、リファクタ�
     expect(article?.ogTitle).toBeNull();
     expect(article?.ogDescription).toBeNull();
     expect(article?.tags).toHaveLength(0);
+  });
+});
+
+describe("generateArticlesForQueue（投稿スケジュール分散、成長G6 F-G6-2 ブリーフ テスト2・旧経路）", () => {
+  afterEach(() => {
+    delete process.env.PUBLISH_SCHEDULE_MODE;
+  });
+
+  const T0 = new Date("2026-07-27T00:00:00.000Z");
+
+  it("PUBLISH_SCHEDULE_MODE未設定(既定immediate)では従来どおり即時publishedになる(回帰なし)", async () => {
+    const id = await createQueuedItem("5ch");
+    const summary = await generateArticlesForQueue(llm, { championMap: null, now: T0 });
+    const result = summary.results.find((r) => r.collectedItemId === id);
+    expect(result).toMatchObject({ status: "success", publicationStatus: "published" });
+  });
+
+  it("PUBLISH_SCHEDULE_MODE=scheduleで反応記事(5ch)はscheduled＋scheduledAt割当、免除ソース(riot)は即時publishedのまま", async () => {
+    process.env.PUBLISH_SCHEDULE_MODE = "schedule";
+    const fivechId = await createQueuedItem("5ch");
+    const riotId = await createQueuedItem("riot");
+
+    const summary = await generateArticlesForQueue(llm, { championMap: null, now: T0 });
+
+    const fivechResult = summary.results.find((r) => r.collectedItemId === fivechId);
+    expect(fivechResult).toMatchObject({ status: "success", publicationStatus: "scheduled" });
+    const fivechArticleId =
+      fivechResult && fivechResult.status === "success" ? fivechResult.articleId : undefined;
+    const fivechArticle = await prisma.article.findUnique({ where: { id: fivechArticleId } });
+    expect(fivechArticle?.status).toBe("scheduled");
+    expect(fivechArticle?.scheduledAt?.toISOString()).toBe(nextPublishSlots(T0, 1)[0].toISOString());
+
+    const riotResult = summary.results.find((r) => r.collectedItemId === riotId);
+    expect(riotResult).toMatchObject({ status: "success", publicationStatus: "published" });
+    const riotArticleId = riotResult && riotResult.status === "success" ? riotResult.articleId : undefined;
+    const riotArticle = await prisma.article.findUnique({ where: { id: riotArticleId } });
+    expect(riotArticle?.status).toBe("published");
+    expect(riotArticle?.scheduledAt).toBeNull();
   });
 });

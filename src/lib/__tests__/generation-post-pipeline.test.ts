@@ -10,6 +10,7 @@ import { generateArticlesFromHotPosts } from "@/lib/generation/post-pipeline";
 import { MockLLMClient, type LLMClient, type LLMMessage } from "@/lib/generation/llm-client";
 import { SEO_SYSTEM_PROMPT } from "@/lib/generation/seo";
 import type { SourceType } from "@/lib/collection/types";
+import { nextPublishSlots } from "@/lib/generation/publish-schedule";
 
 async function resetDb() {
   await prisma.articleSource.deleteMany();
@@ -527,5 +528,95 @@ describe("generateArticlesFromHotPosts（Post経路の画像取りこぼし修�
 
     const article = await prisma.article.findUnique({ where: { postId: post.id } });
     expect(article?.thumbnailUrl).toBe(imageUrl);
+  });
+});
+
+describe("generateArticlesFromHotPosts（投稿スケジュール分散、成長G6 F-G6-2 ブリーフ テスト2）", () => {
+  afterEach(() => {
+    delete process.env.PUBLISH_SCHEDULE_MODE;
+  });
+
+  it("PUBLISH_SCHEDULE_MODE未設定(既定immediate)では従来どおり即時publishedになる(回帰なし)", async () => {
+    const post = await createPost({
+      sourceType: "5ch",
+      metrics: [{ score: 0, commentCount: 50, capturedAt: T0 }],
+    });
+
+    const summary = await generateArticlesFromHotPosts(llm, { now: T0, championMap: null });
+    const result = summary.results.find((r) => r.postId === post.id);
+    expect(result).toMatchObject({ status: "success", publicationStatus: "published" });
+
+    const article = await prisma.article.findUnique({ where: { postId: post.id } });
+    expect(article?.status).toBe("published");
+    expect(article?.scheduledAt).toBeNull();
+  });
+
+  it("PUBLISH_SCHEDULE_MODE=scheduleで反応記事(5ch)はscheduled＋scheduledAt割当になる", async () => {
+    process.env.PUBLISH_SCHEDULE_MODE = "schedule";
+    const post = await createPost({
+      sourceType: "5ch",
+      metrics: [{ score: 0, commentCount: 50, capturedAt: T0 }],
+    });
+
+    const summary = await generateArticlesFromHotPosts(llm, { now: T0, championMap: null });
+    const result = summary.results.find((r) => r.postId === post.id);
+    expect(result).toMatchObject({ status: "success", publicationStatus: "scheduled" });
+
+    const article = await prisma.article.findUnique({ where: { postId: post.id } });
+    expect(article?.status).toBe("scheduled");
+    expect(article?.scheduledAt).not.toBeNull();
+    expect(article?.scheduledAt?.toISOString()).toBe(nextPublishSlots(T0, 1)[0].toISOString());
+  });
+
+  it("PUBLISH_SCHEDULE_MODE=scheduleでも免除ソース(riot)は常に即時publishedのまま(速報性維持)", async () => {
+    process.env.PUBLISH_SCHEDULE_MODE = "schedule";
+    const post = await createPost({
+      sourceType: "riot",
+      metrics: [{ score: 200, commentCount: 50, capturedAt: T0 }],
+    });
+
+    const summary = await generateArticlesFromHotPosts(llm, { now: T0, championMap: null });
+    const result = summary.results.find((r) => r.postId === post.id);
+    expect(result).toMatchObject({ status: "success", publicationStatus: "published" });
+
+    const article = await prisma.article.findUnique({ where: { postId: post.id } });
+    expect(article?.status).toBe("published");
+    expect(article?.scheduledAt).toBeNull();
+  });
+
+  it("PUBLISH_SCHEDULE_MODE=scheduleで複数の反応記事が同時にscheduledになる場合、時刻をずらして割当てる(同時公開の洪水防止)", async () => {
+    process.env.PUBLISH_SCHEDULE_MODE = "schedule";
+    // 重複判定(記事レベルの類似度)に引っかからないよう、各投稿の題材を明確に別々にする。
+    const distinctTopics = [
+      { title: "【LoL】ヤスオの壁飛びコンボがすごいと話題のスレ", body: "1: 壁飛びから連続でキャリーする神プレイに賞賛の声。\n2: 反応まとめ。", commentCount: 100 },
+      { title: "【LoL】リサンドラの氷結スキルが強すぎると話題のスレ", body: "1: 氷結スキルの性能が高すぎて対処法が無いという意見。\n2: 賛否両論。", commentCount: 99 },
+      { title: "【LoL】新パッチのジャングル調整についての反応スレ", body: "1: ジャングルモンスターの経験値調整に賛否の声。\n2: 序盤ペースへの影響を議論。", commentCount: 98 },
+    ];
+    const posts = [];
+    for (const topic of distinctTopics) {
+      posts.push(
+        await createPost({
+          sourceType: "5ch",
+          title: topic.title,
+          body: topic.body,
+          metrics: [{ score: 0, commentCount: topic.commentCount, capturedAt: T0 }],
+        }),
+      );
+    }
+
+    const summary = await generateArticlesFromHotPosts(llm, { now: T0, maxPerCategory: 3, championMap: null });
+    expect(summary.succeededCount).toBe(3);
+
+    const articles = await prisma.article.findMany({
+      where: { postId: { in: posts.map((p) => p.id) } },
+      orderBy: { scheduledAt: "asc" },
+    });
+    expect(articles).toHaveLength(3);
+    expect(articles.every((a) => a.status === "scheduled")).toBe(true);
+
+    const expectedSlots = nextPublishSlots(T0, 3).map((d) => d.toISOString());
+    expect(articles.map((a) => a.scheduledAt?.toISOString())).toEqual(expectedSlots);
+    // 重複スロットが無い(1スロット1件)ことを確認する。
+    expect(new Set(expectedSlots).size).toBe(3);
   });
 });

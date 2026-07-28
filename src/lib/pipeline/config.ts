@@ -49,3 +49,16 @@ export type GenerationSource = "post" | "collected";
 export function getGenerationSource(): GenerationSource {
   return process.env.GENERATION_SOURCE === "collected" ? "collected" : "post";
 }
+
+/**
+ * 投稿スケジュール分散のモード（成長G6 F-G6-2）。
+ * "immediate"（既定・未設定含む）: 現状どおり生成記事を即時 `status="published"` にする
+ * （挙動を1バイトも変えない）。
+ * "schedule": 反応記事(reddit/5ch)を `status="scheduled"` ＋ `nextPublishSlots` によるスロット割当にする。
+ * 免除ソース（`getExemptSourceTypes()`、既定 riot/riot-news）は速報性維持のため常に即時公開のまま。
+ */
+export type PublishScheduleMode = "immediate" | "schedule";
+
+export function getPublishScheduleMode(): PublishScheduleMode {
+  return process.env.PUBLISH_SCHEDULE_MODE === "schedule" ? "schedule" : "immediate";
+}

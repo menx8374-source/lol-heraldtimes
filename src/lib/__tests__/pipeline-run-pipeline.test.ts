@@ -3,7 +3,7 @@
  * DATABASE_URL を差し替え済み）に対して実際にPrisma経由で書き込み、
  * 「完走・上限・重複防止・失敗継続・運営ログ」を検証する。
  */
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { prisma } from "@/lib/prisma";
 import { runFullPipeline, type PipelineRunOptions } from "@/lib/pipeline/run-pipeline";
 import { rebuildCandidateQueue } from "@/lib/collection/queue";
@@ -443,5 +443,89 @@ describe("runFullPipeline の生成経路切替（GENERATION_SOURCE、リファ�
       if (original === undefined) delete process.env.GENERATION_SOURCE;
       else process.env.GENERATION_SOURCE = original;
     }
+  });
+});
+
+/**
+ * 配信導線（Discord Webhook通知、成長G6 F-G6-3）の結合テスト。実webhookは叩かずfetchをモックする。
+ */
+describe("runFullPipeline の配信導線（Discord Webhook通知、成長G6 F-G6-3）", () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    delete process.env.DISCORD_WEBHOOK_URL;
+  });
+
+  it("DISCORD_WEBHOOK_URL未設定時は新規公開があってもfetchを呼ばない(no-op)", async () => {
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const report = await runPipeline({
+      adapters: [
+        new FakeAdapter("riot", [
+          item({
+            sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/patch-discord-noop/",
+            title: "配信導線no-op確認用パッチノート",
+            content: "配信導線のno-op確認用の本文。",
+          }),
+        ]),
+      ],
+      llmClient: llm,
+      now: T0,
+    });
+
+    expect(report.publishedCount).toBeGreaterThan(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("DISCORD_WEBHOOK_URL設定時、新規公開記事についてDiscordへ通知される", async () => {
+    process.env.DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/xxx/yyy";
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const report = await runPipeline({
+      adapters: [
+        new FakeAdapter("riot", [
+          item({
+            sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/patch-discord-notify/",
+            title: "配信導線通知確認用パッチノート",
+            content: "配信導線の通知確認用の本文。",
+          }),
+        ]),
+      ],
+      llmClient: llm,
+      now: T0,
+    });
+
+    expect(report.publishedCount).toBeGreaterThan(0);
+    expect(fetchMock).toHaveBeenCalled();
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body as string);
+    expect(body.content).toContain("配信導線通知確認用パッチノート");
+    expect(body.allowed_mentions).toEqual({ parse: [] });
+  });
+
+  it("Discord通知が失敗してもパイプライン本体は成功のまま完走する(補助処理は本体を止めない)", async () => {
+    process.env.DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/xxx/yyy";
+    const fetchMock = vi.fn().mockRejectedValue(new Error("network error(テスト用)"));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const report = await runPipeline({
+      adapters: [
+        new FakeAdapter("riot", [
+          item({
+            sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/patch-discord-fail/",
+            title: "配信導線失敗確認用パッチノート",
+            content: "配信導線の送信失敗確認用の本文。",
+          }),
+        ]),
+      ],
+      llmClient: llm,
+      now: T0,
+    });
+
+    expect(report.status).toBe("success");
+    expect(report.publishedCount).toBeGreaterThan(0);
   });
 });
