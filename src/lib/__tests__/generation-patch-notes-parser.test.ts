@@ -400,20 +400,34 @@ describe("parsePatchNotesHtml（S6 テスト5: 多様なh4は小見出しとし�
     expect(base.changes[0]).toEqual({ stat: "レベルアップごとの攻撃力", before: "3.7", after: "3.4" });
   });
 
-  it("アリーナのh4=アイテム/オーグメントも小見出しグループとして表示され、スキルキーを持たない", () => {
-    const arena = findByName(targets, "チャンピオン")!; // h3無し・先頭h4(チャンピオン)が対象名に消費される
+  it("アリーナの対象名はセクション名「アリーナ」になる(先頭h4「チャンピオン」という総称に潰れない、S7 F-S7-2)", () => {
+    const arena = findByName(targets, "アリーナ")!;
+    expect(arena).toBeDefined();
     expect(arena.kind).toBe("arena");
-    const itemGroup = arena.groups.find((g) => g.abilityName === "アイテム")!;
-    const augmentGroup = arena.groups.find((g) => g.abilityName === "オーグメント")!;
-    expect(itemGroup).toBeDefined();
-    expect(itemGroup.abilityKey).toBeUndefined();
-    expect(augmentGroup).toBeDefined();
-    expect(augmentGroup.abilityKey).toBeUndefined();
+    expect(findByName(targets, "チャンピオン")).toBeUndefined();
   });
 
-  it("アリーナのNEWバッジ付き記述式変更は装飾バッジを飛ばして正しいラベルを取る(オーグメント)", () => {
-    const arena = findByName(targets, "チャンピオン")!;
-    const augmentGroup = arena.groups.find((g) => g.abilityName === "オーグメント")!;
+  it("アリーナの中間ラベル(<p><strong>個別名</strong></p>)が個別グループに分割され、1グループに潰れない(S7 F-S7-1)", () => {
+    const arena = findByName(targets, "アリーナ")!;
+    const ambessa = arena.groups.find((g) => g.abilityName === "アンベッサ")!;
+    const gragas = arena.groups.find((g) => g.abilityName === "グラガス")!;
+    expect(ambessa).toBeDefined();
+    expect(ambessa.abilityKey).toBeUndefined();
+    expect(ambessa.changes).toEqual([
+      { stat: "Q1の基本攻撃力反映率", before: "60%", after: "45%" },
+      { stat: "Q2の基本攻撃力反映率", before: "90%", after: "70%" },
+    ]);
+    expect(gragas).toBeDefined();
+    // アイテム(ファントム ダンサー等)・オーグメント(聖なる介入等)の個別名も同様に別グループになる
+    const phantomDancer = arena.groups.find((g) => g.abilityName === "ファントム ダンサー")!;
+    const augmentGroup = arena.groups.find((g) => g.abilityName === "聖なる介入")!;
+    expect(phantomDancer).toBeDefined();
+    expect(augmentGroup).toBeDefined();
+  });
+
+  it("アリーナのNEWバッジ付き記述式変更は装飾バッジを飛ばして正しいラベルを取る(オーグメント個別名「聖なる介入」)", () => {
+    const arena = findByName(targets, "アリーナ")!;
+    const augmentGroup = arena.groups.find((g) => g.abilityName === "聖なる介入")!;
     const hexbolt = augmentGroup.changes.find((c) => c.stat === "「ヘクスボルト」のインタラクション")!;
     expect(hexbolt).toBeDefined();
     expect(hexbolt.text).toContain("クールダウンが2秒短縮されるようになりました");

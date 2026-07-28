@@ -266,8 +266,14 @@ function parseChangeLi(liInner: string): PatchChange | null {
     const afterStrongMatch = afterHtml.match(/^\s*<strong>([\s\S]*?)<\/strong>/);
     const after = afterStrongMatch ? textOf(afterStrongMatch[1]) : textOf(afterHtml);
 
-    if (!stat || !before || !after) return null;
-    return { stat, before, after };
+    if (stat && before && after) return { stat, before, after };
+    // S7 F-S7-1: ラベル（stat）を特定できない場合、before/afterへの機械的な分割は不確かなため
+    // 数値変更にはせず、行全体（⇒含む）を逐語の記述式変更にフォールバックする（欠落ゼロ）。
+    // 実データ確認済み: ミッドパッチアップデート/ランダムミッド：メイヘム等の記述行は<strong>による
+    // ラベル装飾が一切無いものが多く（例「メイヘム進行状況 ティア4：初期ゴールドx300 ⇒ 黄金のリロール」）、
+    // 従来はstatが空文字になりnullで丸ごと捨てられていた（欠落）。
+    const wholeText = textOf(liInner).trim();
+    return wholeText ? { text: wholeText } : null;
   }
 
   // 記述式変更（⇒なし）: ラベルが見つかれば`label＋text`、無ければ`text`のみ（本文の文字そのまま）。
@@ -306,24 +312,84 @@ function extractAllUlChanges(html: string): PatchChange[] {
   return changes;
 }
 
+/** ブロック（またはその一部区間）内の`<h4 class="change-detail-title...">`をすべて見つける
+ * （S7 F-S7-1で`extractGroups`から切り出し、対象の区切り判定（`findEntityHeadings`）でも再利用する）。 */
+function findH4Matches(html: string): { start: number; end: number; inner: string }[] {
+  const h4Re = /<h4 class="change-detail-title[^"]*"[^>]*>([\s\S]*?)<\/h4>/g;
+  const matches: { start: number; end: number; inner: string }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = h4Re.exec(html))) {
+    matches.push({ start: m.index, end: m.index + m[0].length, inner: m[1] });
+  }
+  return matches;
+}
+
+/** `<p><strong>個別名</strong></p>`（h3/h4でない中間ラベル。オーグメント/アリーナの個別名・
+ * サブ項目名等、S7 F-S7-1）を検出する。`<p>`直下が（前置の空白/`<br>`を挟んで）`<strong>`のみという
+ * 単純な段落だけを対象にする（説明文の`<p>`は他の語やタグを含むため誤検出しない）。 */
+function findMidLabels(html: string): { start: number; end: number; name: string }[] {
+  const re = /<p>(?:\s|<br\s*\/?>)*<strong>([\s\S]*?)<\/strong>(?:\s|<br\s*\/?>)*<\/p>/g;
+  const labels: { start: number; end: number; name: string }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    const name = textOf(m[1]);
+    if (name) labels.push({ start: m.index, end: m.index + m[0].length, name });
+  }
+  return labels;
+}
+
+/**
+ * 区間（h4見出し1件分、またはh4が無いブロック全体）からグループを組み立てる（S7 F-S7-1で新設）。
+ * 区間内に`<p><strong>個別名</strong></p>`という中間ラベルがあれば、それ以降の`<ul>`をその個別名の
+ * 別グループに分割して紐づける（1グループに潰さない・逐語維持）。中間ラベルが無ければ、区間全体を
+ * `headingName`（親h4見出し。無ければ無名）の単一グループとして扱う（S6までの挙動を維持）。
+ */
+function extractGroupsFromRegion(
+  regionHtml: string,
+  headingName: string | undefined,
+  headingKey: PatchAbilityKey | undefined,
+  headingIconUrl: string | undefined,
+): PatchChangeGroup[] {
+  function buildHeadingGroup(changes: PatchChange[]): PatchChangeGroup {
+    const group: PatchChangeGroup = { changes };
+    if (headingName) group.abilityName = headingName;
+    if (headingKey) group.abilityKey = headingKey;
+    if (headingIconUrl) group.abilityIconUrl = headingIconUrl;
+    return group;
+  }
+
+  const labels = findMidLabels(regionHtml);
+  if (labels.length === 0) {
+    const changes = extractAllUlChanges(regionHtml);
+    return changes.length > 0 ? [buildHeadingGroup(changes)] : [];
+  }
+
+  const groups: PatchChangeGroup[] = [];
+  const introChanges = extractAllUlChanges(regionHtml.slice(0, labels[0].start));
+  if (introChanges.length > 0) groups.push(buildHeadingGroup(introChanges));
+  for (let i = 0; i < labels.length; i++) {
+    const label = labels[i];
+    const subEnd = i + 1 < labels.length ? labels[i + 1].start : regionHtml.length;
+    const changes = extractAllUlChanges(regionHtml.slice(label.end, subEnd));
+    if (changes.length === 0) continue; // 変更が取れない個別名（blockquoteのみ等）はゴーストとして捨てる
+    groups.push({ abilityName: label.name, changes });
+  }
+  return groups;
+}
+
 /**
  * ブロック内の`<h4 class="change-detail-title...">`をすべて見つけ、各h4の「次のh4手前まで」の区間から
  * グループを組み立てる（パッチ記事刷新S6: 区間内の`<ul>`は全て拾う。変更が1件も取れないh4は
- * 見出しだけのゴーストグループを作らないよう捨てる）。h4が1つも無いブロック（実データ確認済み:
- * 一部アイテム・バグ修正＆QoLの変更のwhite-stoneブロック等はh4無しでblockquote/ulが直結・繰り返す）は、
- * ブロック全体の全`<ul>`を無名(abilityName無し)の単一グループとして拾う(変更を取りこぼさない)。
+ * 見出しだけのゴーストグループを作らないよう捨てる。S7 F-S7-1で中間ラベル（`extractGroupsFromRegion`）
+ * 対応を追加）。h4が1つも無いブロック（実データ確認済み: 一部アイテム・バグ修正＆QoLの変更の
+ * white-stoneブロック等はh4無しでblockquote/ulが直結・繰り返す）は、ブロック全体を同様に扱う
+ * （中間ラベルがあれば個別名ごとに分割、無ければ無名の単一グループとして拾い、変更を取りこぼさない）。
  */
 function extractGroups(blockHtml: string): PatchChangeGroup[] {
-  const h4Re = /<h4 class="change-detail-title[^"]*"[^>]*>([\s\S]*?)<\/h4>/g;
-  const h4Matches: { start: number; end: number; inner: string }[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = h4Re.exec(blockHtml))) {
-    h4Matches.push({ start: m.index, end: m.index + m[0].length, inner: m[1] });
-  }
+  const h4Matches = findH4Matches(blockHtml);
 
   if (h4Matches.length === 0) {
-    const changes = extractAllUlChanges(blockHtml);
-    return changes.length > 0 ? [{ changes }] : [];
+    return extractGroupsFromRegion(blockHtml, undefined, undefined, undefined);
   }
 
   const groups: PatchChangeGroup[] = [];
@@ -331,20 +397,12 @@ function extractGroups(blockHtml: string): PatchChangeGroup[] {
     const h4 = h4Matches[i];
     const regionEnd = i + 1 < h4Matches.length ? h4Matches[i + 1].start : blockHtml.length;
     const region = blockHtml.slice(h4.end, regionEnd);
-    const changes = extractAllUlChanges(region);
-    if (changes.length === 0) continue; // 見出しのみで変更が取れないh4はゴーストグループとして表示しない
-    const abilityName = textOf(h4.inner);
+    const abilityName = textOf(h4.inner) || undefined;
+    const abilityKey = abilityName ? abilityKeyFromName(abilityName) : undefined;
     // 正規化（akamaihdラッパー→DDragon直URL）はS3 F-S3-1で表示URLに適用する。壊れURL/非https等は
     // undefinedになり、group.abilityIconUrl自体を持たない（画像なしで崩れない）。
     const abilityIconUrl = normalizePatchIconUrl(firstImgSrc(h4.inner));
-    const group: PatchChangeGroup = { changes };
-    if (abilityName) {
-      group.abilityName = abilityName;
-      const key = abilityKeyFromName(abilityName);
-      if (key) group.abilityKey = key;
-    }
-    if (abilityIconUrl) group.abilityIconUrl = abilityIconUrl;
-    groups.push(group);
+    groups.push(...extractGroupsFromRegion(region, abilityName, abilityKey, abilityIconUrl));
   }
   return groups;
 }
@@ -390,19 +448,41 @@ function parseBlock(blockHtml: string, section: string | undefined): PatchChange
 
   let groups = extractGroups(blockHtml);
 
-  // 対象名の決定（パッチ記事刷新S6 決定ルール）:
-  // ①h3.change-title ②h3が無ければブロック先頭の非スキルh4のテキスト
-  // （消費した先頭グループは見出しの二重表示を避けるため無名グループに戻す）
+  // 対象名の決定（パッチ記事刷新S6 決定ルール、S7 F-S7-2で文脈解決を追加）:
+  // ①h3.change-title ②h3が無ければブロック先頭の非スキルh4のテキスト（候補名）
   // ③それも無ければ直近のh2セクション名（例: バグ修正＆QoLの変更のwhite-stoneブロック）
+  //
+  // S7 F-S7-2: ②の候補名は、まだ`extractGroups`で中間ラベル（S7 F-S7-1）に分割される前の
+  // 「ブロック先頭h4の生テキスト」を使う（h4見出しが個別名の中間ラベルで細分された結果の
+  // groups[0]は個別実体名（例「アカリ」）になり得るため、名前決定はそれと切り離す）。
+  // 候補名が「チャンピオン/アイテム/オーグメント/システム/ルーン/バグ修正/アリーナ」等の
+  // 総称バケット語そのもの（`kindFromSection(candidate) !== "other"`で判定）の場合は、対象全体が
+  // 実際には複数種別・複数対象にまたがる集約ブロック（実データ確認済み: アリーナ）であることが
+  // 多く、その総称をそのまま対象名にすると誤解を招くため使わず、セクション名にフォールバックする
+  // （例:「アリーナ」節の対象名が「チャンピオン」になってしまう問題の解消）。
   let name = h3Name;
   if (!name) {
-    const first = groups[0];
-    if (first && first.abilityName && !first.abilityKey) {
-      name = first.abilityName;
-      groups = [{ changes: first.changes }, ...groups.slice(1)];
+    const firstH4 = findH4Matches(blockHtml)[0];
+    const candidate = firstH4 ? textOf(firstH4.inner) || undefined : undefined;
+    const candidateKey = candidate ? abilityKeyFromName(candidate) : undefined;
+    const consumeCandidate = () => {
+      name = candidate;
+      // 対象名として消費した見出しは、先頭グループの見出しとしての二重表示を避けるため無名に戻す
+      // （S6からの既存挙動を維持。中間ラベル分割で先頭グループの見出しが既に個別名等へ変わっている
+      // 場合はこの限りではない＝abilityNameが候補と一致する場合のみ戻す）。
+      if (groups[0] && groups[0].abilityName === candidate) {
+        groups = [{ changes: groups[0].changes }, ...groups.slice(1)];
+      }
+    };
+    if (candidate && !candidateKey && kindFromSection(candidate) === "other") {
+      consumeCandidate();
+    } else if (section && section.trim().length > 0) {
+      name = section.trim();
+    } else if (candidate && !candidateKey) {
+      // セクション名すら無い最終手段: 総称であっても候補名を使う（何も無いよりまし、捏造しない）
+      consumeCandidate();
     }
   }
-  if (!name) name = section && section.trim().length > 0 ? section.trim() : undefined;
   if (!name) return null; // 対象名を一切取得できない場合は抽出不能として捨てる(捏造しない)
 
   // 有効な変更が1件も無いブロックは装飾のみ(スキン紹介・パッチハイライト等)とみなして捨てる
@@ -426,6 +506,119 @@ function parseBlock(blockHtml: string, section: string | undefined): PatchChange
   if (iconUrl) target.iconUrl = iconUrl;
   if (intent) target.intent = intent;
   return target;
+}
+
+/**
+ * `<h3 class="change-detail-title...ability-title...">`や`<h4 class="change-detail-title...ability-title...">`
+ * のうち、内部の`<img>`がチャンピオン/アイテムアイコン（DDragon `/img/champion|item/...`）に解決できる
+ * ものを検出する（S7 F-S7-1）。大型パッチの「ミッドパッチアップデート」節等、`h3.change-title`を
+ * 使わずに複数のチャンピオン/アイテムの変更を1つのブロックへ連続して列挙する構造
+ * （実データ確認済み: 26.1/26.3）に対応するため、これらの見出しを対象の区切りとして扱う
+ * （新規実装のためnpm依存追加なし、正規表現ベースの限定スキャンのみ）。
+ * スキル見出し（Q/W/E/R/パッシブ等、spell/passiveアイコン）はclassifyIconUrlが
+ * champion/item以外を返すため対象外（従来どおりextractGroupsのグループ内スキル見出しとして扱われる）。
+ * 新アイテム等のCMSホスト画像（DDragon形式に一致しない）も対象外（従来どおり単一対象内のh4見出しのまま）。
+ */
+function findEntityHeadings(
+  blockHtml: string,
+): { start: number; end: number; name: string; kind: "champion" | "item"; id: string; rawIconUrl: string }[] {
+  const re = /<h[34] class="change-detail-title[^"]*"[^>]*>([\s\S]*?)<\/h[34]>/g;
+  const out: { start: number; end: number; name: string; kind: "champion" | "item"; id: string; rawIconUrl: string }[] =
+    [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(blockHtml))) {
+    const rawIconUrl = firstImgSrc(m[1]);
+    if (!rawIconUrl) continue;
+    const classified = classifyIconUrl(rawIconUrl);
+    if (!classified || (classified.kind !== "champion" && classified.kind !== "item")) continue;
+    const name = textOf(m[1]);
+    if (!name) continue;
+    out.push({ start: m.index, end: m.index + m[0].length, name, kind: classified.kind, id: classified.id, rawIconUrl });
+  }
+  return out;
+}
+
+/**
+ * `h3.change-title`を持たないブロックの中に、チャンピオン/アイテムアイコン付きの見出し
+ * （`findEntityHeadings`）が1件以上見つかった場合に、そのブロックを複数の独立した
+ * `PatchChangeTarget`（対象ごと）に分割する（S7 F-S7-1: 大型パッチの「ミッドパッチアップデート」節
+ * 実データ確認済み。従来はこれらが1つのブロックとして扱われ、複数チャンピオン/アイテムのスキル別
+ * 変更グループが対象名不明瞭のまま1つの対象に混在していた＝誤帰属に近い問題を解消）。
+ * エンティティ見出し以外の見出し（スキルキー見出しを除く「プレーンなh4」、例: 実データ確認済みの
+ * 「Clash最新スケジュール」「バグ修正」「既知の問題」等）も区切りとして扱い、直前のエンティティの
+ * 変更に混入させない（対象名はF-S7-2と同じ総称バケット語の判定＋セクション名フォールバックを使う）。
+ * 最初のエンティティ見出しより前の内容（導入のblockquote等）は対象を組み立てられないため無視する。
+ */
+function splitEntityBlock(
+  blockHtml: string,
+  section: string | undefined,
+  entityHeadings: ReturnType<typeof findEntityHeadings>,
+): PatchChangeTarget[] {
+  const h4Matches = findH4Matches(blockHtml);
+  type Boundary =
+    | { start: number; end: number; kind: "entity"; name: string; entityKind: "champion" | "item"; id: string; rawIconUrl: string }
+    | { start: number; end: number; kind: "plain"; name: string };
+
+  const entityStarts = new Set(entityHeadings.map((e) => e.start));
+  const plainBoundaries: Boundary[] = h4Matches
+    .filter((h4) => h4.start > entityHeadings[0].start && !entityStarts.has(h4.start))
+    .filter((h4) => !abilityKeyFromName(textOf(h4.inner)))
+    .map((h4) => ({ start: h4.start, end: h4.end, kind: "plain" as const, name: textOf(h4.inner) }));
+
+  const boundaries: Boundary[] = [
+    ...entityHeadings.map((e) => ({
+      start: e.start,
+      end: e.end,
+      kind: "entity" as const,
+      name: e.name,
+      entityKind: e.kind,
+      id: e.id,
+      rawIconUrl: e.rawIconUrl,
+    })),
+    ...plainBoundaries,
+  ].sort((a, b) => a.start - b.start);
+
+  const targets: PatchChangeTarget[] = [];
+  for (let i = 0; i < boundaries.length; i++) {
+    const b = boundaries[i];
+    const regionEnd = i + 1 < boundaries.length ? boundaries[i + 1].start : blockHtml.length;
+    const region = blockHtml.slice(b.end, regionEnd);
+    const groups = extractGroups(region);
+    const totalChanges = groups.reduce((sum, g) => sum + g.changes.length, 0);
+    if (totalChanges === 0) continue; // 見出しのみ・変更が取れない区切りはゴーストとして捨てる
+    const intent = extractCombinedIntent(region);
+
+    let name: string | undefined;
+    let kind: PatchChangeTarget["kind"];
+    let id: string | undefined;
+    let iconUrl: string | undefined;
+    if (b.kind === "entity") {
+      name = b.name;
+      kind = b.entityKind;
+      id = b.id;
+      iconUrl = normalizePatchIconUrl(b.rawIconUrl);
+    } else {
+      // F-S7-2と同じ判定: 総称バケット語ならセクション名にフォールバックする
+      const candidateKey = abilityKeyFromName(b.name);
+      if (b.name && !candidateKey && kindFromSection(b.name) === "other") {
+        name = b.name;
+      } else if (section && section.trim().length > 0) {
+        name = section.trim();
+      } else {
+        name = b.name;
+      }
+      kind = kindFromSection(section);
+    }
+    if (!name) continue;
+
+    const target: PatchChangeTarget = { name, kind, groups };
+    if (section) target.section = section;
+    if (id) target.id = id;
+    if (iconUrl) target.iconUrl = iconUrl;
+    if (intent) target.intent = intent;
+    targets.push(target);
+  }
+  return targets;
 }
 
 /**
@@ -473,8 +666,16 @@ export function parsePatchNotesHtml(html: string): PatchChangeTarget[] {
       const nextBlockStart = blockStarts.find((idx) => idx > marker.index);
       const blockHtml = cleaned.slice(marker.index, nextBlockStart ?? cleaned.length);
       try {
-        const target = parseBlock(blockHtml, currentSection);
-        if (target) targets.push(target);
+        // h3.change-titleを持たないブロックにチャンピオン/アイテムアイコン付き見出しが見つかれば、
+        // 複数対象への分割を優先する（S7 F-S7-1、大型パッチのミッドパッチアップデート節対応）。
+        const hasH3ChangeTitle = /<h3 class="change-title"[^>]*>/.test(blockHtml);
+        const entityHeadings = hasH3ChangeTitle ? [] : findEntityHeadings(blockHtml);
+        if (entityHeadings.length > 0) {
+          targets.push(...splitEntityBlock(blockHtml, currentSection, entityHeadings));
+        } else {
+          const target = parseBlock(blockHtml, currentSection);
+          if (target) targets.push(target);
+        }
       } catch {
         // 1ブロックの構造不一致は読み飛ばす(本体を止めない・他ブロックの抽出は継続する)
         continue;

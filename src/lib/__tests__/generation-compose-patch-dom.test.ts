@@ -231,16 +231,16 @@ describe("composeArticleBody（S6: 記述式変更のdirection・非チャンピ
     expect(wGroup.changes.every((c) => c.text !== undefined)).toBe(true);
   });
 
-  it("リー・シン/死神の残り火/アリーナ(対象名チャンピオン)が対象名付きカードで出る(総称に潰れない)", async () => {
+  it("リー・シン/死神の残り火/アリーナ(対象名「アリーナ」、S7 F-S7-2で「チャンピオン」から解消)が対象名付きカードで出る(総称に潰れない)", async () => {
     const body = await composeArticleBody(
       { sourceType: "riot", title: "パッチ26.14ノート公開", content: dummyContent, sourceUrl, html: fixtureHtml },
       llm,
     );
     const names = patchChangeBlocks(body).map((b) => b.targetName);
-    expect(names).toEqual(expect.arrayContaining(["リー・シン", "死神の残り火", "チャンピオン"]));
+    expect(names).toEqual(expect.arrayContaining(["リー・シン", "死神の残り火", "アリーナ"]));
     const deathfire = patchChangeBlocks(body).find((b) => b.targetName === "死神の残り火")!;
     expect(deathfire.targetKind).toBe("rune");
-    const arena = patchChangeBlocks(body).find((b) => b.targetName === "チャンピオン" && b.targetKind === "arena")!;
+    const arena = patchChangeBlocks(body).find((b) => b.targetName === "アリーナ" && b.targetKind === "arena")!;
     expect(arena).toBeDefined();
   });
 
