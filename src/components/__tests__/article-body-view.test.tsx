@@ -364,6 +364,52 @@ describe("ArticleBodyView（強調レスの色分け, 拡張E32 F-E32-1／緑廃
   });
 });
 
+describe("ArticleBodyView（目次(toc)＋見出しanchor, 成長G3 F-G3-4）", () => {
+  it("anchor付きheadingは<h2 id=anchor>で描画する", () => {
+    const blocks: ArticleBodyBlock[] = [{ type: "heading", text: "主な強化", anchor: "sec-1" }];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain('id="sec-1"');
+    expect(html).toContain("主な強化");
+  });
+
+  it("anchor無しの既存headingは従来どおりidが付かない(回帰なし)", () => {
+    const blocks: ArticleBodyBlock[] = [{ type: "heading", text: "見出し" }];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).not.toContain("id=");
+    expect(html).toContain("見出し");
+  });
+
+  it("tocブロックをnav(aria-label=目次)＋各itemへのページ内リンク(#anchor)として描画する", () => {
+    const blocks: ArticleBodyBlock[] = [
+      {
+        type: "toc",
+        items: [
+          { label: "主な強化", anchor: "sec-1" },
+          { label: "アジール", anchor: "sec-2" },
+        ],
+      },
+      { type: "heading", text: "主な強化", anchor: "sec-1" },
+      { type: "heading", text: "アジール", anchor: "sec-2" },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain('aria-label="目次"');
+    expect(html).toContain('<nav');
+    expect(html).toContain('href="#sec-1"');
+    expect(html).toContain('href="#sec-2"');
+    expect(html).toContain("id=\"sec-1\"");
+    expect(html).toContain("id=\"sec-2\"");
+  });
+
+  it("未知の型が混入しても既存の網羅的ハンドリングでクラッシュしない(tocも含め全ブロック型が描画対象になる)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "toc", items: [{ label: "見出し", anchor: "sec-1" }] },
+      { type: "heading", text: "見出し", anchor: "sec-1" },
+      { type: "paragraph", text: "本文" },
+    ];
+    expect(() => renderToStaticMarkup(<ArticleBodyView blocks={blocks} />)).not.toThrow();
+  });
+});
+
 describe("ResLines（AA・原文併記, 拡張E3）", () => {
   it("AAらしい行は等幅フォント(font-mono)クラスを付与する", () => {
     const blocks: ArticleBodyBlock[] = [

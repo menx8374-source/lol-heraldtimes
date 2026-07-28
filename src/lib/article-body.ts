@@ -65,14 +65,25 @@ export type ArticleBodyEmbedBlock = { type: "embed"; provider: EmbedProvider; ur
  * `url` は https のみ許可（`javascript:` 等は弾く）。`label` を表示しURL文字列自体は出さない。 */
 export type ArticleBodyLinkButtonBlock = { type: "linkButton"; url: string; label: string };
 
+/** 章見出しブロック。`anchor`（成長G3）は目次からページ内リンクするための任意のid。
+ * 未指定の既存見出し（旧記事・fact/summaryモード等）は従来どおり anchor なしで表示される（後方互換）。 */
+export type ArticleBodyHeadingBlock = { type: "heading"; text: string; anchor?: string };
+
+/**
+ * 目次（TOC）ブロック（成長G3 F-G3-4）。記事内の章見出しへページ内リンクする一覧。
+ * `items` の `anchor` は同じ記事内に存在する heading ブロックの `anchor` と対応する。
+ */
+export type ArticleBodyTocBlock = { type: "toc"; items: { label: string; anchor: string }[] };
+
 export type ArticleBodyBlock =
-  | { type: "heading"; text: string }
+  | ArticleBodyHeadingBlock
   | { type: "paragraph"; text: string }
   | { type: "quote"; text: string; source?: string }
   | ArticleBodyReactionBlock
   | ArticleBodyImageBlock
   | ArticleBodyEmbedBlock
-  | ArticleBodyLinkButtonBlock;
+  | ArticleBodyLinkButtonBlock
+  | ArticleBodyTocBlock;
 
 export class InvalidArticleBodyError extends Error {
   constructor(message: string) {
@@ -194,6 +205,31 @@ function parseLinkButtonBlock(b: Record<string, unknown>, index: number): Articl
   return { type: "linkButton", url: b.url, label: b.label };
 }
 
+/**
+ * toc ブロックの検証（成長G3 F-G3-4）。`items` は1件以上・各要素の `label`/`anchor` が非空文字列。
+ */
+function parseTocBlock(b: Record<string, unknown>, index: number): ArticleBodyTocBlock {
+  if (!Array.isArray(b.items) || b.items.length === 0) {
+    throw new InvalidArticleBodyError(`本文ブロック[${index}]のtoc itemsが空です`);
+  }
+  const items = b.items.map((item, itemIndex) => {
+    if (typeof item !== "object" || item === null) {
+      throw new InvalidArticleBodyError(
+        `本文ブロック[${index}]のtoc items[${itemIndex}]がオブジェクトではありません`,
+      );
+    }
+    const it = item as Record<string, unknown>;
+    if (typeof it.label !== "string" || it.label.trim().length === 0) {
+      throw new InvalidArticleBodyError(`本文ブロック[${index}]のtoc items[${itemIndex}]のlabelが空です`);
+    }
+    if (typeof it.anchor !== "string" || it.anchor.trim().length === 0) {
+      throw new InvalidArticleBodyError(`本文ブロック[${index}]のtoc items[${itemIndex}]のanchorが空です`);
+    }
+    return { label: it.label, anchor: it.anchor };
+  });
+  return { type: "toc", items };
+}
+
 function parseEmbedBlock(b: Record<string, unknown>, index: number): ArticleBodyEmbedBlock {
   if (!isEmbedProvider(b.provider)) {
     throw new InvalidArticleBodyError(`本文ブロック[${index}]の埋め込みproviderが不正です: ${String(b.provider)}`);
@@ -236,6 +272,9 @@ export function parseArticleBody(value: unknown): ArticleBodyBlock[] {
     if (b.type === "linkButton") {
       return parseLinkButtonBlock(b, index);
     }
+    if (b.type === "toc") {
+      return parseTocBlock(b, index);
+    }
     if (typeof b.type !== "string" || !TEXT_TYPES.has(b.type)) {
       throw new InvalidArticleBodyError(
         `本文ブロック[${index}]の type が不正です: ${String(b.type)}`,
@@ -250,6 +289,16 @@ export function parseArticleBody(value: unknown): ArticleBodyBlock[] {
         text: b.text,
         source: typeof b.source === "string" ? b.source : undefined,
       } satisfies ArticleBodyBlock;
+    }
+    if (b.type === "heading") {
+      let anchor: string | undefined;
+      if (b.anchor !== undefined) {
+        if (typeof b.anchor !== "string" || b.anchor.trim().length === 0) {
+          throw new InvalidArticleBodyError(`本文ブロック[${index}]のheading anchorが不正です`);
+        }
+        anchor = b.anchor;
+      }
+      return { type: "heading", text: b.text, ...(anchor ? { anchor } : {}) } satisfies ArticleBodyBlock;
     }
     return { type: b.type, text: b.text } as ArticleBodyBlock;
   });
@@ -324,6 +373,9 @@ export function blockText(block: ArticleBodyBlock): string {
   }
   if (block.type === "linkButton") {
     return [block.label, block.url].join("\n");
+  }
+  if (block.type === "toc") {
+    return block.items.map((i) => i.label).join("\n");
   }
   return block.text;
 }

@@ -33,8 +33,8 @@ const detailedPatchContent = [
 
 const sourceUrl = "https://www.leagueoflegends.com/ja-jp/news/game-updates/league-of-legends-patch-26-14-notes";
 
-describe("composeArticleBody（riot detailedパッチ本文、拡張E53 F-E53-1・テスト2）", () => {
-  it("PATCH_ARTICLE_MODE未設定(既定)はdetailedになり、バナー画像→見出し→チャンピオンごと[見出し+画像+変更点]→linkButtonの順で組まれる", async () => {
+describe("composeArticleBody（riot detailedパッチ本文、拡張E53 F-E53-1・テスト2、成長G3で3分類＋サマリ＋目次を追加）", () => {
+  it("PATCH_ARTICLE_MODE未設定(既定)はdetailedになり、バナー画像→冒頭サマリ→目次→3グループ[見出し+画像+変更点]→linkButtonの順で組まれる", async () => {
     const body = await composeArticleBody(
       {
         sourceType: "riot",
@@ -53,11 +53,24 @@ describe("composeArticleBody（riot detailedパッチ本文、拡張E53 F-E53-1�
     );
     expect(body[0].type === "image" && body[0].credit).toContain("Riot Games");
 
-    // 2. 見出し「パッチ26.14 の変更点」＋導入段落
+    // 2. バナー直後は冒頭1文サマリ（段落）、その次は目次（toc）
+    expect(body[1].type).toBe("paragraph");
+    expect(body[2].type).toBe("toc");
+
+    // アジール(攻撃力55⇒58、増加)は「主な強化」、ガレン(確定ダメージ150/250/350⇒130/230/330、減少)は
+    // 「主な弱体化」に分類される。3グループ見出しが分類どおりに並ぶ（空グループ「その他の調整」は非表示）。
     const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
-    expect(headings[0]).toBe("パッチ26.14 の変更点");
+    expect(headings).toEqual(["主な強化", "アジール", "主な弱体化", "ガレン"]);
     expect(headings).toContain("アジール");
     expect(headings).toContain("ガレン");
+
+    // 目次（toc）のitemsは全heading（anchor付き）を指す
+    const toc = body.find((b) => b.type === "toc");
+    expect(toc?.type === "toc" && toc.items.map((i) => i.label)).toEqual(headings);
+    const headingBlocks = body.filter((b) => b.type === "heading");
+    for (const h of headingBlocks) {
+      expect(h.type === "heading" && h.anchor).toMatch(/^sec-\d+$/);
+    }
 
     // 3. チャンピオンごとに見出し→画像→変更点段落の順で並ぶ
     const azirHeadingIndex = body.findIndex((b) => b.type === "heading" && b.text === "アジール");
@@ -89,13 +102,13 @@ describe("composeArticleBody（riot detailedパッチ本文、拡張E53 F-E53-1�
     }
   });
 
-  it("imageUrl未指定でもdetailed本文が組まれる（バナー省略、見出しから始まる）", async () => {
+  it("imageUrl未指定でもdetailed本文が組まれる（バナー省略、冒頭サマリから始まる）", async () => {
     const body = await composeArticleBody(
       { sourceType: "riot", title: "パッチ26.14ノート公開", content: detailedPatchContent, sourceUrl },
       llm,
     );
-    expect(body[0].type).toBe("heading");
-    expect(body[0].type === "heading" && body[0].text).toBe("パッチ26.14 の変更点");
+    expect(body[0].type).toBe("paragraph");
+    expect(body[1].type).toBe("toc");
   });
 });
 

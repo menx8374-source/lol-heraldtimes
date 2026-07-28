@@ -123,6 +123,31 @@ function LinkButtonBlockView({ block }: { block: Extract<ArticleBodyBlock, { typ
   );
 }
 
+/**
+ * 目次（TOC）ブロック（成長G3 F-G3-4）。記事内の章見出し（`<h2 id={anchor}>`）へのページ内リンク一覧。
+ * `aria-label="目次"` の nav 要素にすることでスクリーンリーダー等からも目次と識別できる。
+ */
+function TocBlockView({ block }: { block: Extract<ArticleBodyBlock, { type: "toc" }> }) {
+  return (
+    <nav
+      aria-label="目次"
+      data-article-toc
+      className="rounded border border-neutral-300 bg-neutral-50 p-3 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+    >
+      <p className="mb-1 font-bold text-neutral-700 dark:text-neutral-300">目次</p>
+      <ol className="list-decimal space-y-0.5 pl-5">
+        {block.items.map((item, i) => (
+          <li key={i}>
+            <a href={`#${item.anchor}`} className="text-sky-700 underline dark:text-sky-400">
+              {item.label}
+            </a>
+          </li>
+        ))}
+      </ol>
+    </nav>
+  );
+}
+
 const EMBED_PROVIDER_ICON: Record<EmbedProvider, string> = { twitter: "X", youtube: "▶", clip: "🎬" };
 
 /**
@@ -234,9 +259,14 @@ export function ArticleBodyView({ blocks }: { blocks: ArticleBodyBlock[] }) {
           return (
             <Fragment key={index}>
               {index === adBeforeBlockIndex && <AdSlot position="article-in-body" />}
-              <h2 className="mt-2 text-base font-bold sm:text-lg">{block.text}</h2>
+              <h2 id={block.anchor} className="mt-2 text-base font-bold sm:text-lg">
+                {block.text}
+              </h2>
             </Fragment>
           );
+        }
+        if (block.type === "toc") {
+          return <TocBlockView key={index} block={block} />;
         }
         if (block.type === "quote") {
           // 引用（掲示板/SNSの原文要約）は自サイト生成文（見出し・段落）と視覚的に区別する（F15）:

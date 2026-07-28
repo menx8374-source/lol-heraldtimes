@@ -277,9 +277,9 @@ describe("composeArticleBody（riot detailedパッチ本文のチャンピオン
     );
 
     const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
-    expect(headings[0]).toBe("パッチ26.14 の変更点");
-    // チャンピオン→アイテム→システムの順
-    expect(headings).toEqual(["パッチ26.14 の変更点", "アジール", "ガレン", "アイテム", "システム"]);
+    // アジール(攻撃力55⇒58、増加)は「主な強化」、ガレン(確定ダメージ150/250/350⇒130/230/330、減少)は
+    // 「主な弱体化」に分類される（成長G3）。3グループ→アイテム→システムの順
+    expect(headings).toEqual(["主な強化", "アジール", "主な弱体化", "ガレン", "アイテム", "システム"]);
 
     // チャンピオン節は画像付き（E53のまま）
     const azirHeadingIndex = body.findIndex((b) => b.type === "heading" && b.text === "アジール");
@@ -316,7 +316,7 @@ describe("composeArticleBody（riot detailedパッチ本文のチャンピオン
       llm,
     );
     const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
-    expect(headings).toEqual(["パッチ26.14 の変更点", "アジール", "ガレン"]);
+    expect(headings).toEqual(["主な強化", "アジール", "主な弱体化", "ガレン"]);
     expect(headings).not.toContain("アイテム");
     expect(headings).not.toContain("システム");
   });
@@ -327,7 +327,8 @@ describe("composeArticleBody（riot detailedパッチ本文のチャンピオン
       llm,
     );
     const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
-    expect(headings).toEqual(["パッチ26.15 の変更点", "アイテム"]);
+    // チャンピオン変更が無いので3グループ見出しは一切出ず、アイテム節のみになる（臨機応変）
+    expect(headings).toEqual(["アイテム"]);
     // チャンピオンのスプラッシュ画像は無い（imageUrl未指定・バナーなし・チャンピオンなし）
     expect(body.some((b) => b.type === "image")).toBe(false);
     const lastBlock = body[body.length - 1];

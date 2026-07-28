@@ -327,6 +327,53 @@ describe("parseArticleBody", () => {
       parseArticleBody([{ type: "linkButton", url: "https://example.com/", label: "" }]),
     ).toThrow(InvalidArticleBodyError);
   });
+
+  it("headingブロックはanchor省略時、従来どおりtextのみになる(成長G3、後方互換)", () => {
+    const result = parseArticleBody([{ type: "heading", text: "見出し" }]);
+    expect(result[0]).toEqual({ type: "heading", text: "見出し" });
+  });
+
+  it("headingブロックはanchorを付与してパースできる(成長G3 F-G3-4)", () => {
+    const input = [{ type: "heading", text: "主な強化", anchor: "sec-1" }];
+    const result = parseArticleBody(input);
+    expect(result[0]).toEqual(input[0]);
+  });
+
+  it("headingブロックのanchorが空文字ならエラーを投げる(成長G3)", () => {
+    expect(() =>
+      parseArticleBody([{ type: "heading", text: "見出し", anchor: "" }]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
+  it("tocブロックをパースできる(items: label/anchor, 成長G3 F-G3-4)", () => {
+    const input = [
+      {
+        type: "toc",
+        items: [
+          { label: "主な強化", anchor: "sec-1" },
+          { label: "アジール", anchor: "sec-2" },
+        ],
+      },
+    ];
+    const result = parseArticleBody(input);
+    expect(result[0]).toEqual(input[0]);
+  });
+
+  it("tocブロックのitemsが空配列ならエラーを投げる(成長G3)", () => {
+    expect(() => parseArticleBody([{ type: "toc", items: [] }])).toThrow(InvalidArticleBodyError);
+  });
+
+  it("tocブロックのitems[].labelが空ならエラーを投げる(成長G3)", () => {
+    expect(() =>
+      parseArticleBody([{ type: "toc", items: [{ label: "", anchor: "sec-1" }] }]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
+  it("tocブロックのitems[].anchorが空ならエラーを投げる(成長G3)", () => {
+    expect(() =>
+      parseArticleBody([{ type: "toc", items: [{ label: "主な強化", anchor: "" }] }]),
+    ).toThrow(InvalidArticleBodyError);
+  });
 });
 
 describe("blockText", () => {
@@ -374,6 +421,18 @@ describe("blockText", () => {
     expect(
       blockText({ type: "linkButton", url: "https://example.com/patch-notes", label: "公式パッチノートを読む" }),
     ).toBe("公式パッチノートを読む\nhttps://example.com/patch-notes");
+  });
+
+  it("tocは各itemのlabelを改行連結して返す(成長G3 F-G3-4)", () => {
+    expect(
+      blockText({
+        type: "toc",
+        items: [
+          { label: "主な強化", anchor: "sec-1" },
+          { label: "アジール", anchor: "sec-2" },
+        ],
+      }),
+    ).toBe("主な強化\nアジール");
   });
 });
 
