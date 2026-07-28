@@ -576,6 +576,53 @@ describe("ArticleBodyView（patchChangeブロックのアイコン表示、パ�
   });
 });
 
+describe("ArticleBodyView（記述式変更の表示、パッチ記事刷新S6 F-S6-4）", () => {
+  const descriptiveBlock: ArticleBodyBlock = {
+    type: "patchChange",
+    targetName: "アジール",
+    targetKind: "champion",
+    direction: "adjust",
+    groups: [
+      {
+        abilityKey: "W",
+        abilityName: "W - 目覚めよ！",
+        changes: [
+          { stat: "ダブルタップ", text: "「征服者」が通常攻撃時に1ではなく2スタックを適用するようになりました" },
+          { text: "ラベル無しの記述式変更本文" },
+          { stat: "通常攻撃による残りリチャージ時間短縮量", before: "2秒～4秒", after: "2秒～6秒" },
+        ],
+      },
+    ],
+  };
+  const html = renderToStaticMarkup(<ArticleBodyView blocks={[descriptiveBlock]} />);
+
+  it("ラベル付き記述式変更は「label：text」で表示される(逐語のまま)", () => {
+    expect(html).toContain("ダブルタップ");
+    const stripped = html.replace(/<[^>]+>/g, "");
+    expect(stripped).toContain("ダブルタップ：「征服者」が通常攻撃時に1ではなく2スタックを適用するようになりました");
+  });
+
+  it("ラベル無し記述式変更はtextのみ表示される", () => {
+    expect(html).toContain("ラベル無しの記述式変更本文");
+  });
+
+  it("記述式変更にはbefore/after/矢印の色分け要素(data-patch-before等)が付かない(中立表示)", () => {
+    // 同じブロック内に数値変更(短縮量)も混在するため、記述式変更の行だけを見て判定する
+    expect(html).toContain("data-patch-descriptive");
+    expect(html).toContain("data-patch-before"); // 数値変更(短縮量)側には引き続き付く
+    const descriptiveLiMatch = html.match(/<li data-patch-descriptive[^>]*>[\s\S]*?<\/li>/g)!;
+    for (const li of descriptiveLiMatch) {
+      expect(li).not.toContain("data-patch-before");
+      expect(li).not.toContain("data-patch-after");
+    }
+  });
+
+  it("数値変更(短縮量)は引き続きbefore⇒afterで色分け表示される(既存挙動を維持)", () => {
+    const stripped = html.replace(/<[^>]+>/g, "");
+    expect(stripped).toContain("通常攻撃による残りリチャージ時間短縮量：2秒～4秒 ⇒ 2秒～6秒");
+  });
+});
+
 describe("ArticleBodyView（LoL公式風パッチ意匠、パッチ記事刷新S4）", () => {
   const buffBlock: ArticleBodyBlock = {
     type: "patchChange",

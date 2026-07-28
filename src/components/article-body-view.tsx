@@ -314,10 +314,21 @@ function PatchChangeBlockView({
             )}
             <ul className="list-disc pl-5 marker:text-[#785A28]">
               {g.changes.map((c, ci) => (
-                <li key={ci}>
-                  {c.stat}：<span data-patch-before className="text-[#9AA0A6]">{c.before}</span>
-                  <span data-patch-arrow className="text-[#C8AA6E]">{" ⇒ "}</span>
-                  <span data-patch-after className={style.afterClass}>{c.after}</span>
+                <li key={ci} data-patch-descriptive={c.text !== undefined || undefined}>
+                  {c.text !== undefined ? (
+                    // 記述式変更（パッチ記事刷新S6 F-S6-4）: before⇒afterの色分けをせず中立表示
+                    // （ラベルは金、本文は基本の文字色）。逐語のテキスト自体は変更しない。
+                    <>
+                      {c.stat && <span className="text-[#C8AA6E]">{c.stat}：</span>}
+                      {c.text}
+                    </>
+                  ) : (
+                    <>
+                      {c.stat}：<span data-patch-before className="text-[#9AA0A6]">{c.before}</span>
+                      <span data-patch-arrow className="text-[#C8AA6E]">{" ⇒ "}</span>
+                      <span data-patch-after className={style.afterClass}>{c.after}</span>
+                    </>
+                  )}
                 </li>
               ))}
             </ul>

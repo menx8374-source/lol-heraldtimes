@@ -83,11 +83,11 @@ describe("parsePatchNotesHtml（スキルキー判定）", () => {
     expect(baseGroup?.abilityKey).toBe("base");
   });
 
-  it('"固有スキル - ..." のようなパッシブ表記は"パッシブ"を含まないため未判定(undefined)のままになる(捏造しない)', () => {
+  it('"固有スキル - ..." はパッチ記事刷新S6の決定ルールでabilityKey="passive"と判定される(固有スキルもスキルグループ扱い)', () => {
     const jayce = findByName(targets, "ジェイス")!;
     const passiveGroup = jayce.groups.find((g) => g.abilityName?.includes("固有スキル"));
     expect(passiveGroup).toBeDefined();
-    expect(passiveGroup?.abilityKey).toBeUndefined();
+    expect(passiveGroup?.abilityKey).toBe("passive");
   });
 });
 
@@ -178,7 +178,7 @@ describe("parsePatchNotesHtml（逐語維持）", () => {
 describe("parsePatchNotesHtml（F-S1-3: 既存classifyChangeの適用）", () => {
   const targets = parsePatchNotesHtml(fixtureHtml);
 
-  function changeLine(c: { stat: string; before: string; after: string }): string {
+  function changeLine(c: { stat?: string; before?: string; after?: string }): string {
     return `${c.stat}：${c.before} ⇒ ${c.after}`;
   }
 
@@ -293,5 +293,162 @@ describe("parsePatchNotesHtml（異常系）", () => {
     expect(parsePatchNotesHtml(null)).toEqual([]);
     // @ts-expect-error 実行時の不正入力(undefined)に対する防御を確認する意図的な型違反
     expect(parsePatchNotesHtml(undefined)).toEqual([]);
+  });
+});
+
+/**
+ * パッチ記事刷新S6: 過去5パッチ実データ（26.10〜26.14）で判明した未対応パターンの回帰テスト。
+ * フィクスチャ（`__fixtures__/patch-26-14.html`）は本来のアジール/コーキ等に加え、リー・シン
+ * （26.12実データ・Q1/Q2の非スキルh4）・死神の残り火（26.11実データ・ルーンのh3付きブロック、
+ * kindがセクション名フォールバックで解決）・アリーナ（2614実データ・h4=チャンピオン/アイテム/
+ * オーグメントの多様な小見出し・NEWバッジ付き記述式変更）を実データのまま追記している
+ * （docs/sprints/patch-s6-brief.md「テスト」1〜7に対応）。
+ */
+describe("parsePatchNotesHtml（S6 テスト1: アジールWの記述式変更が埋まる）", () => {
+  const targets = parsePatchNotesHtml(fixtureHtml);
+
+  it("アジールのW group(見出し=W - 目覚めよ！)に記述式変更が3件、逐語のまま入る(空にならない)", () => {
+    const azir = findByName(targets, "アジール")!;
+    const wGroup = azir.groups.find((g) => g.abilityKey === "W")!;
+    expect(wGroup.changes.length).toBe(3);
+    expect(wGroup.changes.every((c) => c.text !== undefined)).toBe(true);
+    expect(wGroup.changes.every((c) => c.before === undefined && c.after === undefined)).toBe(true);
+
+    const texts = wGroup.changes.map((c) => c.text);
+    expect(texts.some((t) => t?.includes("征服者") && t?.includes("2スタックを適用するようになりました"))).toBe(
+      true,
+    );
+    expect(texts.some((t) => t?.includes("プレスアタック") && t?.includes("最初に命中した対象"))).toBe(true);
+    expect(texts.some((t) => t?.includes("通常攻撃時に50%ではなく100%のダメージ"))).toBe(true);
+
+    // ラベル(stat)は先頭<strong>から取れる(例: "ダブルタップ")
+    const doubleTap = wGroup.changes.find((c) => c.text?.includes("征服者"))!;
+    expect(doubleTap.stat).toBe("ダブルタップ");
+  });
+
+  it("アジールのRにも記述式変更(ノックバック)が1件入る", () => {
+    const azir = findByName(targets, "アジール")!;
+    const rGroup = azir.groups.find((g) => g.abilityKey === "R")!;
+    expect(rGroup.changes.length).toBe(1);
+    expect(rGroup.changes[0].text).toContain("ジャングルモンスターをノックバックするようになりました");
+    expect(rGroup.changes[0].stat).toBe("失せろ、下民！");
+  });
+});
+
+describe("parsePatchNotesHtml（S6 テスト3: h3無しシステムブロックの対象名解決）", () => {
+  const targets = parsePatchNotesHtml(fixtureHtml);
+
+  it("h3が無いブロックは先頭の非スキルh4(ブルーバフ)を対象名として使い、その見出し自体は重複表示しない(無名グループになる)", () => {
+    const blueBuff = findByName(targets, "ブルーバフ")!;
+    expect(blueBuff.kind).toBe("system");
+    expect(blueBuff.groups.length).toBe(1);
+    expect(blueBuff.groups[0].abilityName).toBeUndefined();
+    expect(blueBuff.groups[0].abilityKey).toBeUndefined();
+  });
+
+  it("スキルヘイスト：10 ⇒ 10/15/20 が数値変更として正しく抽出される(コロンがstrongタグ内側にあるパターン)", () => {
+    const blueBuff = findByName(targets, "ブルーバフ")!;
+    const change = blueBuff.groups[0].changes[0];
+    expect(change.stat).toBe("スキルヘイスト");
+    expect(change.before).toBe("10");
+    expect(change.after).toContain("10 / 15 / 20");
+  });
+});
+
+describe("parsePatchNotesHtml（S6 テスト4: white-stone非pcbバグ修正ブロックが欠落しない）", () => {
+  const targets = parsePatchNotesHtml(fixtureHtml);
+
+  it("patch-change-blockクラスを持たないバグ修正ブロックが対象として抽出される(対象名はセクション名フォールバック)", () => {
+    const bugfix = findByName(targets, "バグ修正＆QoLの変更")!;
+    expect(bugfix).toBeDefined();
+    expect(bugfix.kind).toBe("bugfix");
+  });
+
+  it("複数のul(意図→変更→意図→変更)にまたがる7件の変更が全て取れる(欠落ゼロ)。前のブロックにも吸い込まれない", () => {
+    const bugfix = findByName(targets, "バグ修正＆QoLの変更")!;
+    const allChanges = bugfix.groups.flatMap((g) => g.changes);
+    expect(allChanges.length).toBe(7);
+    expect(allChanges.some((c) => c.text?.includes("ケイトリンの「ヘッドショット」") && c.text?.includes("修正しました"))).toBe(
+      true,
+    );
+    expect(allChanges.some((c) => c.text?.includes("/remake"))).toBe(true);
+
+    // 前のブロック(システム=ブルーバフ)にバグ修正の変更が紛れ込んでいない(誤帰属ゼロ)
+    const blueBuff = findByName(targets, "ブルーバフ")!;
+    expect(blueBuff.groups.flatMap((g) => g.changes).some((c) => c.text?.includes("ヘッドショット"))).toBe(false);
+  });
+
+  it("複数のblockquoteが結合されintentに反映される", () => {
+    const bugfix = findByName(targets, "バグ修正＆QoLの変更")!;
+    expect(bugfix.intent).toContain("バフバーに重要度の低い情報");
+    expect(bugfix.intent).toContain("以前はあった重要な情報が見つからない");
+  });
+});
+
+describe("parsePatchNotesHtml（S6 テスト5: 多様なh4は小見出しとして扱われスキル誤認しない）", () => {
+  const targets = parsePatchNotesHtml(fixtureHtml);
+
+  it("リー・シンのQ1/Q2はabilityNameを持つが、単独のQ/Rトークンに一致しないためabilityKeyは未判定(小見出しグループ)", () => {
+    const leeSin = findByName(targets, "リー・シン")!;
+    const q1 = leeSin.groups.find((g) => g.abilityName === "Q1 - 響掌")!;
+    const q2 = leeSin.groups.find((g) => g.abilityName === "Q2 - 共鳴撃")!;
+    expect(q1).toBeDefined();
+    expect(q1.abilityKey).toBeUndefined();
+    expect(q2).toBeDefined();
+    expect(q2.abilityKey).toBeUndefined();
+    const base = leeSin.groups.find((g) => g.abilityKey === "base")!;
+    expect(base.changes[0]).toEqual({ stat: "レベルアップごとの攻撃力", before: "3.7", after: "3.4" });
+  });
+
+  it("アリーナのh4=アイテム/オーグメントも小見出しグループとして表示され、スキルキーを持たない", () => {
+    const arena = findByName(targets, "チャンピオン")!; // h3無し・先頭h4(チャンピオン)が対象名に消費される
+    expect(arena.kind).toBe("arena");
+    const itemGroup = arena.groups.find((g) => g.abilityName === "アイテム")!;
+    const augmentGroup = arena.groups.find((g) => g.abilityName === "オーグメント")!;
+    expect(itemGroup).toBeDefined();
+    expect(itemGroup.abilityKey).toBeUndefined();
+    expect(augmentGroup).toBeDefined();
+    expect(augmentGroup.abilityKey).toBeUndefined();
+  });
+
+  it("アリーナのNEWバッジ付き記述式変更は装飾バッジを飛ばして正しいラベルを取る(オーグメント)", () => {
+    const arena = findByName(targets, "チャンピオン")!;
+    const augmentGroup = arena.groups.find((g) => g.abilityName === "オーグメント")!;
+    const hexbolt = augmentGroup.changes.find((c) => c.stat === "「ヘクスボルト」のインタラクション")!;
+    expect(hexbolt).toBeDefined();
+    expect(hexbolt.text).toContain("クールダウンが2秒短縮されるようになりました");
+    expect(hexbolt.text).not.toContain("NEW");
+  });
+});
+
+describe("parsePatchNotesHtml（S6: ルーン節はアイコンURLがitem/champion/runeパターンに一致しなくてもセクション名からkind=runeに解決される）", () => {
+  const targets = parsePatchNotesHtml(fixtureHtml);
+
+  it("死神の残り火はh3を持ち、kind=rune・数値変更(ダメージ)が正しく抽出される", () => {
+    const deathfire = findByName(targets, "死神の残り火")!;
+    expect(deathfire.kind).toBe("rune");
+    expect(deathfire.section).toBe("ルーン");
+    const change = deathfire.groups[0].changes[0];
+    expect(change.stat).toBe("ダメージ");
+    expect(change.before).toBe("自身の攻撃力と魔力のうち、高い方に応じて変動");
+    expect(change.after).toBe("魔法ダメージ");
+  });
+});
+
+describe("parsePatchNotesHtml（S6 テスト7: 誤帰属ゼロ・欠落ゼロの総合確認）", () => {
+  const targets = parsePatchNotesHtml(fixtureHtml);
+
+  it("装飾のみ(見出しやアイコンだけ)のブロックは対象として出ない(空カードにならない)", () => {
+    for (const t of targets) {
+      const totalChanges = t.groups.reduce((n, g) => n + g.changes.length, 0);
+      expect(totalChanges).toBeGreaterThan(0);
+    }
+  });
+
+  it("全対象が一意の名前を持つか、少なくとも異なるsection/kindに属する(意図しない重複統合が無い)", () => {
+    const names = targets.map((t) => t.name);
+    // アジール/コーキ/ガレン/ジェイス/ロック/モルデカイザー/ナミ/セナ/セラフィーン/ユナラ/リー・シン(11)
+    // + アイテム3 + ルーン1 + システム1 + アリーナ1(先頭h4名"チャンピオン") + バグ修正1 = 18対象
+    expect(names.length).toBe(18);
   });
 });

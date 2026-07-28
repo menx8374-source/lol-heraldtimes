@@ -219,6 +219,44 @@ describe("classifyPatchChange（direction算出、パッチ刷新S2 F-S2-3）", 
   });
 });
 
+describe("composeArticleBody（S6: 記述式変更のdirection・非チャンピオン対象の反映）", () => {
+  it("アジールは全変更が記述式(⇒なし)のためdirectionはadjust(安全側)になる", async () => {
+    const body = await composeArticleBody(
+      { sourceType: "riot", title: "パッチ26.14ノート公開", content: dummyContent, sourceUrl, html: fixtureHtml },
+      llm,
+    );
+    const azir = patchChangeBlocks(body).find((b) => b.targetName === "アジール")!;
+    expect(azir.direction).toBe("adjust");
+    const wGroup = azir.groups.find((g) => g.abilityKey === "W")!;
+    expect(wGroup.changes.every((c) => c.text !== undefined)).toBe(true);
+  });
+
+  it("リー・シン/死神の残り火/アリーナ(対象名チャンピオン)が対象名付きカードで出る(総称に潰れない)", async () => {
+    const body = await composeArticleBody(
+      { sourceType: "riot", title: "パッチ26.14ノート公開", content: dummyContent, sourceUrl, html: fixtureHtml },
+      llm,
+    );
+    const names = patchChangeBlocks(body).map((b) => b.targetName);
+    expect(names).toEqual(expect.arrayContaining(["リー・シン", "死神の残り火", "チャンピオン"]));
+    const deathfire = patchChangeBlocks(body).find((b) => b.targetName === "死神の残り火")!;
+    expect(deathfire.targetKind).toBe("rune");
+    const arena = patchChangeBlocks(body).find((b) => b.targetName === "チャンピオン" && b.targetKind === "arena")!;
+    expect(arena).toBeDefined();
+  });
+
+  it("バグ修正＆QoLの変更ブロックが記述式変更を含んだまま(数値化しない)出る", async () => {
+    const body = await composeArticleBody(
+      { sourceType: "riot", title: "パッチ26.14ノート公開", content: dummyContent, sourceUrl, html: fixtureHtml },
+      llm,
+    );
+    const bugfix = patchChangeBlocks(body).find((b) => b.targetName === "バグ修正＆QoLの変更")!;
+    expect(bugfix).toBeDefined();
+    expect(bugfix.targetKind).toBe("bugfix");
+    const allChanges = bugfix.groups.flatMap((g) => g.changes);
+    expect(allChanges.some((c) => c.text?.includes("ケイトリンの「ヘッドショット」"))).toBe(true);
+  });
+});
+
 describe("composeArticleBody（DOM抽出フォールバック、パッチ刷新S2 F-S2-2）", () => {
   const textContent = [
     "パッチ26.14ノートへようこそ。今回のアップデートでは複数のチャンピオンとアイテムに調整が加わっています。",

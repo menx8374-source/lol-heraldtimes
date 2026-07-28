@@ -75,14 +75,15 @@ export type ArticleBodyHeadingBlock = { type: "heading"; text: string; anchor?: 
  */
 export type ArticleBodyTocBlock = { type: "toc"; items: { label: string; anchor: string }[] };
 
-/** パッチ変更対象内の1スキル/1項目分の変更点グループ（パッチ記事刷新S2 F-S2-1）。
- * `changes` は本文（公式パッチノートHTML）の逐語（stat/before/after）そのもの、捏造しない。 */
+/** パッチ変更対象内の1スキル/1項目分の変更点グループ（パッチ記事刷新S2 F-S2-1、S6で記述式変更に対応）。
+ * `changes` は本文（公式パッチノートHTML）の逐語そのもの、捏造しない。数値変更は`stat`/`before`/`after`、
+ * 記述式変更（`⇒`を含まない）は`text`（＋任意で`stat`をラベルとして）を持つ。 */
 export type ArticleBodyPatchChangeGroup = {
   abilityKey?: "passive" | "Q" | "W" | "E" | "R" | "base";
   abilityName?: string;
   /** スキル/パッシブアイコンURL（S3で表示。S2では保持のみ）。 */
   abilityIconUrl?: string;
-  changes: { stat: string; before: string; after: string }[];
+  changes: { stat?: string; before?: string; after?: string; text?: string }[];
 };
 
 /**
@@ -95,10 +96,11 @@ export type ArticleBodyPatchChangeBlock = {
   targetName: string;
   /** 対象アイコン（champion square / item icon）URL（S3で表示。S2では保持のみ）。 */
   targetIconUrl?: string;
-  targetKind: "champion" | "item" | "rune" | "system" | "bugfix" | "other";
+  /** S6でarena（アリーナ）/augment（オーグメント）を追加。 */
+  targetKind: "champion" | "item" | "rune" | "system" | "bugfix" | "arena" | "augment" | "other";
   /** 対象単位の総合方向（成長G3の3分類と同じ語彙、算出はcompose.ts側）。 */
   direction: "buff" | "nerf" | "adjust";
-  /** 変更意図（blockquote、本文の文字そのまま）。 */
+  /** 変更意図（blockquote、本文の文字そのまま。複数ある場合は結合済み）。 */
   intent?: string;
   groups: ArticleBodyPatchChangeGroup[];
 };
@@ -260,20 +262,20 @@ function parseTocBlock(b: Record<string, unknown>, index: number): ArticleBodyTo
 }
 
 const PATCH_ABILITY_KEYS = new Set(["passive", "Q", "W", "E", "R", "base"]);
-const PATCH_TARGET_KINDS = new Set(["champion", "item", "rune", "system", "bugfix", "other"]);
+const PATCH_TARGET_KINDS = new Set(["champion", "item", "rune", "system", "bugfix", "arena", "augment", "other"]);
 const PATCH_DIRECTIONS = new Set(["buff", "nerf", "adjust"]);
 
 /**
- * patchChangeブロックのgroups[].changes[]を検証する（パッチ記事刷新S2 F-S2-1）。
- * stat/before/afterは本文の逐語そのものであるべきなので、非空文字列を必須にする（欠落は捨てずに
- * 例外を投げる＝呼び出し側の組み立てミスに気づけるようにする。既存 parseReactionBlock のlines検証と
- * 同じ方針）。
+ * patchChangeブロックのgroups[].changes[]を検証する（パッチ記事刷新S2 F-S2-1、S6で記述式変更に対応）。
+ * 数値変更（stat/before/afterが全て非空文字列）または記述式変更（textが非空文字列。statは任意の
+ * ラベル）のいずれかを満たすことを必須にする（どちらも満たさない欠落・不正は例外を投げる＝呼び出し側の
+ * 組み立てミスに気づけるようにする。既存 parseReactionBlock のlines検証と同じ方針）。
  */
 function parsePatchChangeGroupChanges(
   raw: unknown,
   index: number,
   groupIndex: number,
-): { stat: string; before: string; after: string }[] {
+): { stat?: string; before?: string; after?: string; text?: string }[] {
   if (!Array.isArray(raw)) {
     throw new InvalidArticleBodyError(`本文ブロック[${index}]のgroups[${groupIndex}]のchangesが配列ではありません`);
   }
@@ -284,19 +286,25 @@ function parsePatchChangeGroupChanges(
       );
     }
     const change = c as Record<string, unknown>;
-    if (
-      typeof change.stat !== "string" ||
-      change.stat.trim().length === 0 ||
-      typeof change.before !== "string" ||
-      change.before.trim().length === 0 ||
-      typeof change.after !== "string" ||
-      change.after.trim().length === 0
-    ) {
-      throw new InvalidArticleBodyError(
-        `本文ブロック[${index}]のgroups[${groupIndex}]のchanges[${changeIndex}]のstat/before/afterが不正です`,
-      );
+    const isNumeric =
+      typeof change.stat === "string" &&
+      change.stat.trim().length > 0 &&
+      typeof change.before === "string" &&
+      change.before.trim().length > 0 &&
+      typeof change.after === "string" &&
+      change.after.trim().length > 0;
+    if (isNumeric) {
+      return { stat: change.stat as string, before: change.before as string, after: change.after as string };
     }
-    return { stat: change.stat, before: change.before, after: change.after };
+    const isDescriptive = typeof change.text === "string" && change.text.trim().length > 0;
+    if (isDescriptive) {
+      const label =
+        typeof change.stat === "string" && change.stat.trim().length > 0 ? (change.stat as string) : undefined;
+      return { ...(label ? { stat: label } : {}), text: change.text as string };
+    }
+    throw new InvalidArticleBodyError(
+      `本文ブロック[${index}]のgroups[${groupIndex}]のchanges[${changeIndex}]がstat/before/after(数値変更)・text(記述式変更)のいずれも満たしません`,
+    );
   });
 }
 

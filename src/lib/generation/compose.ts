@@ -1115,13 +1115,20 @@ export function classifyPatchChange(change: { stat: string; before: string; afte
 
 /**
  * DOM抽出した対象（`PatchChangeTarget`）1件分の全変更点を集約し、対象単位のdirectionを判定する
- * （パッチ記事刷新S2 F-S2-3）。全groupの全changeを`classifyPatchChange`で分類し、全てbuff→buff、
- * 全てnerf→nerf、混在・変更点が1つも無い・全て判定不能→adjust（`classifyChampion`と同じ思想）。
+ * （パッチ記事刷新S2 F-S2-3、S6で記述式変更を考慮）。direction算出は数値変更（`⇒`ありでstat/before/after
+ * を持つもの）からのみ行う。全groupの全changeを`classifyPatchChange`で分類し、全てbuff→buff、
+ * 全てnerf→nerf、混在・数値変更が1つも無い（記述式のみ含め）・全て判定不能→adjust（安全側。
+ * `classifyChampion`と同じ思想）。
  */
 export function classifyPatchTargetDirection(target: PatchChangeTarget): "buff" | "nerf" | "adjust" {
-  const allChanges = target.groups.flatMap((g) => g.changes);
-  if (allChanges.length === 0) return "adjust";
-  const classifications = allChanges.map(classifyPatchChange);
+  const numericChanges = target.groups
+    .flatMap((g) => g.changes)
+    .filter(
+      (c): c is { stat: string; before: string; after: string } =>
+        c.stat !== undefined && c.before !== undefined && c.after !== undefined,
+    );
+  if (numericChanges.length === 0) return "adjust";
+  const classifications = numericChanges.map(classifyPatchChange);
   const hasBuff = classifications.includes("buff");
   const hasNerf = classifications.includes("nerf");
   if (hasBuff && hasNerf) return "adjust";
