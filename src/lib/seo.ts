@@ -104,3 +104,43 @@ export function buildBreadcrumbJsonLd(items: BreadcrumbItem[], siteUrl: string) 
     })),
   };
 }
+
+/** buildNewsArticleJsonLd の入力（記事メタ情報のみ。DB/フレームワーク非依存）。 */
+export type NewsArticleJsonLdInput = {
+  title: string;
+  category: string;
+  articleUrl: string;
+  publishedAt: Date;
+  updatedAt: Date;
+  images: string[];
+};
+
+/**
+ * 記事ページの NewsArticle 構造化データを組み立てる純関数（成長G5 F-G5-2）。
+ * 既存フィールド（headline/datePublished/articleSection/mainEntityOfPage/image）に加え、
+ * `dateModified`・`author`（まとめサイトのため運営組織名を返す。個人名は作らない）・
+ * `publisher.logo`（サイト既定のOGP画像をロゴ代わりに利用）を追加する。
+ * 埋め込み時は必ず `toSafeJsonLd` を通すこと（headline等に閲覧者/収集由来テキストが入り得るため）。
+ */
+export function buildNewsArticleJsonLd(
+  input: NewsArticleJsonLdInput,
+  siteUrl: string,
+  siteName: string,
+) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "NewsArticle",
+    headline: input.title,
+    datePublished: input.publishedAt.toISOString(),
+    dateModified: input.updatedAt.toISOString(),
+    articleSection: input.category,
+    mainEntityOfPage: { "@type": "WebPage", "@id": input.articleUrl },
+    image: input.images,
+    author: { "@type": "Organization", name: siteName },
+    publisher: {
+      "@type": "Organization",
+      name: siteName,
+      logo: { "@type": "ImageObject", url: `${siteUrl}/og-default.svg` },
+    },
+  };
+}

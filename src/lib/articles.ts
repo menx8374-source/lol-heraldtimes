@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { parseArticleBody, type ArticleBodyBlock } from "@/lib/article-body";
 import { selectRelatedArticles } from "@/lib/related-articles";
 import { buildArticleExcerpt } from "@/lib/seo";
+import { NEWS_SITEMAP_WINDOW_MS } from "@/lib/news-sitemap";
 import { mergeReactionCounts, type ReactionCounts } from "@/lib/reactions";
 import { cutoffForPeriod, mapRankingOrder, type RankingPeriod } from "@/lib/ranking";
 import {
@@ -55,6 +56,8 @@ export type ArticleDetail = ArticleSummary & {
   metaDescription: string | null;
   ogTitle: string | null;
   ogDescription: string | null;
+  /** 最終更新日時（成長G5 F-G5-2）。記事ページ JSON-LD の dateModified に使う。 */
+  updatedAt: Date;
 };
 
 /**
@@ -132,6 +135,7 @@ function toDetail(article: ArticleWithRelations): ArticleDetail {
     metaDescription: article.metaDescription,
     ogTitle: article.ogTitle,
     ogDescription: article.ogDescription,
+    updatedAt: article.updatedAt,
   };
 }
 
@@ -227,6 +231,23 @@ export async function listArticlesForSitemap(): Promise<{ slug: string; updatedA
   return prisma.article.findMany({
     where: PUBLISHED_ONLY,
     select: { slug: true, updatedAt: true },
+    orderBy: { publishedAt: "desc" },
+  });
+}
+
+/**
+ * ニュースサイトマップ（成長G5 F-G5-3）向け: 公開から48時間以内の公開済み記事のみを返す。
+ * 48時間の窓（NEWS_SITEMAP_WINDOW_MS）は lib/news-sitemap.ts の純関数と共有し、ここでは
+ * 同じ下限日時を where 条件に使うことで取得対象を有界化する（公開記事が増え続けても
+ * 直近48時間分だけを取得し、線形に肥大化しない）。
+ */
+export async function listArticlesForNewsSitemap(
+  now: Date = new Date(),
+): Promise<{ slug: string; title: string; publishedAt: Date }[]> {
+  const cutoff = new Date(now.getTime() - NEWS_SITEMAP_WINDOW_MS);
+  return prisma.article.findMany({
+    where: { ...PUBLISHED_ONLY, publishedAt: { gte: cutoff } },
+    select: { slug: true, title: true, publishedAt: true },
     orderBy: { publishedAt: "desc" },
   });
 }

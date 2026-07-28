@@ -13,7 +13,7 @@ import { buildHubLinks } from "@/lib/hub-links";
 import { categorySlugFor, isReactionCategory } from "@/lib/categories";
 import { pickDeterministicChampionSplashUrl } from "@/lib/generation/champion-splash";
 import { shouldShowHeroThumbnail } from "@/lib/article-body";
-import { buildArticleDescription, toSafeJsonLd } from "@/lib/seo";
+import { buildArticleDescription, buildNewsArticleJsonLd, toSafeJsonLd } from "@/lib/seo";
 import { getSiteUrl, SITE_NAME } from "@/lib/site";
 import { ArticleBodyView } from "@/components/article-body-view";
 import { ArticleThumbnail } from "@/components/article-thumbnail";
@@ -136,17 +136,21 @@ export default async function ArticlePage({ params }: Props) {
 
   const siteUrl = getSiteUrl();
   const articleUrl = `${siteUrl}/articles/${article.slug}`;
-  // 記事の構造化データ（F13）: 見出し・公開日時・カテゴリ等を含む記事メタ情報。
-  const structuredData = {
-    "@context": "https://schema.org",
-    "@type": "NewsArticle",
-    headline: article.title,
-    datePublished: article.publishedAt.toISOString(),
-    articleSection: article.category,
-    mainEntityOfPage: { "@type": "WebPage", "@id": articleUrl },
-    image: [resolveOgImageUrl(siteUrl, article.thumbnailUrl, article.category, article.slug)],
-    publisher: { "@type": "Organization", name: SITE_NAME },
-  };
+  // 記事の構造化データ（F13＋成長G5 F-G5-2）: 見出し・公開日時・更新日時・カテゴリ・
+  // 運営者(author)・publisher.logo を含む記事メタ情報。BreadcrumbList は Breadcrumbs
+  // コンポーネント（下記）が別scriptで併せて出力する。
+  const structuredData = buildNewsArticleJsonLd(
+    {
+      title: article.title,
+      category: article.category,
+      articleUrl,
+      publishedAt: article.publishedAt,
+      updatedAt: article.updatedAt,
+      images: [resolveOgImageUrl(siteUrl, article.thumbnailUrl, article.category, article.slug)],
+    },
+    siteUrl,
+    SITE_NAME,
+  );
 
   return (
     <>

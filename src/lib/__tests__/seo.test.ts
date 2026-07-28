@@ -3,6 +3,7 @@ import {
   buildArticleDescription,
   buildArticleExcerpt,
   buildBreadcrumbJsonLd,
+  buildNewsArticleJsonLd,
   toSafeJsonLd,
 } from "@/lib/seo";
 import type { ArticleBodyBlock } from "@/lib/article-body";
@@ -148,6 +149,48 @@ describe("buildBreadcrumbJsonLd（パンくずリスト構造化データ, 拡�
     const jsonLd = buildBreadcrumbJsonLd(
       [{ name: "</script><script>alert(1)</script>", path: "/" }],
       "https://example.com",
+    );
+    const json = toSafeJsonLd(jsonLd);
+    expect(json).not.toContain("</script>");
+    expect(json).not.toContain("<script>");
+  });
+});
+
+describe("buildNewsArticleJsonLd（NewsArticle構造化データ強化, 成長G5 F-G5-2）", () => {
+  const baseInput = {
+    title: "テスト記事タイトル",
+    category: "パッチ/メタ",
+    articleUrl: "https://example.com/articles/test-slug",
+    publishedAt: new Date("2026-07-20T00:00:00Z"),
+    updatedAt: new Date("2026-07-21T03:00:00Z"),
+    images: ["https://example.com/thumb.jpg"],
+  };
+
+  it("dateModified・author（Organization）・publisher.logoを含むNewsArticleを返す", () => {
+    const jsonLd = buildNewsArticleJsonLd(baseInput, "https://example.com", "テストサイト");
+
+    expect(jsonLd["@type"]).toBe("NewsArticle");
+    expect(jsonLd.headline).toBe("テスト記事タイトル");
+    expect(jsonLd.datePublished).toBe("2026-07-20T00:00:00.000Z");
+    expect(jsonLd.dateModified).toBe("2026-07-21T03:00:00.000Z");
+    expect(jsonLd.author).toEqual({ "@type": "Organization", name: "テストサイト" });
+    expect(jsonLd.publisher).toEqual({
+      "@type": "Organization",
+      name: "テストサイト",
+      logo: { "@type": "ImageObject", url: "https://example.com/og-default.svg" },
+    });
+    expect(jsonLd.image).toEqual(["https://example.com/thumb.jpg"]);
+    expect(jsonLd.mainEntityOfPage).toEqual({
+      "@type": "WebPage",
+      "@id": "https://example.com/articles/test-slug",
+    });
+  });
+
+  it("toSafeJsonLd と組み合わせると、タイトルにスクリプトタグが混入していても安全に埋め込める", () => {
+    const jsonLd = buildNewsArticleJsonLd(
+      { ...baseInput, title: "</script><script>alert(1)</script>" },
+      "https://example.com",
+      "テストサイト",
     );
     const json = toSafeJsonLd(jsonLd);
     expect(json).not.toContain("</script>");

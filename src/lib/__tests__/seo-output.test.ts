@@ -8,10 +8,12 @@ import { prisma } from "@/lib/prisma";
 import sitemap from "@/app/sitemap";
 import robots from "@/app/robots";
 import { GET as getFeed } from "@/app/feed.xml/route";
+import { GET as getNewsSitemap } from "@/app/news-sitemap.xml/route";
 import { generateMetadata as generateArticleMetadata } from "@/app/articles/[slug]/page";
 import { generateMetadata as generateCategoryMetadata } from "@/app/category/[slug]/page";
 import { metadata as rootMetadata } from "@/app/layout";
 import { pickDeterministicChampionSplashUrl } from "@/lib/generation/champion-splash";
+import { getArticleBySlug, listArticlesForNewsSitemap } from "@/lib/articles";
 import { getSiteUrl } from "@/lib/site";
 
 async function resetDb() {
@@ -283,6 +285,77 @@ describe("記事メタのSEO列フォールバック（リファクタリングS
     expect(meta.title).toBe("SEO用の記事タイトル(OGP列なし)");
     expect(meta.openGraph?.title).toBe("SEO用の記事タイトル(OGP列なし)");
     expect(meta.openGraph?.description).toBe("SEO用のメタディスクリプション(OGP列なし)。");
+  });
+});
+
+describe("記事詳細のupdatedAt（成長G5 F-G5-2）", () => {
+  it("getArticleBySlugの返り値にupdatedAt(Date)が含まれる（DBスキーマ変更なし・既存カラムの取得のみ）", async () => {
+    const article = await getArticleBySlug("published-article-a");
+    expect(article?.updatedAt).toBeInstanceOf(Date);
+  });
+});
+
+describe("news-sitemap.xml（成長G5 F-G5-3）", () => {
+  it("listArticlesForNewsSitemapは公開から48時間以内の公開記事のみを返す（それより古い/保留記事は除く）", async () => {
+    const now = new Date("2026-07-28T12:00:00Z");
+    await prisma.article.create({
+      data: {
+        slug: "news-recent",
+        title: "直近記事",
+        category: "パッチ/メタ",
+        body,
+        publishedAt: new Date(now.getTime() - 2 * 60 * 60 * 1000), // 2時間前
+        status: "published",
+      },
+    });
+    await prisma.article.create({
+      data: {
+        slug: "news-old",
+        title: "48時間より古い記事",
+        category: "パッチ/メタ",
+        body,
+        publishedAt: new Date(now.getTime() - 72 * 60 * 60 * 1000), // 72時間前
+        status: "published",
+      },
+    });
+
+    const articles = await listArticlesForNewsSitemap(now);
+    const slugs = articles.map((a) => a.slug);
+    expect(slugs).toContain("news-recent");
+    expect(slugs).not.toContain("news-old");
+    // beforeEach で投入される固定シード（2026-07-20/21/22公開）も48時間より古いため含まれない
+    expect(slugs).not.toContain("published-article-a");
+    expect(slugs).not.toContain("held-article-hidden");
+  });
+
+  it("GET(/news-sitemap.xml)は対象0件でも空の有効なurlsetを返す", async () => {
+    await prisma.article.deleteMany();
+    const res = await getNewsSitemap();
+    expect(res.headers.get("Content-Type")).toContain("xml");
+    const xml = await res.text();
+    expect(xml).toContain('xmlns:news="http://www.google.com/schemas/sitemap-news/0.9"');
+    expect(xml).toContain("<urlset");
+    expect(xml).toContain("</urlset>");
+    expect(xml).not.toContain("<url>");
+  });
+
+  it("GET(/news-sitemap.xml)は直近公開の記事をnews:news付きで返し、48時間より古い既存記事は含めない", async () => {
+    await prisma.article.create({
+      data: {
+        slug: "news-route-recent",
+        title: "ルートテスト用の直近記事",
+        category: "パッチ/メタ",
+        body,
+        publishedAt: new Date(),
+        status: "published",
+      },
+    });
+
+    const res = await getNewsSitemap();
+    const xml = await res.text();
+    expect(xml).toContain("news-route-recent");
+    expect(xml).toContain("<news:title>ルートテスト用の直近記事</news:title>");
+    expect(xml).not.toContain("published-article-a");
   });
 });
 

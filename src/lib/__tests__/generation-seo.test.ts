@@ -4,7 +4,7 @@
  * tags の上限・空要素除去を検証する。
  */
 import { describe, expect, it } from "vitest";
-import { generateSeo } from "@/lib/generation/seo";
+import { SEO_SYSTEM_PROMPT, generateSeo } from "@/lib/generation/seo";
 import { MockLLMClient, type LLMClient, type LLMMessage } from "@/lib/generation/llm-client";
 
 class StubLLMClient implements LLMClient {
@@ -25,6 +25,37 @@ const input = {
   bodyText: "ヤスオの基本攻撃力が引き下げられ、序盤のレーン戦が不利になったとの声が多い。",
   category: "パッチ/メタ",
 };
+
+describe("SEO_SYSTEM_PROMPT（成長G5 F-G5-1 ブリーフテスト1: カテゴリ別タイトル型のフリーズ）", () => {
+  it("静的な文字列であり、記事固有の動的値（タイトル・本文・カテゴリ名の具体値）を含まない", () => {
+    expect(typeof SEO_SYSTEM_PROMPT).toBe("string");
+    expect(SEO_SYSTEM_PROMPT).not.toContain(input.title);
+    expect(SEO_SYSTEM_PROMPT).not.toContain(input.bodyText);
+  });
+
+  it("共通ルール（重要語を前半28〜32字以内・全角区切り・捏造禁止）を含む", () => {
+    expect(SEO_SYSTEM_PROMPT).toContain("前半28〜32字以内");
+    expect(SEO_SYSTEM_PROMPT).toContain("｜");
+    expect(SEO_SYSTEM_PROMPT).toContain("・");
+    expect(SEO_SYSTEM_PROMPT).toContain("捏造");
+  });
+
+  it("カテゴリ別タイトル型（パッチ/メタ・反応・Riot公式・eスポーツ・チャンピオン）を含む", () => {
+    expect(SEO_SYSTEM_PROMPT).toContain("パッチ/メタ");
+    expect(SEO_SYSTEM_PROMPT).toContain("5chの反応・海外の反応");
+    expect(SEO_SYSTEM_PROMPT).toContain("Riot公式");
+    expect(SEO_SYSTEM_PROMPT).toContain("eスポーツ");
+    expect(SEO_SYSTEM_PROMPT).toContain("チャンピオン/Tier系");
+  });
+
+  it("出力形式(JSON: seoTitle/metaDescription/ogTitle/ogDescription/tags)の指示は既存のまま維持されている", () => {
+    expect(SEO_SYSTEM_PROMPT).toContain('"seoTitle"');
+    expect(SEO_SYSTEM_PROMPT).toContain('"metaDescription"');
+    expect(SEO_SYSTEM_PROMPT).toContain('"ogTitle"');
+    expect(SEO_SYSTEM_PROMPT).toContain('"ogDescription"');
+    expect(SEO_SYSTEM_PROMPT).toContain('"tags"');
+  });
+});
 
 describe("generateSeo（正常パス）", () => {
   it("正常なJSONを返すLLMなら、seoTitle/metaDescription/ogTitle/ogDescription/tagsを正規化して返す", async () => {
