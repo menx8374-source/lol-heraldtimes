@@ -265,3 +265,32 @@
   border-radius: 0.125rem;
   border-color: var(--news-rule);
 }
+
+/*
+ * パッチ記事刷新S4: LoL公式風ダーク意匠のカラートークン（research §5.1・公式CSS実測:
+ * 金 #C8AA6E・区切り #3b4353）。`[data-lol-patch]`（パッチ記事本文ラッパ、article-body-view.tsxの
+ * ArticleBodyViewがpatchChangeブロックを含む本文にのみ付与）の内側だけに適用する専用トークンで、
+ * サイトの`dark:`ユーティリティ（既存のダークモード切替）や`.design-news`テーマとは独立した固定色
+ * にする（パッチ記事はライト/ダーク両モードで同じLoL意匠になる）。実際の配色は
+ * article-body-view.tsx側でTailwind任意値(hex直書き)として適用しており、ここではトークン一覧を
+ * 単一の真実源として文書化する（`[data-lol-patch]`属性が付いた要素の内側にしか作用しないため、
+ * パッチ本文以外・他記事・一覧・ヘッダ/フッタへは一切波及しない）。
+ */
+[data-lol-patch] {
+  --lol-gold-bright: #f0e6d2;
+  --lol-gold: #c8aa6e;
+  --lol-gold-2: #c89b3c;
+  --lol-gold-3: #785a28;
+  --lol-gold-deep: #463714;
+  --lol-blue: #0ac8b9;
+  --lol-blue-2: #0397ab;
+  --lol-blue-3: #005a82;
+  --lol-bg: #010a13;
+  --lol-bg-2: #091428;
+  --lol-panel: #1e2328;
+  --lol-divider: #3b4353;
+  --lol-text: #cdbe91;
+  --lol-buff: #0ac8b9;
+  --lol-nerf: #e84057;
+  --lol-adjust: #c8aa6e;
+}

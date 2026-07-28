@@ -486,11 +486,12 @@ describe("ArticleBodyView（patchChangeブロック、パッチ記事刷新S2 F-
     expect(html).toContain("試合終盤のコーキの出撃時の火力を少し高めました。");
   });
 
-  it("各groupのスキルキー/abilityName・before ⇒ afterをstatとともに表示する", () => {
+  it("各groupのスキルキー/abilityName・before ⇒ afterをstatとともに表示する（S4で色分け用にspan分割されても逐語の内容は不変）", () => {
     expect(html).toContain("R - 連発ミサイル");
     expect(html).toContain("レベルアップごとの攻撃力");
-    expect(html).toContain("2 ⇒ 2.5");
-    expect(html).toContain("2秒～4秒 ⇒ 2秒～6秒");
+    const stripped = html.replace(/<[^>]+>/g, "");
+    expect(stripped).toContain("2 ⇒ 2.5");
+    expect(stripped).toContain("2秒～4秒 ⇒ 2秒～6秒");
   });
 
   it("data-patch-change / data-patch-direction属性を付与する", () => {
@@ -550,7 +551,7 @@ describe("ArticleBodyView（patchChangeブロックのアイコン表示、パ�
 
   it("アイコン欠落group(基本ステータス)は画像なしで表示が崩れない", () => {
     expect(html).toContain("レベルアップごとの攻撃力");
-    expect(html).toContain("2 ⇒ 2.5");
+    expect(html.replace(/<[^>]+>/g, "")).toContain("2 ⇒ 2.5");
   });
 
   it("対象/スキルのアイコンURLが両方欠落しても画像タグを出さず崩れない", () => {
@@ -572,5 +573,163 @@ describe("ArticleBodyView（patchChangeブロックのアイコン表示、パ�
     const multiHtml = renderToStaticMarkup(<ArticleBodyView blocks={[corkiIconBlock, secondBlock]} />);
     const matches = multiHtml.match(/画像: Riot Games \/ Data Dragon/g) ?? [];
     expect(matches.length).toBe(1);
+  });
+});
+
+describe("ArticleBodyView（LoL公式風パッチ意匠、パッチ記事刷新S4）", () => {
+  const buffBlock: ArticleBodyBlock = {
+    type: "patchChange",
+    targetName: "コーキ",
+    targetIconUrl: "https://ddragon.leagueoflegends.com/cdn/16.13.1/img/champion/Corki.png",
+    targetKind: "champion",
+    direction: "buff",
+    intent: "試合終盤の火力を少し高めました。",
+    groups: [
+      {
+        abilityKey: "R",
+        abilityName: "R - 連発ミサイル",
+        abilityIconUrl: "https://ddragon.leagueoflegends.com/cdn/16.13.1/img/spell/MissileBarrage.png",
+        changes: [{ stat: "ダメージ", before: "100", after: "120" }],
+      },
+    ],
+  };
+  const nerfBlock: ArticleBodyBlock = {
+    type: "patchChange",
+    targetName: "アジール",
+    targetKind: "champion",
+    direction: "nerf",
+    groups: [{ changes: [{ stat: "クールダウン", before: "10", after: "14" }] }],
+  };
+  const adjustBlock: ArticleBodyBlock = {
+    type: "patchChange",
+    targetName: "ブルーバフ",
+    targetKind: "system",
+    direction: "adjust",
+    groups: [{ changes: [{ stat: "スキルヘイスト", before: "10", after: "15" }] }],
+  };
+
+  it("patchChangeブロックを含む本文は data-lol-patch でラップされ、黒/紺地のグラデ・金文字クラスが付く(F-S4-1)", () => {
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={[buffBlock]} />);
+    expect(html).toContain("data-lol-patch");
+    expect(html).toContain("from-[#091428]");
+    expect(html).toContain("to-[#010A13]");
+    expect(html).toContain("text-[#CDBE91]");
+  });
+
+  it("patchChangeブロックを含まない本文（他記事）には data-lol-patch が一切漏れない(スコープ確認)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "heading", text: "見出し" },
+      { type: "paragraph", text: "通常の記事本文" },
+      { type: "toc", items: [{ label: "見出し", anchor: "sec-1" }] },
+      { type: "linkButton", url: "https://example.com/", label: "公式サイトへ" },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).not.toContain("data-lol-patch");
+    // toc/linkButtonも従来の（LoL化されていない）配色のまま
+    expect(html).toContain("bg-sky-700");
+    expect(html).toContain("text-sky-700");
+  });
+
+  it("対象アイコン(金枠・円形)・スキルアイコン(金枠・角丸)を表示する(F-S4-2)", () => {
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={[buffBlock]} />);
+    expect(html).toContain("border-[#C8AA6E]");
+    expect(html).toContain("rounded-full");
+    expect(html).toContain("border-[#785A28]");
+  });
+
+  it("directionバッジ（強化=teal/弱体化=赤/調整=金）が付く(F-S4-2)", () => {
+    const buffHtml = renderToStaticMarkup(<ArticleBodyView blocks={[buffBlock]} />);
+    expect(buffHtml).toContain("data-patch-direction-badge");
+    expect(buffHtml).toContain("bg-[#0AC8B9]");
+
+    const nerfHtml = renderToStaticMarkup(<ArticleBodyView blocks={[nerfBlock]} />);
+    expect(nerfHtml).toContain("bg-[#E84057]");
+
+    const adjustHtml = renderToStaticMarkup(<ArticleBodyView blocks={[adjustBlock]} />);
+    expect(adjustHtml).toContain("bg-[#C8AA6E]");
+  });
+
+  it("before=グレー弱め・after=direction色（buff=teal/nerf=赤/adjust=金）・⇒矢印(金)で色分けされる(F-S4-2)", () => {
+    const buffHtml = renderToStaticMarkup(<ArticleBodyView blocks={[buffBlock]} />);
+    expect(buffHtml).toContain("data-patch-before");
+    expect(buffHtml).toContain("text-[#9AA0A6]");
+    expect(buffHtml).toContain("data-patch-arrow");
+    expect(buffHtml).toContain("data-patch-after");
+    expect(buffHtml).toContain('<span data-patch-after="true" class="text-[#0AC8B9]">120</span>');
+
+    const nerfHtml = renderToStaticMarkup(<ArticleBodyView blocks={[nerfBlock]} />);
+    expect(nerfHtml).toContain('<span data-patch-after="true" class="text-[#E84057]">14</span>');
+
+    const adjustHtml = renderToStaticMarkup(<ArticleBodyView blocks={[adjustBlock]} />);
+    expect(adjustHtml).toContain('<span data-patch-after="true" class="text-[#C8AA6E]">15</span>');
+  });
+
+  it("3グループ見出し（主な強化=teal下線・主な弱体化=赤下線・その他の調整=金下線）が付く(F-S4-3)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "heading", text: "主な強化" },
+      buffBlock,
+      { type: "heading", text: "主な弱体化" },
+      nerfBlock,
+      { type: "heading", text: "その他の調整" },
+      adjustBlock,
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    const buffHeadingIndex = html.indexOf("主な強化");
+    const nerfHeadingIndex = html.indexOf("主な弱体化");
+    const adjustHeadingIndex = html.indexOf("その他の調整");
+    // 各見出し<h2>直前のclass属性を大まかに検証(下線色クラスが含まれる)
+    const buffH2Start = html.lastIndexOf("<h2", buffHeadingIndex);
+    const nerfH2Start = html.lastIndexOf("<h2", nerfHeadingIndex);
+    const adjustH2Start = html.lastIndexOf("<h2", adjustHeadingIndex);
+    expect(html.slice(buffH2Start, buffHeadingIndex)).toContain("border-[#0AC8B9]");
+    expect(html.slice(nerfH2Start, nerfHeadingIndex)).toContain("border-[#E84057]");
+    expect(html.slice(adjustH2Start, adjustHeadingIndex)).toContain("border-[#C8AA6E]");
+  });
+
+  it("冒頭サマリ段落(最初のparagraph)は紺地金文字のカードになる(F-S4-3)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "paragraph", text: "強化2体・弱体1体・調整1体のパッチです。" },
+      { type: "toc", items: [{ label: "主な強化", anchor: "sec-1" }] },
+      { type: "heading", text: "主な強化", anchor: "sec-1" },
+      buffBlock,
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    const summaryIndex = html.indexOf("強化2体・弱体1体・調整1体のパッチです。");
+    const pStart = html.lastIndexOf("<p", summaryIndex);
+    expect(html.slice(pStart, summaryIndex)).toContain("bg-[#091428]");
+    expect(html.slice(pStart, summaryIndex)).toContain("text-[#F0E6D2]");
+  });
+
+  it("目次(toc)が紺地・金見出し・tealリンクのLoL意匠になる(F-S4-3)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "toc", items: [{ label: "主な強化", anchor: "sec-1" }] },
+      { type: "heading", text: "主な強化", anchor: "sec-1" },
+      buffBlock,
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("text-[#0AC8B9]");
+    expect(html).toContain("bg-[#091428]");
+    expect(html).toContain('href="#sec-1"');
+  });
+
+  it("公式リンクボタンが紺地・金枠・金文字のLoL意匠になり、▶ラベルを保つ(F-S4-3)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      buffBlock,
+      { type: "linkButton", url: "https://www.leagueoflegends.com/patch-notes", label: "▶ パッチ26.14 公式パッチノートを読む" },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("border-[#C8AA6E]");
+    expect(html).toContain("hover:bg-[#C8AA6E]");
+    expect(html).toContain("▶ パッチ26.14 公式パッチノートを読む");
+    expect(html).not.toContain("bg-sky-700");
+  });
+
+  it("画像はmax-width:100%を保ち、レスポンシブ崩れの土台を保つ(F-S4-4、既存ImageBlockViewの回帰なし)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "image", url: "https://example.com/banner.jpg", alt: "バナー" },
+      buffBlock,
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("max-width:100%");
   });
 });

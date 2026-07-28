@@ -106,8 +106,17 @@ function ImageBlockView({ block }: { block: Extract<ArticleBodyBlock, { type: "i
 
 /** 大きく目立つボタン風の外部リンクブロック（拡張E42）。パッチ記事の公式パッチノートリンク等に使う。
  * ラベルのみを表示しURL文字列は出さない（すっきりした見た目にする）。ダーク/ライト両対応、
- * ホバーで少し暗くなる程度。外部リンクのため target="_blank" + rel="noopener noreferrer"。 */
-function LinkButtonBlockView({ block }: { block: Extract<ArticleBodyBlock, { type: "linkButton" }> }) {
+ * ホバーで少し暗くなる程度。外部リンクのため target="_blank" + rel="noopener noreferrer"。
+ * `lol`（パッチ記事刷新S4 F-S4-3）が真のときだけ、パッチ記事本文（`[data-lol-patch]`スコープ）専用の
+ * LoL公式風（紺地・金枠・金文字＋ホバーで金地反転）に切り替える。それ以外（一般のRiotニュース記事等）は
+ * 従来の青ボタンのまま（このブロックはパッチ記事専用ではなく共用のため、呼び出し元がisPatchArticleを渡す）。 */
+function LinkButtonBlockView({
+  block,
+  lol,
+}: {
+  block: Extract<ArticleBodyBlock, { type: "linkButton" }>;
+  lol?: boolean;
+}) {
   return (
     <div className="my-1 flex justify-center">
       <a
@@ -115,7 +124,11 @@ function LinkButtonBlockView({ block }: { block: Extract<ArticleBodyBlock, { typ
         target="_blank"
         rel="noopener noreferrer"
         data-link-button
-        className="inline-block rounded-lg bg-sky-700 px-8 py-3 text-center text-base font-bold text-white shadow transition-colors hover:bg-sky-800 dark:bg-sky-600 dark:hover:bg-sky-500"
+        className={
+          lol
+            ? "inline-block rounded-lg border border-[#C8AA6E] bg-[#091428] px-8 py-3 text-center text-base font-bold text-[#C8AA6E] shadow transition-colors hover:bg-[#C8AA6E] hover:text-[#091428]"
+            : "inline-block rounded-lg bg-sky-700 px-8 py-3 text-center text-base font-bold text-white shadow transition-colors hover:bg-sky-800 dark:bg-sky-600 dark:hover:bg-sky-500"
+        }
       >
         {block.label}
       </a>
@@ -126,19 +139,40 @@ function LinkButtonBlockView({ block }: { block: Extract<ArticleBodyBlock, { typ
 /**
  * 目次（TOC）ブロック（成長G3 F-G3-4）。記事内の章見出し（`<h2 id={anchor}>`）へのページ内リンク一覧。
  * `aria-label="目次"` の nav 要素にすることでスクリーンリーダー等からも目次と識別できる。
+ * `lol`（パッチ記事刷新S4 F-S4-3）が真のときは、パッチ記事本文専用のLoL公式風（紺地・金見出し・
+ * tealリンク）に切り替える（toc自体はパッチ以外の記事でも使われる共用ブロックのため条件分岐する）。
  */
-function TocBlockView({ block }: { block: Extract<ArticleBodyBlock, { type: "toc" }> }) {
+function TocBlockView({
+  block,
+  lol,
+}: {
+  block: Extract<ArticleBodyBlock, { type: "toc" }>;
+  lol?: boolean;
+}) {
   return (
     <nav
       aria-label="目次"
       data-article-toc
-      className="rounded border border-neutral-300 bg-neutral-50 p-3 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+      className={
+        lol
+          ? "rounded-lg border border-[#463714] bg-[#091428] p-3 text-sm"
+          : "rounded border border-neutral-300 bg-neutral-50 p-3 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+      }
     >
-      <p className="mb-1 font-bold text-neutral-700 dark:text-neutral-300">目次</p>
+      <p className={lol ? "mb-1 font-bold text-[#F0E6D2]" : "mb-1 font-bold text-neutral-700 dark:text-neutral-300"}>
+        目次
+      </p>
       <ol className="list-decimal space-y-0.5 pl-5">
         {block.items.map((item, i) => (
           <li key={i}>
-            <a href={`#${item.anchor}`} className="text-sky-700 underline dark:text-sky-400">
+            <a
+              href={`#${item.anchor}`}
+              className={
+                lol
+                  ? "text-[#0AC8B9] underline hover:text-[#5CE1D3]"
+                  : "text-sky-700 underline dark:text-sky-400"
+              }
+            >
               {item.label}
             </a>
           </li>
@@ -159,11 +193,53 @@ const PATCH_DIRECTION_LABEL: Record<"buff" | "nerf" | "adjust", string> = {
 const PATCH_ICON_CREDIT = "画像: Riot Games / Data Dragon";
 
 /**
- * patchChangeブロックの対象アイコン/スキルアイコン用の小さな正方画像（パッチ記事刷新S3 F-S3-2）。
- * URLは既にarticle-body.ts側（`isSafeImageUrl`）で検証済み（https/データURI/ローカルのみ）。
- * srcが無ければ何も描画しない（アイコン無しgroupが画像なしで崩れないようにする）。既存の
- * ImageBlockViewと同様プレーンな`<img>`表示（Next Imageは使わない＝既存の画像表示方法に合わせる。
- * デザイン(黒/紺・金の枠等)はS4のためここでは素朴な枠のみ）。
+ * パッチ変更カード（PatchChangeBlockView）・3グループ見出しのLoL公式風カラートークン
+ * （パッチ記事刷新S4 F-S4-2・F-S4-3、research §5.1・公式CSS実測: 金#C8AA6E・区切り#3b4353）。
+ * direction（強化=teal/弱体化=赤/調整=金）ごとに、directionバッジ・変更後(after)値の強調色・
+ * 3グループ見出しの下線色を1箇所にまとめる。各クラス文字列はTailwindの静的スキャン対象になるよう
+ * 完全な形でここに書く（実行時の文字列結合では生成CSSが漏れるため行わない）。
+ * PatchChangeBlockViewはpatchChangeブロック専用（=常にパッチ記事本文内でのみ描画される）ため、
+ * `[data-lol-patch]`スコープの内外を条件分岐せず直接この固定色で描画してよい。
+ */
+const PATCH_DIRECTION_STYLE: Record<
+  "buff" | "nerf" | "adjust",
+  { badgeClass: string; afterClass: string; headingBorderClass: string }
+> = {
+  buff: {
+    badgeClass: "bg-[#0AC8B9] text-[#010A13]",
+    afterClass: "text-[#0AC8B9]",
+    headingBorderClass: "border-[#0AC8B9]",
+  },
+  nerf: {
+    badgeClass: "bg-[#E84057] text-[#010A13]",
+    afterClass: "text-[#E84057]",
+    headingBorderClass: "border-[#E84057]",
+  },
+  adjust: {
+    badgeClass: "bg-[#C8AA6E] text-[#010A13]",
+    afterClass: "text-[#C8AA6E]",
+    headingBorderClass: "border-[#C8AA6E]",
+  },
+};
+
+/**
+ * 3グループ見出し（パッチ記事刷新S4 F-S4-3）の下線色を、見出しテキストの先頭一致で判定する純関数
+ * （compose.ts側の固定文言「主な強化」「主な弱体化」に対応。それ以外＝「その他の調整」・
+ * アイテム/システム等のセクション見出しは金下線を既定にする）。
+ */
+function patchHeadingDirectionStyle(headingText: string): (typeof PATCH_DIRECTION_STYLE)["adjust"] {
+  if (headingText.startsWith("主な強化")) return PATCH_DIRECTION_STYLE.buff;
+  if (headingText.startsWith("主な弱体化")) return PATCH_DIRECTION_STYLE.nerf;
+  return PATCH_DIRECTION_STYLE.adjust;
+}
+
+/**
+ * patchChangeブロックの対象アイコン/スキルアイコン用の小さな正方画像（パッチ記事刷新S3 F-S3-2、
+ * S4 F-S4-2でLoL公式風の金枠に変更）。URLは既にarticle-body.ts側（`isSafeImageUrl`）で検証済み
+ * （https/データURI/ローカルのみ）。srcが無ければ何も描画しない（アイコン無しgroupが画像なしで
+ * 崩れないようにする）。既存のImageBlockViewと同様プレーンな`<img>`表示（Next Imageは使わない＝
+ * 既存の画像表示方法に合わせる）。対象アイコンは目立つ金の太枠（円形）、スキル/パッシブアイコンは
+ * 控えめな金枠（角丸）にする。
  */
 function PatchIconImg({
   src,
@@ -175,7 +251,10 @@ function PatchIconImg({
   size: "target" | "ability";
 }) {
   if (!src) return null;
-  const sizeClass = size === "target" ? "h-8 w-8" : "h-5 w-5";
+  const sizeClass =
+    size === "target"
+      ? "h-8 w-8 rounded-full border-2 border-[#C8AA6E]"
+      : "h-5 w-5 rounded border border-[#785A28]";
   return (
     // eslint-disable-next-line @next/next/no-img-element -- 既存の画像表示方法(通常img、ホットリンク・ローカル保存しない)に合わせる
     <img
@@ -183,18 +262,21 @@ function PatchIconImg({
       alt={alt}
       loading="lazy"
       decoding="async"
-      className={`${sizeClass} shrink-0 rounded border border-neutral-300 object-contain dark:border-neutral-700`}
+      className={`${sizeClass} shrink-0 bg-[#1E2328] object-contain`}
     />
   );
 }
 
 /**
- * パッチ変更「対象単位」ブロックの素朴なレンダリング（パッチ記事刷新S2 F-S2-4、S3 F-S3-2で画像追加）。
- * 対象名＋directionラベル・対象アイコン・各groupのスキルキー/abilityName・スキルアイコン・
- * `before ⇒ after`（statとともに）・intentをプレーンなHTMLで表示する。画像が欠落しているgroup/対象は
- * 画像なしで崩れない。`showCredit`が真のブロックだけ出典クレジットを1回表示する（呼び出し元の
- * ArticleBodyViewが記事内最初のpatchChangeブロックにのみ渡す）。デザイン（黒/紺・金）はS4のため
- * プレーンに留める。
+ * パッチ変更「対象単位」ブロックのLoL公式風レンダリング（パッチ記事刷新S2 F-S2-4で素朴表示として導入、
+ * S3 F-S3-2でアイコン追加、S4 F-S4-2でLoL公式パッチノート風の意匠に変更）。
+ * 対象名＋directionバッジ・対象アイコン（金枠）・各groupのスキルキー/abilityName・スキルアイコン
+ * （金枠）・`stat：before ⇒ after`（before=グレー弱め・after=direction色で強調）・intentを表示する。
+ * 逐語のテキスト（stat/before/after/intent等）自体は変更しない（色分けのためspan要素で囲むのみ）。
+ * 画像が欠落しているgroup/対象は画像なしで崩れない。`showCredit`が真のブロックだけ出典クレジットを
+ * 1回表示する（呼び出し元のArticleBodyViewが記事内最初のpatchChangeブロックにのみ渡す）。
+ * このコンポーネントはpatchChangeブロック専用（=常にパッチ記事本文内）のため、`[data-lol-patch]`
+ * スコープの内外に関わらず直接LoL固定色で描画する。
  */
 function PatchChangeBlockView({
   block,
@@ -203,44 +285,46 @@ function PatchChangeBlockView({
   block: Extract<ArticleBodyBlock, { type: "patchChange" }>;
   showCredit?: boolean;
 }) {
+  const style = PATCH_DIRECTION_STYLE[block.direction];
   return (
     <div
       data-patch-change
       data-patch-direction={block.direction}
-      className="rounded border border-neutral-300 p-3 text-sm dark:border-neutral-700"
+      className="rounded-lg border border-[#463714] border-t-2 border-t-[#C89B3C] bg-[#091428] p-3 text-sm text-[#CDBE91]"
     >
       <div className="mb-1 flex flex-wrap items-center gap-2">
         <PatchIconImg src={block.targetIconUrl} alt={block.targetName} size="target" />
-        <span className="font-bold">{block.targetName}</span>
-        <span className="text-xs text-neutral-500 dark:text-neutral-400">
-          [{PATCH_DIRECTION_LABEL[block.direction]}]
+        <span className="font-bold text-[#F0E6D2]">{block.targetName}</span>
+        <span
+          data-patch-direction-badge
+          className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${style.badgeClass}`}
+        >
+          {PATCH_DIRECTION_LABEL[block.direction]}
         </span>
       </div>
-      {block.intent && (
-        <p className="mb-2 text-xs italic text-neutral-600 dark:text-neutral-400">{block.intent}</p>
-      )}
+      {block.intent && <p className="mb-2 text-xs italic text-[#C8AA6E]">{block.intent}</p>}
       <div className="flex flex-col gap-2">
         {block.groups.map((g, gi) => (
           <div key={gi}>
             {(g.abilityName || g.abilityKey) && (
-              <p className="mb-0.5 flex items-center gap-1 text-xs font-bold text-neutral-600 dark:text-neutral-400">
+              <p className="mb-0.5 flex items-center gap-1 text-xs font-bold text-[#F0E6D2]">
                 <PatchIconImg src={g.abilityIconUrl} alt={g.abilityName ?? g.abilityKey ?? ""} size="ability" />
                 <span>{g.abilityName ?? g.abilityKey}</span>
               </p>
             )}
-            <ul className="list-disc pl-5">
+            <ul className="list-disc pl-5 marker:text-[#785A28]">
               {g.changes.map((c, ci) => (
                 <li key={ci}>
-                  {c.stat}：{c.before} ⇒ {c.after}
+                  {c.stat}：<span data-patch-before className="text-[#9AA0A6]">{c.before}</span>
+                  <span data-patch-arrow className="text-[#C8AA6E]">{" ⇒ "}</span>
+                  <span data-patch-after className={style.afterClass}>{c.after}</span>
                 </li>
               ))}
             </ul>
           </div>
         ))}
       </div>
-      {showCredit && (
-        <p className="mt-2 text-[10px] text-neutral-400 dark:text-neutral-500">{PATCH_ICON_CREDIT}</p>
-      )}
+      {showCredit && <p className="mt-2 text-[10px] text-[#785A28]">{PATCH_ICON_CREDIT}</p>}
     </div>
   );
 }
@@ -345,10 +429,19 @@ export function ArticleBodyView({ blocks }: { blocks: ArticleBodyBlock[] }) {
   // patchChangeブロックのアイコン出典クレジット（パッチ記事刷新S3 F-S3-2）は記事内で1箇所だけ表示する
   // ため、最初のpatchChangeブロックのindexだけを求める（複数対象があっても重複表示しない）。
   const firstPatchChangeIndex = blocks.findIndex((block) => block.type === "patchChange");
+  // パッチ記事刷新S4 F-S4-1: patchChangeブロックを1つでも含む本文＝公式パッチノート由来のdetailed
+  // パッチ記事、と判定し、その場合だけ本文全体をLoL公式風ダーク意匠（[data-lol-patch]）でラップする。
+  // それ以外（反応記事・fact/summary記事・パッチ以外のRiotニュース等）は従来のライト基調のまま
+  // （サイト全体・他記事・ヘッダ/フッタには一切影響しないスコープ限定）。
+  const isPatchArticle = firstPatchChangeIndex !== -1;
+  // 冒頭サマリ段落（パッチ記事刷新S4 F-S4-3）は、パッチ記事本文中で最初に出現するparagraphブロック
+  // （compose.ts側で画像バナーの直後・目次/本文の直前に1つだけ組み立てられる）。それだけを紺地金文字の
+  // サマリカードにする。パッチ記事でない場合はこの判定自体を行わない（他記事の段落に影響させない）。
+  const firstParagraphIndex = isPatchArticle ? blocks.findIndex((block) => block.type === "paragraph") : -1;
   // 連続する reaction ブロックを1枠にまとめる（拡張E12）。それ以外のブロックは従来どおり1件ずつ描画する。
   const groups = groupArticleBodyBlocksForDisplay(blocks);
 
-  return (
+  const content = (
     <div className="flex flex-col gap-3">
       {groups.map((group) => {
         if (group.kind === "reaction-group") {
@@ -356,17 +449,21 @@ export function ArticleBodyView({ blocks }: { blocks: ArticleBodyBlock[] }) {
         }
         const { block, index } = group;
         if (block.type === "heading") {
+          // 3グループ見出し（強化=teal下線／弱体化=赤下線／その他の調整=金下線、パッチ記事刷新S4 F-S4-3）。
+          const headingClassName = isPatchArticle
+            ? `mt-2 border-b-2 pb-1 text-base font-bold text-[#F0E6D2] sm:text-lg ${patchHeadingDirectionStyle(block.text).headingBorderClass}`
+            : "mt-2 text-base font-bold sm:text-lg";
           return (
             <Fragment key={index}>
               {index === adBeforeBlockIndex && <AdSlot position="article-in-body" />}
-              <h2 id={block.anchor} className="mt-2 text-base font-bold sm:text-lg">
+              <h2 id={block.anchor} className={headingClassName}>
                 {block.text}
               </h2>
             </Fragment>
           );
         }
         if (block.type === "toc") {
-          return <TocBlockView key={index} block={block} />;
+          return <TocBlockView key={index} block={block} lol={isPatchArticle} />;
         }
         if (block.type === "quote") {
           // 引用（掲示板/SNSの原文要約）は自サイト生成文（見出し・段落）と視覚的に区別する（F15）:
@@ -396,19 +493,42 @@ export function ArticleBodyView({ blocks }: { blocks: ArticleBodyBlock[] }) {
           return <EmbedBlockView key={index} block={block} />;
         }
         if (block.type === "linkButton") {
-          return <LinkButtonBlockView key={index} block={block} />;
+          return <LinkButtonBlockView key={index} block={block} lol={isPatchArticle} />;
         }
         if (block.type === "patchChange") {
           return (
             <PatchChangeBlockView key={index} block={block} showCredit={index === firstPatchChangeIndex} />
           );
         }
+        // 冒頭サマリ段落（パッチ記事のみ、F-S4-3）は紺地金文字のカードにする。それ以外の段落は従来どおり。
         return (
-          <p key={index} className="text-sm leading-relaxed sm:text-base">
+          <p
+            key={index}
+            className={
+              index === firstParagraphIndex
+                ? "rounded-lg border border-[#463714] bg-[#091428] p-3 text-sm font-bold text-[#F0E6D2] sm:text-base"
+                : "text-sm leading-relaxed sm:text-base"
+            }
+          >
             {block.text}
           </p>
         );
       })}
+    </div>
+  );
+
+  if (!isPatchArticle) {
+    return content;
+  }
+
+  // パッチ記事本文ラッパ（パッチ記事刷新S4 F-S4-1）。紺〜黒のグラデ地・LoLゴールドの本文色。
+  // `[data-lol-patch]`のdata属性はglobals.css側のトークン定義（文書化用）とも対応するスコープの目印。
+  return (
+    <div
+      data-lol-patch
+      className="rounded-lg bg-gradient-to-b from-[#091428] to-[#010A13] p-4 text-[#CDBE91] sm:p-6"
+    >
+      {content}
     </div>
   );
 }
