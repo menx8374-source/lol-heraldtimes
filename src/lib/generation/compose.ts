@@ -25,7 +25,13 @@ import { CHAMPIONS } from "@/lib/generation/title";
 import { isSafeImageUrl } from "@/lib/image-url";
 import { buildChampionSplashUrl, championNameToId } from "@/lib/generation/champion-splash";
 import { buildTranslationGlossaryText } from "@/lib/generation/translation-glossary";
-import { parsePatchNotesHtml, type PatchChangeTarget } from "@/lib/generation/patch-notes-parser";
+import {
+  parsePatchNotesHtml,
+  inferDdragonVersionFromTargets,
+  buildChampionSquareIconUrl,
+  buildItemIconUrl,
+  type PatchChangeTarget,
+} from "@/lib/generation/patch-notes-parser";
 
 export type GenerationCandidateInput = {
   sourceType: SourceType;
@@ -1551,17 +1557,44 @@ function composeDetailedPatchBodyFromText(
   return blocks;
 }
 
-/** DOM抽出した1対象（`PatchChangeTarget`）を`patchChange`ブロックへ変換する（パッチ記事刷新S2 F-S2-2）。
+/**
+ * 対象アイコン(targetIconUrl)がDOM抽出で取れなかった場合のフォールバック（パッチ記事刷新S3 F-S3-3、
+ * 軽量・任意）。champion対象は id（アイコンURLファイル名解決）または名前（`championNameToId`、
+ * champion-splash.tsの既存ID解決を再利用）からDDragon champion square URLを、item対象は
+ * id（数値）からDDragonアイテムアイコンURLを組み立てる。ddragonVersionが取れない（同一パッチの
+ * どのアイコンからもバージョンを推定できない）場合や解決不能な場合はundefined（画像を省略するだけで
+ * 記事は壊れない・過剰実装しない）。スキルアイコンの補完は困難なため対象外（brief F-S3-3どおり）。
+ */
+function resolveFallbackTargetIconUrl(
+  target: PatchChangeTarget,
+  ddragonVersion: string | undefined,
+): string | undefined {
+  if (target.iconUrl || !ddragonVersion) return undefined;
+  if (target.kind === "champion") {
+    const championId = target.id || championNameToId(target.name) || undefined;
+    return championId ? buildChampionSquareIconUrl(championId, ddragonVersion) : undefined;
+  }
+  if (target.kind === "item" && target.id) {
+    return buildItemIconUrl(target.id, ddragonVersion);
+  }
+  return undefined;
+}
+
+/** DOM抽出した1対象（`PatchChangeTarget`）を`patchChange`ブロックへ変換する（パッチ記事刷新S2 F-S2-2、
+ * S3 F-S3-2/F-S3-3で画像表示・フォールバックに対応）。
  * 対象名(h3)・スキルキー・変更前後・意図は本文の文字そのまま（逐語維持・捏造禁止）。画像URLは
- * 保持するだけ（表示はS3）。 */
+ * DOM抽出済みの正規化URL（`patch-notes-parser.ts`のnormalizePatchIconUrl適用済み）を優先し、
+ * 欠落時のみフォールバックで補完する。 */
 function buildPatchChangeBlock(
   target: PatchChangeTarget,
   direction: "buff" | "nerf" | "adjust",
+  ddragonVersion: string | undefined,
 ): ArticleBodyPatchChangeBlock {
+  const targetIconUrl = target.iconUrl ?? resolveFallbackTargetIconUrl(target, ddragonVersion);
   return {
     type: "patchChange",
     targetName: target.name,
-    ...(target.iconUrl ? { targetIconUrl: target.iconUrl } : {}),
+    ...(targetIconUrl ? { targetIconUrl } : {}),
     targetKind: target.kind,
     direction,
     ...(target.intent ? { intent: target.intent } : {}),
@@ -1637,6 +1670,9 @@ function composeDetailedPatchBody(
     list.push(t);
   }
 
+  // 同一パッチ内の他アイコンURLからDDragonバージョンを推定する（S3 F-S3-3のフォールバック画像組み立てに使う）。
+  const ddragonVersion = inferDdragonVersionFromTargets(targets);
+
   // 本文ブロック（見出し以外の中身）を組み立てつつ、各見出しに連番anchorを付与する。
   const contentBlocks: ArticleBodyBlock[] = [];
   let anchorSeq = 0;
@@ -1648,14 +1684,14 @@ function composeDetailedPatchBody(
   for (const g of championGroups) {
     pushHeading(g.heading);
     for (const t of g.items) {
-      contentBlocks.push(buildPatchChangeBlock(t, directionByTarget.get(t)!));
+      contentBlocks.push(buildPatchChangeBlock(t, directionByTarget.get(t)!, ddragonVersion));
     }
   }
 
   for (const heading of otherSectionOrder) {
     pushHeading(heading);
     for (const t of otherBySection.get(heading)!) {
-      contentBlocks.push(buildPatchChangeBlock(t, directionByTarget.get(t)!));
+      contentBlocks.push(buildPatchChangeBlock(t, directionByTarget.get(t)!, ddragonVersion));
     }
   }
 

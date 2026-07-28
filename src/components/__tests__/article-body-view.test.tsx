@@ -510,3 +510,67 @@ describe("ArticleBodyView（patchChangeブロック、パッチ記事刷新S2 F-
     expect(mixedHtml).toContain("data-patch-change");
   });
 });
+
+describe("ArticleBodyView（patchChangeブロックのアイコン表示、パッチ記事刷新S3 F-S3-2）", () => {
+  const corkiIconBlock: ArticleBodyBlock = {
+    type: "patchChange",
+    targetName: "コーキ",
+    targetIconUrl: "https://ddragon.leagueoflegends.com/cdn/16.13.1/img/champion/Corki.png",
+    targetKind: "champion",
+    direction: "buff",
+    groups: [
+      {
+        abilityKey: "R",
+        abilityName: "R - 連発ミサイル",
+        abilityIconUrl: "https://ddragon.leagueoflegends.com/cdn/16.13.1/img/spell/MissileBarrage.png",
+        changes: [{ stat: "通常攻撃による残りリチャージ時間短縮量", before: "2秒～4秒", after: "2秒～6秒" }],
+      },
+      {
+        // アイコン欠落group(基本ステータス相当)は画像なしで崩れないことを確認する
+        abilityKey: "base",
+        changes: [{ stat: "レベルアップごとの攻撃力", before: "2", after: "2.5" }],
+      },
+    ],
+  };
+  const html = renderToStaticMarkup(<ArticleBodyView blocks={[corkiIconBlock]} />);
+
+  it("対象アイコンを表示し、altに対象名を付与する", () => {
+    expect(html).toContain('src="https://ddragon.leagueoflegends.com/cdn/16.13.1/img/champion/Corki.png"');
+    expect(html).toContain('alt="コーキ"');
+  });
+
+  it("スキルアイコンを表示し、altにabilityNameを付与する", () => {
+    expect(html).toContain('src="https://ddragon.leagueoflegends.com/cdn/16.13.1/img/spell/MissileBarrage.png"');
+    expect(html).toContain('alt="R - 連発ミサイル"');
+  });
+
+  it("画像の出典クレジットを1回表示する", () => {
+    expect(html).toContain("画像: Riot Games / Data Dragon");
+  });
+
+  it("アイコン欠落group(基本ステータス)は画像なしで表示が崩れない", () => {
+    expect(html).toContain("レベルアップごとの攻撃力");
+    expect(html).toContain("2 ⇒ 2.5");
+  });
+
+  it("対象/スキルのアイコンURLが両方欠落しても画像タグを出さず崩れない", () => {
+    const noIconBlock: ArticleBodyBlock = {
+      type: "patchChange",
+      targetName: "ブルーバフ",
+      targetKind: "system",
+      direction: "adjust",
+      groups: [{ changes: [{ stat: "スキルヘイスト", before: "10", after: "10 / 15 / 20" }] }],
+    };
+    const noIconHtml = renderToStaticMarkup(<ArticleBodyView blocks={[noIconBlock]} />);
+    expect(noIconHtml).not.toContain("<img");
+    expect(noIconHtml).toContain("ブルーバフ");
+    expect(noIconHtml).toContain("スキルヘイスト");
+  });
+
+  it("複数のpatchChangeブロックがあっても出典クレジットは最初の1ブロックだけに表示される(重複表示しない)", () => {
+    const secondBlock: ArticleBodyBlock = { ...corkiIconBlock, targetName: "ガレン" };
+    const multiHtml = renderToStaticMarkup(<ArticleBodyView blocks={[corkiIconBlock, secondBlock]} />);
+    const matches = multiHtml.match(/画像: Riot Games \/ Data Dragon/g) ?? [];
+    expect(matches.length).toBe(1);
+  });
+});

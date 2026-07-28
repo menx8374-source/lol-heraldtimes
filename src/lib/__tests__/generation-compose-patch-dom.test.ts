@@ -123,6 +123,52 @@ describe("composeArticleBody（riot detailedパッチ本文、DOM抽出、パッ
   });
 });
 
+describe("composeArticleBody（patchChangeブロックのアイコンURL、パッチ記事刷新S3 F-S3-1/F-S3-3）", () => {
+  it("対象アイコン/スキルアイコンが正規化後のDDragon直URLで出る(akamaihdラッパー解除)", async () => {
+    const body = await composeArticleBody(
+      { sourceType: "riot", title: "パッチ26.14ノート公開", content: dummyContent, sourceUrl, html: fixtureHtml },
+      llm,
+    );
+    const corki = patchChangeBlocks(body).find((b) => b.targetName === "コーキ")!;
+    expect(corki.targetIconUrl).toBe("https://ddragon.leagueoflegends.com/cdn/16.13.1/img/champion/Corki.png");
+    const rGroup = corki.groups.find((g) => g.abilityKey === "R")!;
+    expect(rGroup.abilityIconUrl).toBe(
+      "https://ddragon.leagueoflegends.com/cdn/16.13.1/img/spell/MissileBarrage.png",
+    );
+  });
+
+  it("http(非https)のf=しか持たないアイテムはtargetIconUrlがDDragonバージョン推定によるフォールバックで補完される", async () => {
+    const body = await composeArticleBody(
+      { sourceType: "riot", title: "パッチ26.14ノート公開", content: dummyContent, sourceUrl, html: fixtureHtml },
+      llm,
+    );
+    const immortalPath = patchChangeBlocks(body).find((b) => b.targetName === "不滅の道")!;
+    // フィクスチャのf=は http(非https) のためDOM抽出のiconUrl自体はundefinedになるが、
+    // 同一パッチ内の他アイコン(champion)からDDragonバージョンが推定され、idからitemアイコンURLが補完される。
+    expect(immortalPath.targetIconUrl).toBe("https://ddragon.leagueoflegends.com/cdn/16.13.1/img/item/3168.png");
+  });
+
+  it("https直のf=を持つアイテムはDOM抽出のiconUrlがそのまま使われる(フォールバック不要)", async () => {
+    const body = await composeArticleBody(
+      { sourceType: "riot", title: "パッチ26.14ノート公開", content: dummyContent, sourceUrl, html: fixtureHtml },
+      llm,
+    );
+    const rocketbelt = patchChangeBlocks(body).find((b) => b.targetName === "ヘクステック ロケットベルト")!;
+    expect(rocketbelt.targetIconUrl).toBe(
+      "https://ddragon.leagueoflegends.com/cdn/16.13.1/img/item/223152.png",
+    );
+  });
+
+  it("system対象(ブルーバフ)はアイコンURLを持たない(壊れない・undefinedのまま)", async () => {
+    const body = await composeArticleBody(
+      { sourceType: "riot", title: "パッチ26.14ノート公開", content: dummyContent, sourceUrl, html: fixtureHtml },
+      llm,
+    );
+    const blueBuff = patchChangeBlocks(body).find((b) => b.targetName === "ブルーバフ")!;
+    expect(blueBuff.targetIconUrl).toBeUndefined();
+  });
+});
+
 describe("classifyPatchChange（direction算出、パッチ刷新S2 F-S2-3）", () => {
   it("攻撃力2⇒2.5(単一値の増加)はbuff", () => {
     expect(classifyPatchChange({ stat: "レベルアップごとの攻撃力", before: "2", after: "2.5" })).toBe("buff");

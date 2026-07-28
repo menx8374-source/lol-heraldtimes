@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { parsePatchNotesHtml, type PatchChangeTarget } from "@/lib/generation/patch-notes-parser";
+import {
+  parsePatchNotesHtml,
+  normalizePatchIconUrl,
+  inferDdragonVersionFromTargets,
+  buildChampionSquareIconUrl,
+  buildItemIconUrl,
+  type PatchChangeTarget,
+} from "@/lib/generation/patch-notes-parser";
 import { classifyChange } from "@/lib/generation/compose";
 
 /**
@@ -109,10 +116,29 @@ describe("parsePatchNotesHtml（対象種別/ID・意図・アイコンURL）", 
     expect(corki.intent).toContain("試合終盤のコーキの出撃時の火力を少し高め");
   });
 
-  it("対象アイコンURL(iconUrl)がブロック先頭のimg srcから取れる", () => {
+  it("対象アイコンURL(iconUrl)がブロック先頭のimg srcから取れる(パッチ刷新S3: akamaihdラッパー正規化後のDDragon直URL)", () => {
     const azir = findByName(targets, "アジール")!;
-    expect(azir.iconUrl).toMatch(/^https:\/\//);
-    expect(azir.iconUrl).toContain("Azir.png");
+    expect(azir.iconUrl).toBe("https://ddragon.leagueoflegends.com/cdn/16.13.1/img/champion/Azir.png");
+  });
+
+  it("コーキの対象アイコン(iconUrl)も正規化後のDDragon champion square URLになる(パッチ刷新S3 F-S3-1)", () => {
+    const corki = findByName(targets, "コーキ")!;
+    expect(corki.iconUrl).toBe("https://ddragon.leagueoflegends.com/cdn/16.13.1/img/champion/Corki.png");
+  });
+
+  it("コーキのRスキルのabilityIconUrlが正規化後のDDragon spell URLになる(パッチ刷新S3 F-S3-1)", () => {
+    const corki = findByName(targets, "コーキ")!;
+    const rGroup = corki.groups.find((g) => g.abilityKey === "R")!;
+    expect(rGroup.abilityIconUrl).toBe(
+      "https://ddragon.leagueoflegends.com/cdn/16.13.1/img/spell/MissileBarrage.png",
+    );
+  });
+
+  it("http(非https)のf=を持つアイテムアイコンはiconUrlがundefinedになる(idは維持され種別解決は壊れない)", () => {
+    const immortalPath = findByName(targets, "不滅の道")!;
+    expect(immortalPath.iconUrl).toBeUndefined();
+    expect(immortalPath.id).toBe("3168");
+    expect(immortalPath.kind).toBe("item");
   });
 
   it("h3が無いシステム節のブロック(実データ: ブルーバフ)もkind=systemで抽出され、クラッシュしない", () => {
@@ -176,6 +202,73 @@ describe("parsePatchNotesHtml（F-S1-3: 既存classifyChangeの適用）", () =>
       (c) => c.stat === "最大体力50%以上時のダメージ増加割合",
     )!;
     expect(classifyChange(changeLine(change))).toBe("nerf");
+  });
+});
+
+describe("normalizePatchIconUrl（パッチ記事刷新S3 F-S3-1）", () => {
+  it("akamaihdラッパー(f=に直接埋め込み)をデコードしてDDragon直URLを返す", () => {
+    expect(
+      normalizePatchIconUrl(
+        "https://am-a.akamaihd.net/image?f=https://ddragon.leagueoflegends.com/cdn/16.13.1/img/spell/MissileBarrage.png",
+      ),
+    ).toBe("https://ddragon.leagueoflegends.com/cdn/16.13.1/img/spell/MissileBarrage.png");
+  });
+
+  it("f=がURLエンコードされていてもデコードできる", () => {
+    const encoded =
+      "https://am-a.akamaihd.net/image?f=" +
+      encodeURIComponent("https://ddragon.leagueoflegends.com/cdn/16.13.1/img/champion/Corki.png");
+    expect(normalizePatchIconUrl(encoded)).toBe(
+      "https://ddragon.leagueoflegends.com/cdn/16.13.1/img/champion/Corki.png",
+    );
+  });
+
+  it("既にDDragon直URLのものはそのまま返す", () => {
+    const url = "https://ddragon.leagueoflegends.com/cdn/16.13.1/img/passive/Jayce_Passive.png";
+    expect(normalizePatchIconUrl(url)).toBe(url);
+  });
+
+  it("その他のhttps画像URLもそのまま返す", () => {
+    const url = "https://example.com/some-image.png";
+    expect(normalizePatchIconUrl(url)).toBe(url);
+  });
+
+  it("f=の中身がhttp(非https)の場合はisSafeImageUrlを満たさずundefinedを返す", () => {
+    expect(
+      normalizePatchIconUrl(
+        "https://am-a.akamaihd.net/image?f=http://ddragon.leagueoflegends.com/cdn/16.13.1/img/item/3168.png",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("不正なスキーム(javascript:)・空文字・undefinedはundefinedを返す", () => {
+    expect(normalizePatchIconUrl("javascript:alert(1)")).toBeUndefined();
+    expect(normalizePatchIconUrl("")).toBeUndefined();
+    expect(normalizePatchIconUrl(undefined)).toBeUndefined();
+  });
+});
+
+describe("inferDdragonVersionFromTargets / buildChampionSquareIconUrl / buildItemIconUrl（パッチ記事刷新S3 F-S3-3）", () => {
+  const targets = parsePatchNotesHtml(fixtureHtml);
+
+  it("同一パッチ内の既存アイコンURLからDDragonバージョンを推定する", () => {
+    expect(inferDdragonVersionFromTargets(targets)).toBe("16.13.1");
+  });
+
+  it("アイコンURLを1件も含まない対象配列はundefinedを返す(例外を投げない)", () => {
+    expect(inferDdragonVersionFromTargets([])).toBeUndefined();
+  });
+
+  it("buildChampionSquareIconUrlはchampionId+versionからDDragon square URLを組み立てる", () => {
+    expect(buildChampionSquareIconUrl("Corki", "16.13.1")).toBe(
+      "https://ddragon.leagueoflegends.com/cdn/16.13.1/img/champion/Corki.png",
+    );
+  });
+
+  it("buildItemIconUrlはitemId+versionからDDragonアイテムアイコンURLを組み立てる", () => {
+    expect(buildItemIconUrl("3168", "16.13.1")).toBe(
+      "https://ddragon.leagueoflegends.com/cdn/16.13.1/img/item/3168.png",
+    );
   });
 });
 

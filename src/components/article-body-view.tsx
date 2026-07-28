@@ -155,20 +155,62 @@ const PATCH_DIRECTION_LABEL: Record<"buff" | "nerf" | "adjust", string> = {
   adjust: "調整",
 };
 
+/** パッチアイコン画像の出典クレジット文言（パッチ記事刷新S3 F-S3-2）。パッチ本文内に1箇所だけ表示する。 */
+const PATCH_ICON_CREDIT = "画像: Riot Games / Data Dragon";
+
 /**
- * パッチ変更「対象単位」ブロックの素朴なレンダリング（パッチ記事刷新S2 F-S2-4）。
- * 対象名＋directionラベル・各groupのスキルキー/abilityName・`before ⇒ after`（statとともに）・intentを
- * プレーンなHTMLで表示する。画像（targetIconUrl/abilityIconUrl）はS3で表示するため、S2では未表示
- * （URLはブロックに保持済み、ここでは使わない）。デザイン（黒/紺・金）はS4のためプレーンに留める。
+ * patchChangeブロックの対象アイコン/スキルアイコン用の小さな正方画像（パッチ記事刷新S3 F-S3-2）。
+ * URLは既にarticle-body.ts側（`isSafeImageUrl`）で検証済み（https/データURI/ローカルのみ）。
+ * srcが無ければ何も描画しない（アイコン無しgroupが画像なしで崩れないようにする）。既存の
+ * ImageBlockViewと同様プレーンな`<img>`表示（Next Imageは使わない＝既存の画像表示方法に合わせる。
+ * デザイン(黒/紺・金の枠等)はS4のためここでは素朴な枠のみ）。
  */
-function PatchChangeBlockView({ block }: { block: Extract<ArticleBodyBlock, { type: "patchChange" }> }) {
+function PatchIconImg({
+  src,
+  alt,
+  size,
+}: {
+  src?: string;
+  alt: string;
+  size: "target" | "ability";
+}) {
+  if (!src) return null;
+  const sizeClass = size === "target" ? "h-8 w-8" : "h-5 w-5";
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- 既存の画像表示方法(通常img、ホットリンク・ローカル保存しない)に合わせる
+    <img
+      src={src}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      className={`${sizeClass} shrink-0 rounded border border-neutral-300 object-contain dark:border-neutral-700`}
+    />
+  );
+}
+
+/**
+ * パッチ変更「対象単位」ブロックの素朴なレンダリング（パッチ記事刷新S2 F-S2-4、S3 F-S3-2で画像追加）。
+ * 対象名＋directionラベル・対象アイコン・各groupのスキルキー/abilityName・スキルアイコン・
+ * `before ⇒ after`（statとともに）・intentをプレーンなHTMLで表示する。画像が欠落しているgroup/対象は
+ * 画像なしで崩れない。`showCredit`が真のブロックだけ出典クレジットを1回表示する（呼び出し元の
+ * ArticleBodyViewが記事内最初のpatchChangeブロックにのみ渡す）。デザイン（黒/紺・金）はS4のため
+ * プレーンに留める。
+ */
+function PatchChangeBlockView({
+  block,
+  showCredit,
+}: {
+  block: Extract<ArticleBodyBlock, { type: "patchChange" }>;
+  showCredit?: boolean;
+}) {
   return (
     <div
       data-patch-change
       data-patch-direction={block.direction}
       className="rounded border border-neutral-300 p-3 text-sm dark:border-neutral-700"
     >
-      <div className="mb-1 flex flex-wrap items-baseline gap-2">
+      <div className="mb-1 flex flex-wrap items-center gap-2">
+        <PatchIconImg src={block.targetIconUrl} alt={block.targetName} size="target" />
         <span className="font-bold">{block.targetName}</span>
         <span className="text-xs text-neutral-500 dark:text-neutral-400">
           [{PATCH_DIRECTION_LABEL[block.direction]}]
@@ -181,8 +223,9 @@ function PatchChangeBlockView({ block }: { block: Extract<ArticleBodyBlock, { ty
         {block.groups.map((g, gi) => (
           <div key={gi}>
             {(g.abilityName || g.abilityKey) && (
-              <p className="text-xs font-bold text-neutral-600 dark:text-neutral-400">
-                {g.abilityName ?? g.abilityKey}
+              <p className="mb-0.5 flex items-center gap-1 text-xs font-bold text-neutral-600 dark:text-neutral-400">
+                <PatchIconImg src={g.abilityIconUrl} alt={g.abilityName ?? g.abilityKey ?? ""} size="ability" />
+                <span>{g.abilityName ?? g.abilityKey}</span>
               </p>
             )}
             <ul className="list-disc pl-5">
@@ -195,6 +238,9 @@ function PatchChangeBlockView({ block }: { block: Extract<ArticleBodyBlock, { ty
           </div>
         ))}
       </div>
+      {showCredit && (
+        <p className="mt-2 text-[10px] text-neutral-400 dark:text-neutral-500">{PATCH_ICON_CREDIT}</p>
+      )}
     </div>
   );
 }
@@ -296,6 +342,9 @@ export function ArticleBodyView({ blocks }: { blocks: ArticleBodyBlock[] }) {
   // 「記事の真ん中あたり」に収まるよう、見出し数の中央インデックスを使う（3見出しなら2番目＝従来と同じ）。
   const headings = headingBlockIndices(blocks);
   const adBeforeBlockIndex = headings.length > 0 ? headings[Math.floor(headings.length / 2)] : -1;
+  // patchChangeブロックのアイコン出典クレジット（パッチ記事刷新S3 F-S3-2）は記事内で1箇所だけ表示する
+  // ため、最初のpatchChangeブロックのindexだけを求める（複数対象があっても重複表示しない）。
+  const firstPatchChangeIndex = blocks.findIndex((block) => block.type === "patchChange");
   // 連続する reaction ブロックを1枠にまとめる（拡張E12）。それ以外のブロックは従来どおり1件ずつ描画する。
   const groups = groupArticleBodyBlocksForDisplay(blocks);
 
@@ -350,7 +399,9 @@ export function ArticleBodyView({ blocks }: { blocks: ArticleBodyBlock[] }) {
           return <LinkButtonBlockView key={index} block={block} />;
         }
         if (block.type === "patchChange") {
-          return <PatchChangeBlockView key={index} block={block} />;
+          return (
+            <PatchChangeBlockView key={index} block={block} showCredit={index === firstPatchChangeIndex} />
+          );
         }
         return (
           <p key={index} className="text-sm leading-relaxed sm:text-base">

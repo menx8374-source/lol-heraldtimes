@@ -17,6 +17,7 @@
  *   不正・空でも例外を投げず `[]` を返す（本体を止めない）。
  */
 import { decodeHtmlEntities } from "@/lib/collection/adapters/riot-datadragon";
+import { isSafeImageUrl } from "@/lib/image-url";
 
 export type PatchAbilityKey = "passive" | "Q" | "W" | "E" | "R" | "base";
 
@@ -71,6 +72,70 @@ function textOf(fragment: string): string {
 function firstImgSrc(fragment: string): string | undefined {
   const m = fragment.match(/<img[^>]+src=["']([^"']+)["']/i);
   return m ? decodeHtmlEntities(m[1]) : undefined;
+}
+
+/** `am-a.akamaihd.net/image?f=<url>` ラッパー形式を検出する正規表現（パッチ記事刷新S3 F-S3-1）。 */
+const AKAMAIHD_IMAGE_WRAPPER_RE = /^https?:\/\/[\w.-]*akamaihd\.net\/image\?f=(.+)$/i;
+
+/**
+ * 公式パッチノートHTMLに埋め込まれたアイコンURLを正規化する（パッチ記事刷新S3 F-S3-1）。
+ * `am-a.akamaihd.net/image?f=<DDragon直URL>` ラッパー形式を検出したら `f=` パラメータを
+ * デコードしてDDragon直URLを返す（URLエンコードされていてもいなくても対応）。既にDDragon直URL・
+ * その他の https 画像URLはそのまま返す。`isSafeImageUrl`（https/データURI/ローカルのみ）を
+ * 満たさないURL（非https等）は undefined（表示しない。呼び出し側でid/kindはURL正規化前の
+ * 生値から取得済みのため、表示だけを諦めれば済む＝記事は壊れない）。
+ */
+export function normalizePatchIconUrl(url: string | undefined | null): string | undefined {
+  if (!url || typeof url !== "string") return undefined;
+  const trimmed = url.trim();
+  if (!trimmed) return undefined;
+
+  const wrapped = trimmed.match(AKAMAIHD_IMAGE_WRAPPER_RE);
+  let candidate = trimmed;
+  if (wrapped) {
+    try {
+      candidate = decodeURIComponent(wrapped[1]);
+    } catch {
+      candidate = wrapped[1];
+    }
+  }
+
+  return isSafeImageUrl(candidate) ? candidate : undefined;
+}
+
+/** DDragon版のURLに埋め込まれたバージョン文字列（例 "16.13.1"）を取り出す正規表現。 */
+const DDRAGON_VERSION_RE = /\/cdn\/(\d+\.\d+\.\d+)\//;
+
+/**
+ * 抽出済みの対象配列（同一パッチの全対象）から、既存アイコンURLに埋め込まれたDDragonバージョン
+ * （例 "16.13.1"）を推定する（パッチ記事刷新S3 F-S3-3）。同じパッチ内のアイコンはすべて同一
+ * バージョンを使うため、1件でも正規化済みアイコンURLが見つかればそれを使う。見つからなければ
+ * undefined（フォールバック画像の組み立てをあきらめる＝記事は壊れない）。
+ */
+export function inferDdragonVersionFromTargets(targets: PatchChangeTarget[]): string | undefined {
+  for (const target of targets) {
+    if (target.iconUrl) {
+      const m = target.iconUrl.match(DDRAGON_VERSION_RE);
+      if (m) return m[1];
+    }
+    for (const group of target.groups) {
+      if (group.abilityIconUrl) {
+        const m = group.abilityIconUrl.match(DDRAGON_VERSION_RE);
+        if (m) return m[1];
+      }
+    }
+  }
+  return undefined;
+}
+
+/** DDragon チャンピオンsquareアイコンURLを組み立てる（パッチ記事刷新S3 F-S3-3、純関数）。 */
+export function buildChampionSquareIconUrl(championId: string, version: string): string {
+  return `https://ddragon.leagueoflegends.com/cdn/${version}/img/champion/${championId}.png`;
+}
+
+/** DDragon アイテムアイコンURLを組み立てる（パッチ記事刷新S3 F-S3-3、純関数）。 */
+export function buildItemIconUrl(itemId: string, version: string): string {
+  return `https://ddragon.leagueoflegends.com/cdn/${version}/img/item/${itemId}.png`;
 }
 
 /** アイコンURLのパスから種別とID(ファイル名, 拡張子なし)を判定する（対象IDは名前マップ非依存）。 */
@@ -176,7 +241,9 @@ function extractGroups(blockHtml: string): PatchChangeGroup[] {
     const ulMatch = region.match(/<ul[^>]*>([\s\S]*?)<\/ul>/);
     const changes = ulMatch ? extractChangesFromUl(ulMatch[1]) : [];
     const abilityName = textOf(h4.inner);
-    const abilityIconUrl = firstImgSrc(h4.inner);
+    // 正規化（akamaihdラッパー→DDragon直URL）はS3 F-S3-1で表示URLに適用する。壊れURL/非https等は
+    // undefinedになり、group.abilityIconUrl自体を持たない（画像なしで崩れない）。
+    const abilityIconUrl = normalizePatchIconUrl(firstImgSrc(h4.inner));
     const group: PatchChangeGroup = { changes };
     if (abilityName) {
       group.abilityName = abilityName;
@@ -206,7 +273,12 @@ function parseBlock(blockHtml: string, section: string | undefined): PatchChange
     : h4FirstMatch
       ? h4FirstMatch.index!
       : blockHtml.length;
-  const iconUrl = firstImgSrc(blockHtml.slice(0, iconSearchEnd));
+  // 種別/ID判定（classifyIconUrl）はakamaihdラッパーで包まれた生の値でも`/img/xxx/yyy.png`パターンを
+  // そのまま検出できるため、正規化前の生URLに対して行う（非https等で正規化が失敗しても対象IDは
+  // 解決できるようにする）。表示用のtarget.iconUrlはS3 F-S3-1で正規化した値を使う（壊れURL/非https
+  // は undefined になり画像を表示しないだけで、対象の識別は失われない）。
+  const rawIconUrl = firstImgSrc(blockHtml.slice(0, iconSearchEnd));
+  const iconUrl = normalizePatchIconUrl(rawIconUrl);
 
   const groups = extractGroups(blockHtml);
 
@@ -217,7 +289,7 @@ function parseBlock(blockHtml: string, section: string | undefined): PatchChange
 
   let kind: PatchChangeTarget["kind"];
   let id: string | undefined;
-  const classified = iconUrl ? classifyIconUrl(iconUrl) : null;
+  const classified = rawIconUrl ? classifyIconUrl(rawIconUrl) : null;
   if (classified) {
     kind = classified.kind;
     id = classified.id;
