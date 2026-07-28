@@ -194,4 +194,36 @@ describe("persistPosts（リファクタリングS2 F-S2-2）", () => {
     });
     expect(post.category).toBeNull();
   });
+
+  it("item.upvoteRatioが指定されていればPost.upvoteRatioに保存される(成長G1 F-G1-3)", async () => {
+    const now = new Date("2026-07-27T10:00:00+09:00");
+    await persistPosts([item({ externalId: "upvote-1", upvoteRatio: 0.55 })], "reddit", now);
+
+    const post = await prisma.post.findUniqueOrThrow({
+      where: { sourceType_externalId: { sourceType: "reddit", externalId: "upvote-1" } },
+    });
+    expect(post.upvoteRatio).toBeCloseTo(0.55, 5);
+  });
+
+  it("item.upvoteRatioが未指定ならPost.upvoteRatioはnullのまま保存される(回帰なし)", async () => {
+    const now = new Date("2026-07-27T10:00:00+09:00");
+    await persistPosts([item({ externalId: "no-upvote-ratio" })], "reddit", now);
+
+    const post = await prisma.post.findUniqueOrThrow({
+      where: { sourceType_externalId: { sourceType: "reddit", externalId: "no-upvote-ratio" } },
+    });
+    expect(post.upvoteRatio).toBeNull();
+  });
+
+  it("同一externalIdを再persistするとPost.upvoteRatioが更新される(update時も反映)", async () => {
+    const t1 = new Date("2026-07-27T10:00:00+09:00");
+    const t2 = new Date("2026-07-27T11:00:00+09:00");
+    await persistPosts([item({ externalId: "upvote-update", upvoteRatio: 0.9 })], "reddit", t1);
+    await persistPosts([item({ externalId: "upvote-update", upvoteRatio: 0.4 })], "reddit", t2);
+
+    const post = await prisma.post.findUniqueOrThrow({
+      where: { sourceType_externalId: { sourceType: "reddit", externalId: "upvote-update" } },
+    });
+    expect(post.upvoteRatio).toBeCloseTo(0.4, 5);
+  });
 });

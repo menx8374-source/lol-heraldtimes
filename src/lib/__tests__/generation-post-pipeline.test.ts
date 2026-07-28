@@ -54,6 +54,8 @@ type CreatePostOptions = {
   postedAt?: Date;
   media?: { imageUrl: string };
   category?: string;
+  /** 成長G1（F-G1-4）: upvote比率（0〜1）。未指定はnull（Post.upvoteRatio既定と同じ）。 */
+  upvoteRatio?: number;
   metrics: { score: number; commentCount: number; capturedAt: Date }[];
 };
 
@@ -71,6 +73,7 @@ async function createPost(opts: CreatePostOptions) {
       postedAt: opts.postedAt ?? new Date(T0.getTime() - hours(2)),
       ...(opts.media ? { media: opts.media } : {}),
       ...(opts.category ? { category: opts.category } : {}),
+      ...(opts.upvoteRatio !== undefined ? { upvoteRatio: opts.upvoteRatio } : {}),
     },
   });
   for (const m of opts.metrics) {
@@ -447,6 +450,62 @@ describe("generateArticlesFromHotPosts（riot-news: hotness免除＋カテゴリ
 
     const summary = await generateArticlesFromHotPosts(llm, { now: T0, championMap: null });
     expect(summary.results.find((r) => r.postId === post.id)).toBeUndefined();
+  });
+});
+
+describe("generateArticlesFromHotPosts（論争度シグナル、成長G1 F-G1-4 ブリーフ テスト4）", () => {
+  it("Post.upvoteRatioがevaluateHotnessに伝播し、isControversialなPostのタイトルが議論寄り(【議論】)になる", async () => {
+    // score=500/comments=40は現在値ルールでhot(reddit既定minScore=100/minComments=30)。
+    // comments/score比=40/500=0.08<0.15(非controversy比)だが、upvoteRatio=0.5<=0.80のため論争判定される。
+    const post = await createPost({
+      sourceType: "reddit",
+      upvoteRatio: 0.5,
+      metrics: [{ score: 500, commentCount: 40, capturedAt: T0 }],
+    });
+
+    const summary = await generateArticlesFromHotPosts(llm, { now: T0, championMap: null });
+    const result = summary.results.find((r) => r.postId === post.id);
+    expect(result?.status).toBe("success");
+
+    const article = await prisma.article.findUnique({ where: { postId: post.id } });
+    // MockLLMClientはJSON以外の入力を空文字にするため、必ずルールベース(generateHookTitle)へ
+    // フォールバックする。isControversial=trueならラベルは【議論】固定になる。
+    expect(article?.title.startsWith("【議論】")).toBe(true);
+  });
+
+  it("Post.upvoteRatioが高い(賛否割れなし)場合はisControversial=falseとなり、通常のhotnessランキングで選ばれる(回帰なし)", async () => {
+    const post = await createPost({
+      sourceType: "reddit",
+      upvoteRatio: 0.95,
+      metrics: [{ score: 500, commentCount: 40, capturedAt: T0 }],
+    });
+
+    const summary = await generateArticlesFromHotPosts(llm, { now: T0, championMap: null });
+    const result = summary.results.find((r) => r.postId === post.id);
+    expect(result?.status).toBe("success"); // 記事化自体は成功する(isControversialはisHotを置き換えない)
+  });
+
+  it("同一hotnessStrength(score/comments同値)の2Postがある場合、isControversialなPostがカテゴリ別上限内で優先選出される", async () => {
+    // 両者ともscore=500/comments=40で同じhotnessStrengthになるようにする。
+    const controversial = await createPost({
+      sourceType: "reddit",
+      upvoteRatio: 0.5, // <=0.80 → isControversial=true
+      postedAt: new Date(T0.getTime() - hours(2)), // 新しい投稿(postedAt降順なら本来こちらが有利)
+      metrics: [{ score: 500, commentCount: 40, capturedAt: T0 }],
+    });
+    const nonControversialButNewer = await createPost({
+      sourceType: "reddit",
+      upvoteRatio: 0.95, // isControversial=false
+      postedAt: new Date(T0.getTime() - hours(1)), // controversialより新しい(postedAt降順なら有利)
+      metrics: [{ score: 500, commentCount: 40, capturedAt: T0 }],
+    });
+
+    // maxPerCategory=1で1件だけ選出させ、isControversial優先(postedAt降順より優先)を確認する。
+    const summary = await generateArticlesFromHotPosts(llm, { now: T0, maxPerCategory: 1, championMap: null });
+
+    const processedIds = summary.results.map((r) => r.postId);
+    expect(processedIds).toEqual([controversial.id]);
+    expect(processedIds.includes(nonControversialButNewer.id)).toBe(false);
   });
 });
 

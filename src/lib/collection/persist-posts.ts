@@ -42,6 +42,8 @@ async function persistOneItem(item: RawCollectionItem, sourceType: SourceType, n
         flair: item.flair ?? null,
         media,
         category: item.category ?? null,
+        // 成長G1（F-G1-3）: 未取得（undefined）はnull扱い（論争度判定はupvoteRatio無しでもcomment比で行う）。
+        upvoteRatio: item.upvoteRatio ?? null,
         postedAt: item.fetchedAt,
         firstSeenAt: now,
         lastCheckedAt: now,
@@ -55,6 +57,7 @@ async function persistOneItem(item: RawCollectionItem, sourceType: SourceType, n
         flair: item.flair ?? null,
         media,
         category: item.category ?? null,
+        upvoteRatio: item.upvoteRatio ?? null,
         lastCheckedAt: now,
       },
     });

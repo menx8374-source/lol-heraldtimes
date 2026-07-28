@@ -116,18 +116,23 @@ function buildExemptHotnessResult(post: PostWithMetrics): HotnessResult {
     isHot: true,
     reasons: ["免除ソース（exemptSourceTypes）のためhotness判定を経ずに常に記事化対象"],
     metrics,
+    // 成長G1: 免除ソース（公式パッチ/ニュース）は賛否が割れる概念に馴染まないため論争判定の対象外とする。
+    controversyScore: 0,
+    isControversial: false,
   };
 }
 
 /**
  * hot判定された（または免除された）Postを、カテゴリ(=ソース種別)ごとに独立してhotnessの強さ降順・
- * 同点はpostedAt降順（新しい投稿優先）で最大maxPerCategory件選ぶ
+ * 同hotnessStrength時はisControversial優先（成長G1 F-G1-4。論争スレが選ばれやすくする）・
+ * さらに同点はpostedAt降順（新しい投稿優先）で最大maxPerCategory件選ぶ
  * （拡張E48のカテゴリ別上限と同じ考え方。純関数・DB非依存・決定論）。
+ * 後続のタイトル生成（isControversialを渡す）のため、選ばれたhotness結果も一緒に返す。
  */
 function selectTopHotPosts(
   evaluated: { post: PostWithMetrics; hotness: HotnessResult }[],
   maxPerCategory: number,
-): PostWithMetrics[] {
+): { post: PostWithMetrics; hotness: HotnessResult }[] {
   const bySource = new Map<SourceType, { post: PostWithMetrics; hotness: HotnessResult }[]>();
   for (const e of evaluated) {
     const sourceType = e.post.sourceType as SourceType;
@@ -136,17 +141,19 @@ function selectTopHotPosts(
     bySource.set(sourceType, list);
   }
 
-  const selected: PostWithMetrics[] = [];
+  const selected: { post: PostWithMetrics; hotness: HotnessResult }[] = [];
   for (const sourceType of SOURCE_TYPES) {
     const list = bySource.get(sourceType) ?? [];
     const sorted = [...list].sort((a, b) => {
       const diff = hotnessStrength(b.hotness.metrics) - hotnessStrength(a.hotness.metrics);
       if (diff !== 0) return diff;
+      const controversyDiff = Number(b.hotness.isControversial) - Number(a.hotness.isControversial);
+      if (controversyDiff !== 0) return controversyDiff;
       const postedAtDiff = b.post.postedAt.getTime() - a.post.postedAt.getTime();
       if (postedAtDiff !== 0) return postedAtDiff;
       return a.post.id.localeCompare(b.post.id); // 決定論のための最終タイブレーク
     });
-    selected.push(...sorted.slice(0, maxPerCategory).map((e) => e.post));
+    selected.push(...sorted.slice(0, maxPerCategory));
   }
   return selected;
 }
@@ -190,7 +197,8 @@ export async function generateArticlesFromHotPosts(
         capturedAt: m.capturedAt,
       }));
       const hotness = evaluateHotness(
-        { sourceType, postedAt: post.postedAt, metricsHistory },
+        // 成長G1（F-G1-4）: upvoteRatioが未取得(null)のときはundefinedのまま渡す(comment比のみで判定)。
+        { sourceType, postedAt: post.postedAt, metricsHistory, upvoteRatio: post.upvoteRatio ?? undefined },
         now,
         getHotnessConfig(sourceType),
       );
@@ -212,7 +220,7 @@ export async function generateArticlesFromHotPosts(
   const championMap: ChampionNameToIdMap | undefined =
     options.championMap === null ? undefined : options.championMap ?? (await fetchChampionNameToIdMap());
 
-  for (const post of targetPosts) {
+  for (const { post, hotness } of targetPosts) {
     const candidate: GenerationCandidate = {
       id: post.id,
       sourceType: post.sourceType as SourceType,
@@ -223,6 +231,8 @@ export async function generateArticlesFromHotPosts(
       // リファクタリングS7a（F-S7a-3）: 取得元ルールで付与されたPost.categoryがあればそれを、
       // 無ければ従来どおり generateArticleForCandidate 側でソース既定にフォールバックする。
       category: (post.category as CategoryLabel | null) ?? undefined,
+      // 成長G1（F-G1-4）: 論争フラグをタイトル生成（generateHookTitleLLM/generateHookTitle）に渡す。
+      isControversial: hotness.isControversial,
     };
 
     try {

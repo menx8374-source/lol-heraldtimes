@@ -44,6 +44,11 @@ export type RawCollectionItem = {
   score?: number;
   /** メトリクス: コメント数（Redditのnum_comments・5chのresCount等）。 */
   commentCount?: number;
+  /**
+   * 成長G1（F-G1-3）: Redditのupvote_ratio（0〜1）。取得できない/概念が無いソースは未設定。
+   * 論争度判定（HotnessEvaluator）でupvote_ratioが低いほど賛否が割れているサインとして使う。
+   */
+  upvoteRatio?: number;
   /** 投稿者。取得できない/概念が無いソースは未設定またはnull。 */
   author?: string | null;
   /** flair（Redditのlink_flair_text等）。取得できない/概念が無いソースは未設定またはnull。 */
@@ -72,6 +77,8 @@ export type CollectionItem = {
   score?: number;
   /** メトリクス: コメント数。 */
   commentCount?: number;
+  /** 成長G1（F-G1-3）: Redditのupvote_ratio（0〜1）。取得できない/概念が無いソースは未設定。 */
+  upvoteRatio?: number;
   /** 投稿者。 */
   author?: string | null;
   /** flair。 */

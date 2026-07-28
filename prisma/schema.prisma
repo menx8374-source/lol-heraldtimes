@@ -259,6 +259,9 @@ model Post {
   flair         String?
   /// 画像/動画等のメディア情報（JSON）
   media         Json?
+  /// upvote比率（0〜1、成長G1）。Redditのupvote_ratio。取得できない/概念が無いソースはnull
+  /// （論争度判定 HotnessEvaluator.isControversial で使う。nullable・非破壊追加）。
+  upvoteRatio   Float?
   /// ソース側の投稿日時
   postedAt      DateTime
   firstSeenAt   DateTime @default(now())

@@ -15,6 +15,9 @@ const ENV_KEYS = [
   "HOTNESS_MIN_AGE_MINUTES",
   "HOTNESS_MAX_AGE_HOURS",
   "HOTNESS_USE_RANK_SIGNAL",
+  "HOTNESS_MIN_CONTROVERSY_RATIO",
+  "HOTNESS_5CH_MIN_CONTROVERSY_RATIO",
+  "HOTNESS_MAX_UPVOTE_RATIO",
   "HOTNESS_EXEMPT_SOURCE_TYPES",
   "UPDATE_MIN_SCORE_DELTA",
   "UPDATE_MIN_COMMENT_DELTA",
@@ -38,6 +41,8 @@ describe("getHotnessConfig（話題性判定の設定ファイル、リファク
       minAgeMinutes: 30,
       maxAgeHours: 72,
       useRankSignal: false,
+      minControversyRatio: 0.15,
+      maxUpvoteRatio: 0.8,
     });
   });
 
@@ -67,6 +72,8 @@ describe("getHotnessConfig（話題性判定の設定ファイル、リファク
       minAgeMinutes: 15,
       maxAgeHours: 48,
       useRankSignal: true,
+      minControversyRatio: 0.15,
+      maxUpvoteRatio: 0.8,
     });
   });
 
@@ -88,6 +95,48 @@ describe("getHotnessConfig（話題性判定の設定ファイル、リファク
     const config = getHotnessConfig();
     expect(config.minScore).toBe(100);
     expect(config.minAgeMinutes).toBe(30);
+  });
+
+  it("論争度判定(成長G1 F-G1-1)の既定値はminControversyRatio=0.15・maxUpvoteRatio=0.80(reddit/汎用)", () => {
+    expect(getHotnessConfig().minControversyRatio).toBe(0.15);
+    expect(getHotnessConfig().maxUpvoteRatio).toBe(0.8);
+    expect(getHotnessConfig("reddit").minControversyRatio).toBe(0.15);
+    expect(getHotnessConfig("reddit").maxUpvoteRatio).toBe(0.8);
+  });
+
+  it("5chはminControversyRatioが実質無効(Infinity)になる(品質ゲート指摘修正: scoreが常時0のためcomment比が発散し判定として無意味なため)", () => {
+    expect(getHotnessConfig("5ch").minControversyRatio).toBe(Number.POSITIVE_INFINITY);
+    // maxUpvoteRatioは5chでも共通既定のまま(5chはupvoteRatioを持たないため実質使われない)
+    expect(getHotnessConfig("5ch").maxUpvoteRatio).toBe(0.8);
+  });
+
+  it("5ch専用envで論争度閾値を明示的に上書きできる(既存のソース別上書きパターンを踏襲)", () => {
+    process.env.HOTNESS_5CH_MIN_CONTROVERSY_RATIO = "0.5";
+    expect(getHotnessConfig("5ch").minControversyRatio).toBe(0.5);
+    // 他ソース・汎用には影響しない
+    expect(getHotnessConfig("reddit").minControversyRatio).toBe(0.15);
+    expect(getHotnessConfig().minControversyRatio).toBe(0.15);
+  });
+
+  it("5ch専用envに不正な値を設定した場合はInfinity(実質無効)にフォールバックする", () => {
+    process.env.HOTNESS_5CH_MIN_CONTROVERSY_RATIO = "not-a-number";
+    expect(getHotnessConfig("5ch").minControversyRatio).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it("論争度判定の閾値はenvで上書きできる", () => {
+    process.env.HOTNESS_MIN_CONTROVERSY_RATIO = "0.3";
+    process.env.HOTNESS_MAX_UPVOTE_RATIO = "0.6";
+    const config = getHotnessConfig();
+    expect(config.minControversyRatio).toBe(0.3);
+    expect(config.maxUpvoteRatio).toBe(0.6);
+  });
+
+  it("論争度判定の閾値に不正な値(数値でない・負数)を設定した場合は既定値にフォールバックする", () => {
+    process.env.HOTNESS_MIN_CONTROVERSY_RATIO = "not-a-number";
+    process.env.HOTNESS_MAX_UPVOTE_RATIO = "-1";
+    const config = getHotnessConfig();
+    expect(config.minControversyRatio).toBe(0.15);
+    expect(config.maxUpvoteRatio).toBe(0.8);
   });
 });
 

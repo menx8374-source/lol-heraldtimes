@@ -54,6 +54,8 @@ export type RedditPostData = {
   selftext?: string;
   created_utc: number;
   score?: number;
+  /** 成長G1（F-G1-3）: upvote比率（0〜1）。Arctic Shiftが返す。低いほど賛否が割れているサイン。 */
+  upvote_ratio?: number;
   stickied?: boolean;
   over_18?: boolean;
   /** 投稿画像プレビュー（Redditが自動生成する画像バリエーション）。あれば最優先で使う。 */
@@ -242,6 +244,8 @@ export function buildRedditItem(post: RedditPostData, comments: RedditCommentDat
     externalId: post.id,
     score: post.score ?? 0,
     commentCount: post.num_comments ?? 0,
+    // 成長G1（F-G1-3）: upvote_ratioが取得できない場合はundefinedのまま（論争判定はscore/commentsのみで行う）。
+    upvoteRatio: post.upvote_ratio,
     author: post.author ?? null,
     flair: post.link_flair_text ?? null,
     media: buildRedditMedia(imageUrl, post.url),

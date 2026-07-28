@@ -52,6 +52,12 @@ export type GenerationCandidate = {
    * 未設定の場合は従来どおりソース既定（CATEGORY_BY_SOURCE）にフォールバックする。
    */
   category?: CategoryLabel;
+  /**
+   * 成長G1（F-G1-4）: HotnessEvaluatorが判定した論争フラグ（賛否が割れている）。
+   * 反応記事（5ch/reddit）のタイトル生成（generateHookTitleLLM/generateHookTitle）に渡し、
+   * 議論寄りのタイトルを優先させる。未指定時はfalse扱い。
+   */
+  isControversial?: boolean;
 };
 
 export type GeneratedArticle = {
@@ -167,10 +173,14 @@ export async function generateArticleForCandidate(
   const title =
     candidate.sourceType === "riot" || candidate.sourceType === "riot-news"
       ? candidate.title
-      : await generateHookTitleLLM(llmClient, {
-          title: candidate.title,
-          content: threadBodyText(candidate.content),
-        });
+      : await generateHookTitleLLM(
+          llmClient,
+          {
+            title: candidate.title,
+            content: threadBodyText(candidate.content),
+          },
+          candidate.isControversial ?? false,
+        );
 
   let thumbnailUrl: string | null = isSafeImageUrl(candidate.imageUrl) ? candidate.imageUrl : null;
   if (!thumbnailUrl && championMap) {

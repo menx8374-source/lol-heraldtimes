@@ -33,6 +33,8 @@ export function toCollectionItems(sourceType: SourceType, raw: RawCollectionItem
       externalId: r.externalId,
       score: r.score,
       commentCount: r.commentCount,
+      // 成長G1（F-G1-3）: upvoteRatioも同様に転記する（S7cの教訓＝転記漏れに注意）。
+      upvoteRatio: r.upvoteRatio,
       author: r.author,
       flair: r.flair,
       media: r.media,

@@ -220,6 +220,13 @@ function buildCoreText(pool: string, targetLen: number): string {
 
 export type TitleGenInput = { title: string; content: string };
 
+/**
+ * 成長G1（F-G1-4）: 論争（賛否が割れている）判定時に優先するラベル・感情フック。
+ * 既存語彙(LABELS/HOOKS)から論争が伝わるものだけを選ぶ（新規語彙は追加しない）。
+ */
+const CONTROVERSY_LABEL: Label = "議論";
+const CONTROVERSY_HOOKS = ["で大荒れ", "を巡り議論に", "に賛否両論"] as const;
+
 function fallbackSubject(input: TitleGenInput): string {
   const trimmedTitle = input.title.trim();
   if (trimmedTitle.length > 0) {
@@ -242,16 +249,20 @@ export function joinSubjectAndHook(subject: string, hook: string): string {
  * 冒頭に【ラベル】、本文由来の具体要素、末尾に感情フックを含み、文字数を20〜48（全角相当）に収める。
  * 省略記号「…」は使わない。文字数がMIN_TITLE_LENGTHに満たない場合でも、本文中に自然に切れる
  * 区切りが見つからなければ無理に埋めず、完結した「【ラベル】主語＋フック」を返す（拡張E19 F-E19-4）。
+ * `isControversial`（成長G1 F-G1-4）がtrueのときは、ラベルは【議論】固定・感情フックは
+ * 「で大荒れ/を巡り議論に/に賛否両論」の中から選び、対立が伝わるタイトルにする。
  */
-export function generateHookTitle(input: TitleGenInput): string {
+export function generateHookTitle(input: TitleGenInput, isControversial = false): string {
   const sourceText = `${input.title}\n${input.content}`;
   const elements = extractConcreteElements(sourceText);
   const rawSubject = elements[0] ?? fallbackSubject(input);
   const safeSubject = stripNgWords(rawSubject);
   const subject = safeSubject.length > 0 ? safeSubject : fallbackSubject(input);
 
-  const label = pickFromArray(LABELS, sourceText);
-  const hook = pickFromArray(HOOKS, `${sourceText}::hook`);
+  const label = isControversial ? CONTROVERSY_LABEL : pickFromArray(LABELS, sourceText);
+  const hook = isControversial
+    ? pickFromArray(CONTROVERSY_HOOKS, `${sourceText}::hook`)
+    : pickFromArray(HOOKS, `${sourceText}::hook`);
   const prefix = `【${label}】`;
 
   const fixedText = `${prefix}${joinSubjectAndHook(subject, hook)}`;
@@ -391,29 +402,40 @@ export function extractLLMTitle(raw: string): string {
   return (labeled ?? lines[0] ?? "").trim();
 }
 
+/**
+ * 論争（賛否が割れている）時にsystemプロンプトへ追記するヒント（成長G1 F-G1-4）。
+ * LLM呼び出し回数は不変（system文への1文追記のみ）。
+ */
+const CONTROVERSY_SYSTEM_HINT =
+  "この話題は賛否が割れているので、【議論】【賛否両論】等の対立が伝わるタイトルが適切です。";
+
 export async function generateHookTitleLLM(
   llmClient: LLMClient,
   input: TitleGenInput,
+  isControversial = false,
 ): Promise<string> {
   const sourceText = `${input.title}\n${input.content}`;
   try {
+    const systemPrompt = isControversial
+      ? `${LLM_TITLE_SYSTEM_PROMPT}${CONTROVERSY_SYSTEM_HINT}`
+      : LLM_TITLE_SYSTEM_PROMPT;
     const raw = await llmClient.generate([
-      { role: "system", content: LLM_TITLE_SYSTEM_PROMPT },
+      { role: "system", content: systemPrompt },
       { role: "user", content: sourceText },
     ]);
     // Haikuが付けがちな前置き・引用符・コードフェンス・改行を除去してタイトル本体を取り出す（拡張E26）。
     const candidate = stripNgWords(extractLLMTitle(raw));
     if (candidate.length === 0) {
-      return generateHookTitle(input);
+      return generateHookTitle(input, isControversial);
     }
     // LLMは自然な言い回しの完結タイトルを作るため、固定フック語彙も本文由来の具体要素も要求しない
     // （要求するとほぼ全てフォールバックし本来の意図＝LLMタイトル採用が達成できない。拡張E26）。
     // 必須はラベルと文字数のみ。捏造防止はプロンプト指示とstripNgWordsに委ねる。
     if (!checkLLMTitleQuality(candidate)) {
-      return generateHookTitle(input);
+      return generateHookTitle(input, isControversial);
     }
     return candidate;
   } catch {
-    return generateHookTitle(input);
+    return generateHookTitle(input, isControversial);
   }
 }

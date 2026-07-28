@@ -200,6 +200,30 @@ describe("generateHookTitle", () => {
   });
 });
 
+describe("generateHookTitle の論争優先(成長G1 F-G1-4、isControversial引数)", () => {
+  it("isControversial=trueのとき、ラベルは【議論】固定になる", () => {
+    for (const sample of SAMPLES) {
+      const title = generateHookTitle(sample, true);
+      const m = title.match(/^【([^】]+)】/);
+      expect(m?.[1]).toBe("議論");
+    }
+  });
+
+  it("isControversial=trueのとき、感情フックは「で大荒れ/を巡り議論に/に賛否両論」のいずれかになる", () => {
+    const CONTROVERSY_HOOKS = ["で大荒れ", "を巡り議論に", "に賛否両論"];
+    for (const sample of SAMPLES) {
+      const title = generateHookTitle(sample, true);
+      const matched = CONTROVERSY_HOOKS.some((h) => title.endsWith(h));
+      expect(matched).toBe(true);
+    }
+  });
+
+  it("isControversial=false(既定)のときは従来どおりの語彙選定になる(回帰なし)", () => {
+    const title = generateHookTitle(SAMPLES[0]);
+    expect(title).toBe(generateHookTitle(SAMPLES[0], false));
+  });
+});
+
 describe("F8受け入れ基準ベンチマーク: 10件のサンプル記事に対するチェッカー合格率", () => {
   it("チェッカーによる合格率が90%以上になる", () => {
     const results = SAMPLES.map((sample) => {
@@ -324,5 +348,43 @@ describe("generateHookTitleLLM（拡張E24 F-E24-2、LLMはスタブで実APIを
     expect(title).not.toContain("アホ");
     expect(title).toBe("【速報】なパッチ14.6でジャングルが弱体化、判明");
     expect(checkTitleQuality(title, sourceText).passed).toBe(true);
+  });
+});
+
+/** systemプロンプトの内容を記録するスタブLLMClient（成長G1 F-G1-4: ヒント追記の確認用）。 */
+class RecordingLLMClient implements LLMClient {
+  public receivedSystemPrompts: string[] = [];
+  public callCount = 0;
+  constructor(private readonly response: string) {}
+  async generate(messages: LLMMessage[]): Promise<string> {
+    this.callCount += 1;
+    const system = messages.find((m) => m.role === "system");
+    if (system) this.receivedSystemPrompts.push(system.content);
+    return this.response;
+  }
+}
+
+describe("generateHookTitleLLM の論争ヒント（成長G1 F-G1-4、LLM呼び出し回数は不変）", () => {
+  const sample = SAMPLES[0];
+
+  it("isControversial=trueのとき、systemプロンプトに賛否/対立が伝わるタイトルを促すヒントが追記される", async () => {
+    const llm = new RecordingLLMClient("【議論】パッチ14.6のジャングル調整で賛否が分かれる展開に");
+    await generateHookTitleLLM(llm, sample, true);
+    expect(llm.callCount).toBe(1); // 呼び出し回数は不変(1回)
+    expect(llm.receivedSystemPrompts[0]).toContain("賛否が割れている");
+  });
+
+  it("isControversial=false(既定)のとき、systemプロンプトにヒントは追記されない(回帰なし)", async () => {
+    const llm = new RecordingLLMClient("【速報】パッチ14.6でジャングルが弱体化、判明");
+    await generateHookTitleLLM(llm, sample);
+    expect(llm.callCount).toBe(1);
+    expect(llm.receivedSystemPrompts[0]).not.toContain("賛否が割れている");
+  });
+
+  it("isControversial=trueでLLMが検証不通過を返した場合、ルールベースへのフォールバックも議論寄りになる", async () => {
+    const llm = new FixedLLMClient(""); // 空文字→フォールバック
+    const title = await generateHookTitleLLM(llm, sample, true);
+    expect(title).toBe(generateHookTitle(sample, true));
+    expect(title.startsWith("【議論】")).toBe(true);
   });
 });

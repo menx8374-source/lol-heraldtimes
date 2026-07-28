@@ -30,6 +30,16 @@ export type HotnessConfig = {
    * 持たないため本スプリントでは常にfalse（未使用）。将来公式OAuth併用時にtrueへ切替える想定。
    */
   useRankSignal: boolean;
+  /**
+   * 論争度判定（成長G1）: `commentCount/max(score,1)` がこれ以上で論争サイン（既定0.15）。
+   * 主にreddit向け。5chはscoreが常時0のためこの比が収集数だけで発散し判定として無意味になるため、
+   * `getHotnessConfig("5ch")` では実質無効化（Infinity）する（既存のcomment主体判定で足りる。F-G1-1）。
+   */
+  minControversyRatio: number;
+  /**
+   * 論争度判定（成長G1）: `upvote_ratio` がこれ以下で賛否が割れている（既定0.80。1.0に近いほど平和）。
+   */
+  maxUpvoteRatio: number;
 };
 
 function envInt(name: string, fallback: number): number {
@@ -43,6 +53,14 @@ function envBool(name: string, fallback: boolean): boolean {
   const raw = process.env[name];
   if (raw === undefined) return fallback;
   return raw === "true" || raw === "1";
+}
+
+/** 非負の小数env値をパースする（不正・未設定はfallback。論争度の比率設定に使う）。 */
+function envFloat(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseFloat(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 /**
@@ -69,6 +87,9 @@ export function getHotnessConfig(sourceType?: SourceType): HotnessConfig {
     minAgeMinutes: envInt("HOTNESS_MIN_AGE_MINUTES", 30),
     maxAgeHours: envInt("HOTNESS_MAX_AGE_HOURS", 72),
     useRankSignal: envBool("HOTNESS_USE_RANK_SIGNAL", false),
+    // 成長G1（F-G1-1）: 汎用・reddit/riot向けの既定（0.15）。5ch分岐では下記で上書きし実質無効化する。
+    minControversyRatio: envFloat("HOTNESS_MIN_CONTROVERSY_RATIO", 0.15),
+    maxUpvoteRatio: envFloat("HOTNESS_MAX_UPVOTE_RATIO", 0.8),
   };
 
   if (sourceType === "5ch") {
@@ -76,6 +97,12 @@ export function getHotnessConfig(sourceType?: SourceType): HotnessConfig {
       ...base,
       minScore: envInt("HOTNESS_5CH_MIN_SCORE", SOURCE_CURRENT_VALUE_DEFAULTS["5ch"].minScore),
       minComments: envInt("HOTNESS_5CH_MIN_COMMENTS", SOURCE_CURRENT_VALUE_DEFAULTS["5ch"].minComments),
+      // F-G1-1修正: 5chはscoreが常時0のためcomment比(controversyScore=comments/max(score,1))が
+      // resCount収集数だけで発散し(既定minComments=30収集で常時30超)、論争判定として無意味になる
+      // (5ch反応記事が実質常時isControversial=trueになりタイトル多様性を損なう不具合)。
+      // 5chはupvote_ratioも持たないため、comment比を実質無効化(Infinity)してisControversialを常にfalseにする
+      // (envで明示的に上書きされた場合のみ有効な値を使う。既存のソース別上書きパターンを踏襲)。
+      minControversyRatio: envFloat("HOTNESS_5CH_MIN_CONTROVERSY_RATIO", Number.POSITIVE_INFINITY),
     };
   }
   if (sourceType === "reddit") {

@@ -48,6 +48,21 @@ describe("toCollectionItems", () => {
     const result = toCollectionItems("riot-news", raw);
     expect(result[0].category).toBe("eスポーツ");
   });
+
+  it("upvoteRatio を共通フォーマットに転記する（成長G1 F-G1-3・転記漏れ注意）", () => {
+    const raw: RawCollectionItem[] = [
+      {
+        sourceUrl: "https://www.reddit.com/r/leagueoflegends/comments/1/x/",
+        title: "t",
+        content: "c",
+        fetchedAt: new Date(),
+        externalId: "x",
+        upvoteRatio: 0.42,
+      },
+    ];
+    const result = toCollectionItems("reddit", raw);
+    expect(result[0].upvoteRatio).toBe(0.42);
+  });
 });
 
 describe("collectFromSource", () => {

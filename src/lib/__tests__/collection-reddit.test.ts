@@ -201,6 +201,18 @@ describe("純関数: Post永続化用メタの付与（リファクタリングS
     expect(item.flair).toBeNull();
   });
 
+  it("upvote_ratioがRawCollectionItem.upvoteRatioにそのまま転記される（成長G1 F-G1-3）", () => {
+    const p = post({ id: "meta5", upvote_ratio: 0.62 });
+    const item = buildRedditItem(p, []);
+    expect(item.upvoteRatio).toBe(0.62);
+  });
+
+  it("upvote_ratioが未指定の場合はupvoteRatioもundefinedのまま", () => {
+    const p = post({ id: "meta6", upvote_ratio: undefined });
+    const item = buildRedditItem(p, []);
+    expect(item.upvoteRatio).toBeUndefined();
+  });
+
   it("mediaにimageUrl/urlが設定される（どちらも無ければundefined）", () => {
     const p = post({
       id: "meta3",
