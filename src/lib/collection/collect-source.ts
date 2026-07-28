@@ -41,6 +41,8 @@ export function toCollectionItems(sourceType: SourceType, raw: RawCollectionItem
       // リファクタリングS7: 取得元ルールで付与したカテゴリ(RiotNewsの種別分類等)を Post/Article まで
       // 伝えるため転記する。ここで漏らすと Post.category が null になりソース既定カテゴリに落ちる。
       category: r.category,
+      // パッチ記事刷新S2（F-S2-2）: riot由来の生HTMLも同様にそのまま転記する(未設定は無視される)。
+      html: r.html,
     });
   }
   return items;

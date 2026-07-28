@@ -171,6 +171,42 @@ describe("persistPosts（リファクタリングS2 F-S2-2）", () => {
     expect(post.media).toBeNull();
   });
 
+  it("item.htmlが有る場合、DBスキーマ変更なしでPost.media.htmlにキー追加される(パッチ記事刷新S2 F-S2-2)", async () => {
+    const now = new Date("2026-07-28T10:00:00+09:00");
+    const html = '<div class="patch-change-block"><h3 class="change-title">コーキ</h3></div>';
+    await persistPosts(
+      [
+        item({
+          externalId: "patch-26-14-html",
+          media: undefined,
+          imageUrl: "https://www.leagueoflegends.com/og-image.png",
+          html,
+        }),
+      ],
+      "riot",
+      now,
+    );
+
+    const post = await prisma.post.findUniqueOrThrow({
+      where: { sourceType_externalId: { sourceType: "riot", externalId: "patch-26-14-html" } },
+    });
+    expect(post.media).toEqual({ imageUrl: "https://www.leagueoflegends.com/og-image.png", html });
+  });
+
+  it("item.htmlが無い場合はPost.mediaにhtmlキーが追加されない(回帰なし)", async () => {
+    const now = new Date("2026-07-28T10:00:00+09:00");
+    await persistPosts(
+      [item({ externalId: "patch-no-html", media: undefined, imageUrl: "https://example.com/og.png" })],
+      "riot",
+      now,
+    );
+
+    const post = await prisma.post.findUniqueOrThrow({
+      where: { sourceType_externalId: { sourceType: "riot", externalId: "patch-no-html" } },
+    });
+    expect(post.media).toEqual({ imageUrl: "https://example.com/og.png" });
+  });
+
   it("item.categoryが指定されていればPost.categoryに保存される(リファクタリングS7a F-S7a-3)", async () => {
     const now = new Date("2026-07-27T10:00:00+09:00");
     await persistPosts(

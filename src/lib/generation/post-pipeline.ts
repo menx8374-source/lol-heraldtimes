@@ -93,6 +93,19 @@ function extractPostImageUrl(media: Prisma.JsonValue | null): string | null {
 }
 
 /**
+ * Post.media から riot由来の生HTML（`html`キー、パッチ記事刷新S2 F-S2-2）を安全に取り出す。
+ * DBスキーマ変更を避けるため既存のJSON列（media）にキー追加する形でpersist-posts.tsが保存している。
+ * 他ソース・未設定時はnull（compose.ts側がDOM抽出をスキップし従来の平テキスト経路にフォールバックする）。
+ */
+function extractPostHtml(media: Prisma.JsonValue | null): string | null {
+  if (media && typeof media === "object" && !Array.isArray(media)) {
+    const value = (media as Record<string, unknown>).html;
+    if (typeof value === "string") return value;
+  }
+  return null;
+}
+
+/**
  * hotnessの強さをカテゴリ内ソートに使う1つの数値にまとめる（決定論・AI不使用）。
  * 現在値(score/comments)と増加率のいずれの条件でhotになった場合でも一貫して比較できるよう、
  * 4指標を単純合算する（reddit=score優勢・5ch=comments優勢という各ソースの特性を吸収する）。
@@ -237,6 +250,8 @@ export async function generateArticlesFromHotPosts(
       title: post.title,
       content: post.body,
       imageUrl: extractPostImageUrl(post.media),
+      // パッチ記事刷新S2（F-S2-2）: riot由来の生HTML(あれば)をcandidateへ届ける(compose.ts側のDOM抽出用)。
+      html: extractPostHtml(post.media),
       // リファクタリングS7a（F-S7a-3）: 取得元ルールで付与されたPost.categoryがあればそれを、
       // 無ければ従来どおり generateArticleForCandidate 側でソース既定にフォールバックする。
       category: (post.category as CategoryLabel | null) ?? undefined,

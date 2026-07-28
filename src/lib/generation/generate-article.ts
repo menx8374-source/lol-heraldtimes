@@ -48,6 +48,11 @@ export type GenerationCandidate = {
   /** 収集時に取得したサムネイル画像URL（拡張E19）。未設定/nullは記事のサムネイルも未設定になる。 */
   imageUrl?: string | null;
   /**
+   * パッチ記事刷新S2（F-S2-2）: riot由来の平テキスト化前の生HTML。DOM構造パーサ
+   * （`parsePatchNotesHtml`）で誤帰属ゼロの本文組み立てに使う。他ソース・未取得時は未設定。
+   */
+  html?: string | null;
+  /**
    * リファクタリングS7a（F-S7a-3）: 取得元ルールで明示されたカテゴリ（Post.category由来）。
    * 未設定の場合は従来どおりソース既定（CATEGORY_BY_SOURCE）にフォールバックする。
    */

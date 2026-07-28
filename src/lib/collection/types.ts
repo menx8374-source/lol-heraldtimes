@@ -62,6 +62,13 @@ export type RawCollectionItem = {
    * （AI分類はしない）。未設定の場合は生成時にソース既定（CATEGORY_BY_SOURCE）にフォールバックする。
    */
   category?: CategoryLabel;
+  /**
+   * パッチ記事刷新S2（F-S2-2）: riot由来の平テキスト化前の生HTML（`riot-datadragon.ts`の
+   * `fetchPatchNotesData().html`）。DOM構造パーサ（`patch-notes-parser.ts`）が誤帰属ゼロで
+   * 対象・スキルキー・変更前後を抽出するために必要。他ソースは未設定のまま（後方互換）。
+   * Post永続化ではDBスキーマ変更を避けるため`Post.media`（既存JSON列）に格納する。
+   */
+  html?: string;
 };
 
 /** 出典URLを必ず持つ、保存可能な収集アイテム（共通フォーマット）。 */
@@ -89,6 +96,8 @@ export type CollectionItem = {
   media?: unknown;
   /** リファクタリングS7: 取得元ルールで付与したカテゴリ（Post.category→Article.category へ伝播）。 */
   category?: CategoryLabel;
+  /** パッチ記事刷新S2（F-S2-2）: riot由来の平テキスト化前の生HTML。RawCollectionItemからそのまま引き継ぐ。 */
+  html?: string;
 };
 
 /** ソースごとのレート制限設定（F5: 取得件数上限・実行間隔）。 */

@@ -75,6 +75,34 @@ export type ArticleBodyHeadingBlock = { type: "heading"; text: string; anchor?: 
  */
 export type ArticleBodyTocBlock = { type: "toc"; items: { label: string; anchor: string }[] };
 
+/** パッチ変更対象内の1スキル/1項目分の変更点グループ（パッチ記事刷新S2 F-S2-1）。
+ * `changes` は本文（公式パッチノートHTML）の逐語（stat/before/after）そのもの、捏造しない。 */
+export type ArticleBodyPatchChangeGroup = {
+  abilityKey?: "passive" | "Q" | "W" | "E" | "R" | "base";
+  abilityName?: string;
+  /** スキル/パッシブアイコンURL（S3で表示。S2では保持のみ）。 */
+  abilityIconUrl?: string;
+  changes: { stat: string; before: string; after: string }[];
+};
+
+/**
+ * パッチ変更「対象単位」のブロック（パッチ記事刷新S2 F-S2-1）。公式パッチノートDOM抽出
+ * （`parsePatchNotesHtml`）の `PatchChangeTarget` 1件に対応する。対象名(`targetName`)は
+ * 総称に潰さず個別のまま保持する（誤帰属ゼロの記事表示への反映）。
+ */
+export type ArticleBodyPatchChangeBlock = {
+  type: "patchChange";
+  targetName: string;
+  /** 対象アイコン（champion square / item icon）URL（S3で表示。S2では保持のみ）。 */
+  targetIconUrl?: string;
+  targetKind: "champion" | "item" | "rune" | "system" | "bugfix" | "other";
+  /** 対象単位の総合方向（成長G3の3分類と同じ語彙、算出はcompose.ts側）。 */
+  direction: "buff" | "nerf" | "adjust";
+  /** 変更意図（blockquote、本文の文字そのまま）。 */
+  intent?: string;
+  groups: ArticleBodyPatchChangeGroup[];
+};
+
 export type ArticleBodyBlock =
   | ArticleBodyHeadingBlock
   | { type: "paragraph"; text: string }
@@ -83,7 +111,8 @@ export type ArticleBodyBlock =
   | ArticleBodyImageBlock
   | ArticleBodyEmbedBlock
   | ArticleBodyLinkButtonBlock
-  | ArticleBodyTocBlock;
+  | ArticleBodyTocBlock
+  | ArticleBodyPatchChangeBlock;
 
 export class InvalidArticleBodyError extends Error {
   constructor(message: string) {
@@ -230,6 +259,117 @@ function parseTocBlock(b: Record<string, unknown>, index: number): ArticleBodyTo
   return { type: "toc", items };
 }
 
+const PATCH_ABILITY_KEYS = new Set(["passive", "Q", "W", "E", "R", "base"]);
+const PATCH_TARGET_KINDS = new Set(["champion", "item", "rune", "system", "bugfix", "other"]);
+const PATCH_DIRECTIONS = new Set(["buff", "nerf", "adjust"]);
+
+/**
+ * patchChangeブロックのgroups[].changes[]を検証する（パッチ記事刷新S2 F-S2-1）。
+ * stat/before/afterは本文の逐語そのものであるべきなので、非空文字列を必須にする（欠落は捨てずに
+ * 例外を投げる＝呼び出し側の組み立てミスに気づけるようにする。既存 parseReactionBlock のlines検証と
+ * 同じ方針）。
+ */
+function parsePatchChangeGroupChanges(
+  raw: unknown,
+  index: number,
+  groupIndex: number,
+): { stat: string; before: string; after: string }[] {
+  if (!Array.isArray(raw)) {
+    throw new InvalidArticleBodyError(`本文ブロック[${index}]のgroups[${groupIndex}]のchangesが配列ではありません`);
+  }
+  return raw.map((c, changeIndex) => {
+    if (typeof c !== "object" || c === null) {
+      throw new InvalidArticleBodyError(
+        `本文ブロック[${index}]のgroups[${groupIndex}]のchanges[${changeIndex}]がオブジェクトではありません`,
+      );
+    }
+    const change = c as Record<string, unknown>;
+    if (
+      typeof change.stat !== "string" ||
+      change.stat.trim().length === 0 ||
+      typeof change.before !== "string" ||
+      change.before.trim().length === 0 ||
+      typeof change.after !== "string" ||
+      change.after.trim().length === 0
+    ) {
+      throw new InvalidArticleBodyError(
+        `本文ブロック[${index}]のgroups[${groupIndex}]のchanges[${changeIndex}]のstat/before/afterが不正です`,
+      );
+    }
+    return { stat: change.stat, before: change.before, after: change.after };
+  });
+}
+
+/**
+ * patchChangeブロックのgroups[]を検証する（パッチ記事刷新S2 F-S2-1）。abilityKey/abilityNameは
+ * 任意（判定できない場合はDOM抽出側がundefinedのまま渡す＝捏造しない）。abilityIconUrlは
+ * 既存 `isSafeImageUrl` で検証し、不正な値は装飾情報にすぎないため例外にせず捨てる（正規化）。
+ */
+function parsePatchChangeGroups(
+  raw: unknown,
+  index: number,
+): ArticleBodyPatchChangeGroup[] {
+  if (!Array.isArray(raw)) {
+    throw new InvalidArticleBodyError(`本文ブロック[${index}]のgroupsが配列ではありません`);
+  }
+  return raw.map((g, groupIndex) => {
+    if (typeof g !== "object" || g === null) {
+      throw new InvalidArticleBodyError(`本文ブロック[${index}]のgroups[${groupIndex}]がオブジェクトではありません`);
+    }
+    const group = g as Record<string, unknown>;
+    if (group.abilityKey !== undefined && !PATCH_ABILITY_KEYS.has(group.abilityKey as string)) {
+      throw new InvalidArticleBodyError(`本文ブロック[${index}]のgroups[${groupIndex}]のabilityKeyが不正です`);
+    }
+    if (
+      group.abilityName !== undefined &&
+      (typeof group.abilityName !== "string" || group.abilityName.trim().length === 0)
+    ) {
+      throw new InvalidArticleBodyError(`本文ブロック[${index}]のgroups[${groupIndex}]のabilityNameが不正です`);
+    }
+    const abilityIconUrl =
+      typeof group.abilityIconUrl === "string" && isSafeImageUrl(group.abilityIconUrl)
+        ? group.abilityIconUrl
+        : undefined;
+    return {
+      ...(group.abilityKey ? { abilityKey: group.abilityKey as ArticleBodyPatchChangeGroup["abilityKey"] } : {}),
+      ...(group.abilityName ? { abilityName: group.abilityName as string } : {}),
+      ...(abilityIconUrl ? { abilityIconUrl } : {}),
+      changes: parsePatchChangeGroupChanges(group.changes, index, groupIndex),
+    };
+  });
+}
+
+/**
+ * patchChangeブロックの検証（パッチ記事刷新S2 F-S2-1）。targetName/targetKind/direction/groupsは
+ * 必須（欠落・不正は例外）。targetIconUrlは既存 `isSafeImageUrl` で検証し不正なら捨てる（正規化）。
+ * intentは任意（本文の逐語そのまま、改変しない）。
+ */
+function parsePatchChangeBlock(b: Record<string, unknown>, index: number): ArticleBodyPatchChangeBlock {
+  if (typeof b.targetName !== "string" || b.targetName.trim().length === 0) {
+    throw new InvalidArticleBodyError(`本文ブロック[${index}]のtargetNameが空です`);
+  }
+  if (typeof b.targetKind !== "string" || !PATCH_TARGET_KINDS.has(b.targetKind)) {
+    throw new InvalidArticleBodyError(`本文ブロック[${index}]のtargetKindが不正です: ${String(b.targetKind)}`);
+  }
+  if (typeof b.direction !== "string" || !PATCH_DIRECTIONS.has(b.direction)) {
+    throw new InvalidArticleBodyError(`本文ブロック[${index}]のdirectionが不正です: ${String(b.direction)}`);
+  }
+  if (b.intent !== undefined && (typeof b.intent !== "string" || b.intent.trim().length === 0)) {
+    throw new InvalidArticleBodyError(`本文ブロック[${index}]のintentが不正です`);
+  }
+  const targetIconUrl =
+    typeof b.targetIconUrl === "string" && isSafeImageUrl(b.targetIconUrl) ? b.targetIconUrl : undefined;
+  return {
+    type: "patchChange",
+    targetName: b.targetName,
+    ...(targetIconUrl ? { targetIconUrl } : {}),
+    targetKind: b.targetKind as ArticleBodyPatchChangeBlock["targetKind"],
+    direction: b.direction as ArticleBodyPatchChangeBlock["direction"],
+    ...(b.intent ? { intent: b.intent as string } : {}),
+    groups: parsePatchChangeGroups(b.groups, index),
+  };
+}
+
 function parseEmbedBlock(b: Record<string, unknown>, index: number): ArticleBodyEmbedBlock {
   if (!isEmbedProvider(b.provider)) {
     throw new InvalidArticleBodyError(`本文ブロック[${index}]の埋め込みproviderが不正です: ${String(b.provider)}`);
@@ -274,6 +414,9 @@ export function parseArticleBody(value: unknown): ArticleBodyBlock[] {
     }
     if (b.type === "toc") {
       return parseTocBlock(b, index);
+    }
+    if (b.type === "patchChange") {
+      return parsePatchChangeBlock(b, index);
     }
     if (typeof b.type !== "string" || !TEXT_TYPES.has(b.type)) {
       throw new InvalidArticleBodyError(
@@ -376,6 +519,15 @@ export function blockText(block: ArticleBodyBlock): string {
   }
   if (block.type === "toc") {
     return block.items.map((i) => i.label).join("\n");
+  }
+  if (block.type === "patchChange") {
+    const parts: string[] = [block.targetName];
+    if (block.intent) parts.push(block.intent);
+    for (const g of block.groups) {
+      if (g.abilityName) parts.push(g.abilityName);
+      for (const c of g.changes) parts.push(`${c.stat}：${c.before} ⇒ ${c.after}`);
+    }
+    return parts.join("\n");
   }
   return block.text;
 }

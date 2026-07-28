@@ -218,12 +218,16 @@ export function buildPatchNoteUrl(version: string): string {
  * 材料になる）。未指定/短すぎる場合は従来どおりの汎用事実速報になる（バランス数値等は含めない）。
  * `imageUrl`（拡張E42 F-E42-1）が渡された場合は `RawCollectionItem.imageUrl` に格納する
  * （記事本文冒頭の公式バナー画像・カードサムネの材料になる。未指定なら従来どおり未設定）。
+ * `html`（パッチ記事刷新S2 F-S2-2）が渡された場合は `RawCollectionItem.html` に格納する
+ * （DOM構造パーサ`parsePatchNotesHtml`が誤帰属ゼロで対象・スキルキー・変更前後を抽出するための
+ * 生HTML。本文が短すぎてhasPatchNotesがfalseのときは併せて未設定にする＝汎用速報のみ）。
  */
 export function buildPatchItem(
   version: string,
   now: Date,
   patchNotesText?: string | null,
   imageUrl?: string | null,
+  html?: string | null,
 ): RawCollectionItem {
   // タイトル表示はユーザーが認識する公式番号（例 26.14）を使う（DDragonの16.14ではなく。拡張E34c）。
   const patchLabel = publicPatchNumber(version);
@@ -238,6 +242,7 @@ export function buildPatchItem(
       : `Riot Games の Data Dragon にて、パッチ ${patchLabel}（内部バージョン ${version}）のゲームデータが公開された。最新バージョンのチャンピオン・アイテム等のデータが利用可能になっている。`,
     fetchedAt: now,
     ...(imageUrl ? { imageUrl } : {}),
+    ...(hasPatchNotes && html ? { html } : {}),
     // リファクタリングS2（F-S2-1）: Post永続化用の外部ID(パッチ識別子)。score/commentCountは
     // Riotに概念が無いため未設定のまま(persist側で0扱い)。
     externalId: patchLabel,
@@ -271,6 +276,8 @@ export class RiotDataDragonAdapter implements SourceAdapter {
     // buildPatchItem が従来の汎用contentにフォールバックする（画像も未設定になる）。
     const patchNotesData = await fetchPatchNotesData(latestVersion);
 
-    return [buildPatchItem(latestVersion, now, patchNotesData?.text, patchNotesData?.imageUrl)];
+    return [
+      buildPatchItem(latestVersion, now, patchNotesData?.text, patchNotesData?.imageUrl, patchNotesData?.html),
+    ];
   }
 }

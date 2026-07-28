@@ -374,6 +374,122 @@ describe("parseArticleBody", () => {
       parseArticleBody([{ type: "toc", items: [{ label: "主な強化", anchor: "" }] }]),
     ).toThrow(InvalidArticleBodyError);
   });
+
+  it("patchChangeブロックの正しい構造をパースできる(パッチ記事刷新S2 F-S2-1)", () => {
+    const input = [
+      {
+        type: "patchChange",
+        targetName: "コーキ",
+        targetIconUrl: "https://ddragon.leagueoflegends.com/cdn/img/champion/Corki.png",
+        targetKind: "champion",
+        direction: "buff",
+        intent: "試合終盤のコーキの出撃時の火力を少し高めました。",
+        groups: [
+          {
+            abilityKey: "base",
+            changes: [{ stat: "レベルアップごとの攻撃力", before: "2", after: "2.5" }],
+          },
+          {
+            abilityKey: "R",
+            abilityName: "R - 連発ミサイル",
+            abilityIconUrl: "https://ddragon.leagueoflegends.com/cdn/img/spell/MissileBarrage.png",
+            changes: [
+              { stat: "通常攻撃による残りリチャージ時間短縮量", before: "2秒～4秒", after: "2秒～6秒" },
+            ],
+          },
+        ],
+      },
+    ];
+    const parsed = parseArticleBody(input);
+    expect(parsed).toEqual(input);
+  });
+
+  it("patchChangeブロックのtargetNameが空ならエラーを投げる", () => {
+    expect(() =>
+      parseArticleBody([
+        { type: "patchChange", targetName: "", targetKind: "champion", direction: "buff", groups: [] },
+      ]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
+  it("patchChangeブロックのtargetKindが不正ならエラーを投げる", () => {
+    expect(() =>
+      parseArticleBody([
+        { type: "patchChange", targetName: "コーキ", targetKind: "unknown", direction: "buff", groups: [] },
+      ]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
+  it("patchChangeブロックのdirectionが不正ならエラーを投げる", () => {
+    expect(() =>
+      parseArticleBody([
+        { type: "patchChange", targetName: "コーキ", targetKind: "champion", direction: "op", groups: [] },
+      ]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
+  it("patchChangeブロックのgroupsが配列でなければエラーを投げる", () => {
+    expect(() =>
+      parseArticleBody([
+        { type: "patchChange", targetName: "コーキ", targetKind: "champion", direction: "buff", groups: "x" },
+      ]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
+  it("patchChangeブロックのgroups[].changes[]のstat/before/afterが欠落しているとエラーを投げる(逐語データの欠落は捨てず気づけるようにする)", () => {
+    expect(() =>
+      parseArticleBody([
+        {
+          type: "patchChange",
+          targetName: "コーキ",
+          targetKind: "champion",
+          direction: "buff",
+          groups: [{ changes: [{ stat: "攻撃力", before: "", after: "2.5" }] }],
+        },
+      ]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
+  it("patchChangeブロックはgroupsが空配列・groups[].changesが空配列でも許容する(誤帰属ゼロの数値なし対象、捏造しない)", () => {
+    const input = [
+      { type: "patchChange", targetName: "アジール", targetKind: "champion", direction: "adjust", groups: [] },
+    ];
+    expect(parseArticleBody(input)).toEqual(input);
+  });
+
+  it("patchChangeブロックの不正な画像URL(targetIconUrl/abilityIconUrl)は例外にせず捨てる(正規化)", () => {
+    const parsed = parseArticleBody([
+      {
+        type: "patchChange",
+        targetName: "コーキ",
+        targetIconUrl: "javascript:alert(1)",
+        targetKind: "champion",
+        direction: "buff",
+        groups: [
+          {
+            abilityIconUrl: "javascript:alert(1)",
+            changes: [{ stat: "攻撃力", before: "2", after: "2.5" }],
+          },
+        ],
+      },
+    ]);
+    expect(parsed[0]).not.toHaveProperty("targetIconUrl");
+    expect((parsed[0] as { groups: { abilityIconUrl?: string }[] }).groups[0]).not.toHaveProperty("abilityIconUrl");
+  });
+
+  it("patchChangeブロックのabilityKeyが不正ならエラーを投げる", () => {
+    expect(() =>
+      parseArticleBody([
+        {
+          type: "patchChange",
+          targetName: "コーキ",
+          targetKind: "champion",
+          direction: "buff",
+          groups: [{ abilityKey: "X", changes: [{ stat: "攻撃力", before: "2", after: "2.5" }] }],
+        },
+      ]),
+    ).toThrow(InvalidArticleBodyError);
+  });
 });
 
 describe("blockText", () => {
@@ -433,6 +549,24 @@ describe("blockText", () => {
         ],
       }),
     ).toBe("主な強化\nアジール");
+  });
+
+  it("patchChangeは対象名＋意図＋各groupのabilityName＋各changeのstat/before/afterを改行連結して返す(パッチ記事刷新S2 F-S2-1)", () => {
+    expect(
+      blockText({
+        type: "patchChange",
+        targetName: "コーキ",
+        targetKind: "champion",
+        direction: "buff",
+        intent: "試合終盤の火力を高める",
+        groups: [
+          {
+            abilityKey: "base",
+            changes: [{ stat: "レベルアップごとの攻撃力", before: "2", after: "2.5" }],
+          },
+        ],
+      }),
+    ).toBe("コーキ\n試合終盤の火力を高める\nレベルアップごとの攻撃力：2 ⇒ 2.5");
   });
 });
 

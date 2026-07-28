@@ -454,3 +454,59 @@ describe("ResLines（AA・原文併記, 拡張E3）", () => {
     expect(originalIndex).toBeLessThan(translatedIndex);
   });
 });
+
+describe("ArticleBodyView（patchChangeブロック、パッチ記事刷新S2 F-S2-4・素朴レンダリング）", () => {
+  const blocks: ArticleBodyBlock[] = [
+    {
+      type: "patchChange",
+      targetName: "コーキ",
+      targetKind: "champion",
+      direction: "buff",
+      intent: "試合終盤のコーキの出撃時の火力を少し高めました。",
+      groups: [
+        {
+          abilityKey: "base",
+          changes: [{ stat: "レベルアップごとの攻撃力", before: "2", after: "2.5" }],
+        },
+        {
+          abilityKey: "R",
+          abilityName: "R - 連発ミサイル",
+          changes: [
+            { stat: "通常攻撃による残りリチャージ時間短縮量", before: "2秒～4秒", after: "2秒～6秒" },
+          ],
+        },
+      ],
+    },
+  ];
+  const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+
+  it("対象名・directionラベル・意図(intent)を表示する", () => {
+    expect(html).toContain("コーキ");
+    expect(html).toContain("強化");
+    expect(html).toContain("試合終盤のコーキの出撃時の火力を少し高めました。");
+  });
+
+  it("各groupのスキルキー/abilityName・before ⇒ afterをstatとともに表示する", () => {
+    expect(html).toContain("R - 連発ミサイル");
+    expect(html).toContain("レベルアップごとの攻撃力");
+    expect(html).toContain("2 ⇒ 2.5");
+    expect(html).toContain("2秒～4秒 ⇒ 2秒～6秒");
+  });
+
+  it("data-patch-change / data-patch-direction属性を付与する", () => {
+    expect(html).toContain("data-patch-change");
+    expect(html).toContain('data-patch-direction="buff"');
+  });
+
+  it("既存ブロック(見出し・段落等)の表示は不変(他ブロックと混在しても壊れない)", () => {
+    const mixedBlocks: ArticleBodyBlock[] = [
+      { type: "heading", text: "見出し" },
+      { type: "paragraph", text: "段落テキスト" },
+      ...blocks,
+    ];
+    const mixedHtml = renderToStaticMarkup(<ArticleBodyView blocks={mixedBlocks} />);
+    expect(mixedHtml).toContain("見出し");
+    expect(mixedHtml).toContain("段落テキスト");
+    expect(mixedHtml).toContain("data-patch-change");
+  });
+});

@@ -11,6 +11,14 @@ import { MockLLMClient, type LLMClient, type LLMMessage } from "@/lib/generation
 import { SEO_SYSTEM_PROMPT } from "@/lib/generation/seo";
 import type { SourceType } from "@/lib/collection/types";
 import { nextPublishSlots } from "@/lib/generation/publish-schedule";
+import { parseArticleBody } from "@/lib/article-body";
+import fs from "node:fs";
+import path from "node:path";
+
+const PATCH_FIXTURE_HTML = fs.readFileSync(
+  path.join(__dirname, "..", "generation", "__fixtures__", "patch-26-14.html"),
+  "utf8",
+);
 
 async function resetDb() {
   await prisma.articleSource.deleteMany();
@@ -53,7 +61,7 @@ type CreatePostOptions = {
   body?: string;
   sourceUrl?: string;
   postedAt?: Date;
-  media?: { imageUrl: string };
+  media?: { imageUrl?: string; html?: string };
   category?: string;
   /** 成長G1（F-G1-4）: upvote比率（0〜1）。未指定はnull（Post.upvoteRatio既定と同じ）。 */
   upvoteRatio?: number;
@@ -528,6 +536,30 @@ describe("generateArticlesFromHotPosts（Post経路の画像取りこぼし修�
 
     const article = await prisma.article.findUnique({ where: { postId: post.id } });
     expect(article?.thumbnailUrl).toBe(imageUrl);
+  });
+});
+
+describe("generateArticlesFromHotPosts（Post.media.htmlの配線、パッチ記事刷新S2 F-S2-2）", () => {
+  it("Post.media.htmlに生HTMLがあれば、composeArticleBody(DOM抽出)がpatchChangeブロックで本文を組み立てる", async () => {
+    const post = await createPost({
+      sourceType: "riot",
+      title: "パッチ26.14ノート公開",
+      body: "本パッチではジャングルモンスターの経験値量が引き下げられ、序盤のペースに変化が生まれた。",
+      sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/patch-26-14-notes/",
+      media: { imageUrl: "https://www.leagueoflegends.com/og-image-patch-26-14.png", html: PATCH_FIXTURE_HTML },
+      metrics: [{ score: 0, commentCount: 0, capturedAt: T0 }],
+    });
+
+    const summary = await generateArticlesFromHotPosts(llm, { now: T0, championMap: null });
+    const result = summary.results.find((r) => r.postId === post.id);
+    expect(result?.status).toBe("success");
+
+    const article = await prisma.article.findUnique({ where: { postId: post.id } });
+    expect(article).not.toBeNull();
+    const blocks = parseArticleBody(article!.body);
+    const patchChange = blocks.find((b) => b.type === "patchChange");
+    expect(patchChange).toBeDefined();
+    expect(patchChange?.type === "patchChange" && patchChange.targetName).toBe("コーキ");
   });
 });
 

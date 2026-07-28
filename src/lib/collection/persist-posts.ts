@@ -27,9 +27,14 @@ async function persistOneItem(item: RawCollectionItem, sourceType: SourceType, n
     // Post.media.imageUrlに画像が入るようフォールバックする（リファクタリングS5c F-S5c-2）。
     // どちらも無ければundefinedのまま（create時は未設定＝null、update時はこの列を更新しない＝
     // 既存値を保持。既存の挙動を変えない）。
-    const media = (item.media ?? (item.imageUrl ? { imageUrl: item.imageUrl } : undefined)) as
-      | Prisma.InputJsonValue
-      | undefined;
+    const baseMedia = item.media ?? (item.imageUrl ? { imageUrl: item.imageUrl } : undefined);
+    // パッチ記事刷新S2（F-S2-2）: DBスキーマ変更を避けるため、riot由来の生HTML（`item.html`）は
+    // 既存のJSON列 `Post.media` にキー追加する形で保持する（未設定のソースは従来どおり無変更）。
+    const media = (
+      item.html
+        ? { ...((baseMedia && typeof baseMedia === "object" && !Array.isArray(baseMedia) ? baseMedia : {}) as object), html: item.html }
+        : baseMedia
+    ) as Prisma.InputJsonValue | undefined;
     const post = await prisma.post.upsert({
       where: { sourceType_externalId: { sourceType, externalId } },
       create: {

@@ -95,6 +95,25 @@ describe("純関数: buildPatchNoteUrl / buildPatchItem", () => {
     const withNullImage = buildPatchItem("14.6.1", new Date(), "実際のパッチノート本文。".repeat(30), null);
     expect(withNullImage.imageUrl).toBeFalsy();
   });
+
+  it("htmlが渡され本文が十分な長さの場合、RawCollectionItem.htmlに格納される(パッチ記事刷新S2 F-S2-2)", () => {
+    const html = '<div class="patch-change-block"><h3 class="change-title">コーキ</h3></div>';
+    const item = buildPatchItem("14.6.1", new Date(), "実際のパッチノート本文。".repeat(30), null, html);
+    expect(item.html).toBe(html);
+  });
+
+  it("htmlが未指定/nullの場合はhtmlが設定されない(後方互換)", () => {
+    const withoutHtml = buildPatchItem("14.6.1", new Date(), "実際のパッチノート本文。".repeat(30));
+    expect(withoutHtml.html).toBeUndefined();
+    const withNullHtml = buildPatchItem("14.6.1", new Date(), "実際のパッチノート本文。".repeat(30), null, null);
+    expect(withNullHtml.html).toBeUndefined();
+  });
+
+  it("本文が短すぎる(hasPatchNotesがfalse)場合はhtmlが渡されても設定されない(汎用速報のみ、捏造防止)", () => {
+    const html = '<div class="patch-change-block"><h3 class="change-title">コーキ</h3></div>';
+    const item = buildPatchItem("14.6.1", new Date(), "短い本文", null, html);
+    expect(item.html).toBeUndefined();
+  });
 });
 
 describe("extractOgImageUrl（拡張E42 F-E42-1）", () => {
@@ -373,6 +392,23 @@ describe("RiotDataDragonAdapter.fetchItems", () => {
 
     expect(items).toHaveLength(1);
     expect(items[0].imageUrl).toBe("https://cmsassets.rgpub.io/sanity/images/banner.jpg");
+  });
+
+  it("公式パッチノート本文の取得に成功した場合、RawCollectionItem.htmlに生HTMLが格納される(パッチ記事刷新S2 F-S2-2)", async () => {
+    const paragraph = "ヤスオが強化され、ゼドが弱体化されるなどの変更が入った。".repeat(15);
+    const html = `<div class="patch-change-block"><h3 class="change-title">ヤスオ</h3></div><p>${paragraph}</p>`;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === VERSIONS_URL) return jsonResponse(["14.6.1", "14.5.1"]);
+      if (url === PATCH_NOTE_URL) return textResponse(html);
+      throw new Error(`unexpected url: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new RiotDataDragonAdapter({ now: () => new Date("2026-07-25T00:00:00Z") });
+    const items = await adapter.fetchItems();
+
+    expect(items).toHaveLength(1);
+    expect(items[0].html).toBe(html);
   });
 
   it("公式パッチノート本文の取得に失敗した場合は従来の汎用contentにフォールバックする(例外を投げない)", async () => {

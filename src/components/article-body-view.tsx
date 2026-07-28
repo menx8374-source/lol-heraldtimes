@@ -148,6 +148,57 @@ function TocBlockView({ block }: { block: Extract<ArticleBodyBlock, { type: "toc
   );
 }
 
+/** patchChangeブロックのdirection表示ラベル（パッチ記事刷新S2 F-S2-4、素朴表示）。 */
+const PATCH_DIRECTION_LABEL: Record<"buff" | "nerf" | "adjust", string> = {
+  buff: "強化",
+  nerf: "弱体化",
+  adjust: "調整",
+};
+
+/**
+ * パッチ変更「対象単位」ブロックの素朴なレンダリング（パッチ記事刷新S2 F-S2-4）。
+ * 対象名＋directionラベル・各groupのスキルキー/abilityName・`before ⇒ after`（statとともに）・intentを
+ * プレーンなHTMLで表示する。画像（targetIconUrl/abilityIconUrl）はS3で表示するため、S2では未表示
+ * （URLはブロックに保持済み、ここでは使わない）。デザイン（黒/紺・金）はS4のためプレーンに留める。
+ */
+function PatchChangeBlockView({ block }: { block: Extract<ArticleBodyBlock, { type: "patchChange" }> }) {
+  return (
+    <div
+      data-patch-change
+      data-patch-direction={block.direction}
+      className="rounded border border-neutral-300 p-3 text-sm dark:border-neutral-700"
+    >
+      <div className="mb-1 flex flex-wrap items-baseline gap-2">
+        <span className="font-bold">{block.targetName}</span>
+        <span className="text-xs text-neutral-500 dark:text-neutral-400">
+          [{PATCH_DIRECTION_LABEL[block.direction]}]
+        </span>
+      </div>
+      {block.intent && (
+        <p className="mb-2 text-xs italic text-neutral-600 dark:text-neutral-400">{block.intent}</p>
+      )}
+      <div className="flex flex-col gap-2">
+        {block.groups.map((g, gi) => (
+          <div key={gi}>
+            {(g.abilityName || g.abilityKey) && (
+              <p className="text-xs font-bold text-neutral-600 dark:text-neutral-400">
+                {g.abilityName ?? g.abilityKey}
+              </p>
+            )}
+            <ul className="list-disc pl-5">
+              {g.changes.map((c, ci) => (
+                <li key={ci}>
+                  {c.stat}：{c.before} ⇒ {c.after}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const EMBED_PROVIDER_ICON: Record<EmbedProvider, string> = { twitter: "X", youtube: "▶", clip: "🎬" };
 
 /**
@@ -297,6 +348,9 @@ export function ArticleBodyView({ blocks }: { blocks: ArticleBodyBlock[] }) {
         }
         if (block.type === "linkButton") {
           return <LinkButtonBlockView key={index} block={block} />;
+        }
+        if (block.type === "patchChange") {
+          return <PatchChangeBlockView key={index} block={block} />;
         }
         return (
           <p key={index} className="text-sm leading-relaxed sm:text-base">

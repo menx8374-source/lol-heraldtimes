@@ -90,6 +90,29 @@ describe("toCollectionItems", () => {
       externalId: "1810000000000000099",
     });
   });
+
+  it("riot由来の生HTML(html)を共通フォーマットに転記する（パッチ記事刷新S2 F-S2-2、転記漏れ注意）", () => {
+    const raw: RawCollectionItem[] = [
+      {
+        sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/game-updates/league-of-legends-patch-26-14-notes",
+        title: "【パッチ】26.14 の主な変更点まとめ",
+        content: "本文".repeat(200),
+        fetchedAt: new Date(),
+        externalId: "26.14",
+        html: '<div class="patch-change-block"><h3 class="change-title">コーキ</h3></div>',
+      },
+    ];
+    const result = toCollectionItems("riot", raw);
+    expect(result[0].html).toBe('<div class="patch-change-block"><h3 class="change-title">コーキ</h3></div>');
+  });
+
+  it("htmlが未設定の場合はキー自体を持たない(既存挙動、後方互換)", () => {
+    const raw: RawCollectionItem[] = [
+      { sourceUrl: "https://example.com/a", title: "t1", content: "c1", fetchedAt: new Date() },
+    ];
+    const result = toCollectionItems("reddit", raw);
+    expect(result[0].html).toBeUndefined();
+  });
 });
 
 describe("collectFromSource", () => {

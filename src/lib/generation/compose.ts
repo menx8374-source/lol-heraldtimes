@@ -11,6 +11,7 @@ import type {
   ArticleBodyBlock,
   ArticleBodyEmbedBlock,
   ArticleBodyEmphasisColor,
+  ArticleBodyPatchChangeBlock,
   ArticleBodyReactionBlock,
 } from "@/lib/article-body";
 import type { SourceType } from "@/lib/collection/types";
@@ -24,6 +25,7 @@ import { CHAMPIONS } from "@/lib/generation/title";
 import { isSafeImageUrl } from "@/lib/image-url";
 import { buildChampionSplashUrl, championNameToId } from "@/lib/generation/champion-splash";
 import { buildTranslationGlossaryText } from "@/lib/generation/translation-glossary";
+import { parsePatchNotesHtml, type PatchChangeTarget } from "@/lib/generation/patch-notes-parser";
 
 export type GenerationCandidateInput = {
   sourceType: SourceType;
@@ -35,6 +37,11 @@ export type GenerationCandidateInput = {
   imageUrl?: string | null;
   /** 成長G7（F-G7-4）: x由来の投稿者（Post.author）。引用フォールバック時の出典表記に使う。 */
   author?: string | null;
+  /**
+   * パッチ記事刷新S2（F-S2-2）: riot由来の平テキスト化前の生HTML（`riot-datadragon.ts`保持）。
+   * `parsePatchNotesHtml`でDOM抽出できれば誤帰属ゼロの詳細本文を組み立てる。未取得/他ソースは未設定。
+   */
+  html?: string | null;
 };
 
 /** レス投稿者の匿名化ハンドル（実名・個人特定情報は出さない）。ソース種別ごとに固定。 */
@@ -1016,6 +1023,107 @@ export function classifyChampion(changes: string[]): "buff" | "nerf" | "adjust" 
   return "adjust";
 }
 
+/**
+ * DOM抽出（`PatchChangeTarget`）向けのdirection算出（パッチ記事刷新S2 F-S2-3）。
+ * 既存 `classifyChange`/`classifyChampion`（テキスト行"stat：before ⇒ after"を正規表現で
+ * 数値並び抽出する方式、G3のテストはそのまま維持）とは別に、DOM抽出済みの構造化された
+ * `{ stat, before, after }` を直接受け取り「代表数値」を比較する新ロジックを用意する。
+ * 公式HTML表記（範囲"2秒～4秒"、括弧内の付随数値、スペース入りスラッシュ複数値）に頑健にするため。
+ *
+ * - 括弧内（`（...）`/`(...)`）の付随数値は比較対象から除外する（例: "150 / 250 / 350（+対象の
+ *   減少体力の25 / 30 / 35%）"の括弧部分は無視する）。
+ * - 範囲表記（"2秒～4秒"/"2秒~4秒"）は最大値を代表値にする。
+ * - スラッシュ複数値（"150 / 250 / 350"、スペース有無問わず）は合計値を代表値にする
+ *   （ランクごとの数値をまとめて捉える、既存classifyChangeと同じ思想）。
+ * - 単一値はその値をそのまま使う。
+ * - 代表数値を抽出できない、またはスラッシュ値の個数が前後で食い違う（比較の前提が崩れる）場合は
+ *   nullを返し、呼び出し側が安全側（adjust/判定不能）に倒す。
+ */
+type PatchRepresentativeValue = { value: number; kind: "single" | "range" | "slash"; slashCount?: number };
+
+function stripParentheticalNumbers(s: string): string {
+  return s.replace(/[（(][^）)]*[）)]/g, "");
+}
+
+/**
+ * 値テキストから代表数値を抽出する。範囲(`kind:"range"`)は最大値、スラッシュ複数値
+ * (`kind:"slash"`)は合計値、単一値(`kind:"single"`)はその値そのものを代表値とする。
+ * 単一値の候補が文中に2件以上見つかる場合（例: "魔力100ごとに10%" の "100" と "10"）は、
+ * どちらが本来の対象値か機械的に判別できず誤判定の危険があるため、あえて抽出不能（null）にする
+ * （安全側。brief方針「曖昧はadjustに安全に倒す」）。
+ */
+function extractPatchRepresentativeValue(raw: string): PatchRepresentativeValue | null {
+  const cleaned = stripParentheticalNumbers(raw);
+
+  // 範囲表記("2秒～4秒"/"2秒~4秒"/"200～300"): 全角/半角チルダのみを範囲区切りとみなす
+  // （負数とのハイフン混同を避ける）。数値とチルダの間には「秒」「%」等の短い単位が挟まることがあるため、
+  // 数字以外の短い文字列（最大6文字）を許容する（無関係な数値をまたいで誤マッチしないよう数字自体は除外）。
+  const rangeMatch = cleaned.match(/(-?\d+(?:\.\d+)?)[^\d～~]{0,6}[～~][^\d]{0,6}(-?\d+(?:\.\d+)?)/);
+  if (rangeMatch) {
+    return { value: Math.max(Number(rangeMatch[1]), Number(rangeMatch[2])), kind: "range" };
+  }
+
+  // スラッシュ複数値("150/250/350"、スペース有無問わず): 合計値を代表値にする。
+  const slashMatch = cleaned.match(/-?\d+(?:\.\d+)?(?:\s*\/\s*-?\d+(?:\.\d+)?)+/);
+  if (slashMatch) {
+    const nums = slashMatch[0].split("/").map((part) => Number(part.trim()));
+    if (nums.every((n) => !Number.isNaN(n))) {
+      return { value: nums.reduce((a, b) => a + b, 0), kind: "slash", slashCount: nums.length };
+    }
+  }
+
+  // 単一値。文中に数値候補が複数ある場合はどれが対象値か機械的に判別できないため抽出不能にする。
+  const singleMatches = cleaned.match(/-?\d+(?:\.\d+)?/g);
+  if (singleMatches && singleMatches.length === 1) {
+    return { value: Number(singleMatches[0]), kind: "single" };
+  }
+
+  return null;
+}
+
+/**
+ * DOM抽出した1変更点（`{ stat, before, after }`）を「強化(buff)/弱体化(nerf)/調整(adjust)」に
+ * 機械分類する純関数（パッチ記事刷新S2 F-S2-3）。代表数値を抽出できない・種別(単一/範囲/スラッシュ)が
+ * 前後で食い違う・スラッシュ値の個数が前後で食い違う・同値の場合は判定不能として`adjust`
+ * （断定しない・安全側）を返す。
+ * `LOWER_IS_BETTER_TERMS`（クールダウン/マナ/コスト等）を含むstatは「減る=強化」に解釈を反転するが、
+ * 「短縮量」「軽減量」のように"量"自体が増えることが強化を意味する語（statに"量"を含む場合）は
+ * 反転しない（brief記載の安全側方針。曖昧な場合でも数値自体の増減で素直に判定する）。
+ */
+export function classifyPatchChange(change: { stat: string; before: string; after: string }): "buff" | "nerf" | "adjust" {
+  const beforeVal = extractPatchRepresentativeValue(change.before);
+  const afterVal = extractPatchRepresentativeValue(change.after);
+  if (!beforeVal || !afterVal) return "adjust";
+  if (beforeVal.kind !== afterVal.kind) return "adjust"; // 表記の種類が違う比較は前提が崩れるため安全側に倒す
+  if (beforeVal.kind === "slash" && beforeVal.slashCount !== afterVal.slashCount) {
+    return "adjust"; // 個数が食い違い比較の前提が崩れているため安全側に倒す
+  }
+  if (beforeVal.value === afterVal.value) return "adjust";
+
+  const increased = afterVal.value > beforeVal.value;
+  const isAmountTerm = change.stat.includes("量"); // "短縮量"「軽減量」等、量自体が増える=強化の語
+  const isLowerIsBetter = !isAmountTerm && LOWER_IS_BETTER_TERMS.some((term) => change.stat.includes(term));
+  if (isLowerIsBetter) return increased ? "nerf" : "buff";
+  return increased ? "buff" : "nerf";
+}
+
+/**
+ * DOM抽出した対象（`PatchChangeTarget`）1件分の全変更点を集約し、対象単位のdirectionを判定する
+ * （パッチ記事刷新S2 F-S2-3）。全groupの全changeを`classifyPatchChange`で分類し、全てbuff→buff、
+ * 全てnerf→nerf、混在・変更点が1つも無い・全て判定不能→adjust（`classifyChampion`と同じ思想）。
+ */
+export function classifyPatchTargetDirection(target: PatchChangeTarget): "buff" | "nerf" | "adjust" {
+  const allChanges = target.groups.flatMap((g) => g.changes);
+  if (allChanges.length === 0) return "adjust";
+  const classifications = allChanges.map(classifyPatchChange);
+  const hasBuff = classifications.includes("buff");
+  const hasNerf = classifications.includes("nerf");
+  if (hasBuff && hasNerf) return "adjust";
+  if (hasBuff) return "buff";
+  if (hasNerf) return "nerf";
+  return "adjust";
+}
+
 /** チャンピオン節・変更行の有界化（読みやすさ・トークン節約）。 */
 const MAX_PATCH_CHAMPIONS = 12;
 const MAX_CHANGES_PER_CHAMPION = 5;
@@ -1323,8 +1431,11 @@ function buildPatchIntroSummary(
 }
 
 /**
- * detailed パッチ本文（拡張E53 F-E53-1、lol-times風の詳細記事。拡張E54 F-E54-1でチャンピオン以外の
- * 変更点にも対応。成長G3で「バフ/ナーフ/調整」3分類＋冒頭サマリ＋目次に対応）を組み立てる。
+ * detailed パッチ本文の平テキスト経路フォールバック（拡張E53 F-E53-1、lol-times風の詳細記事。
+ * 拡張E54 F-E54-1でチャンピオン以外の変更点にも対応。成長G3で「バフ/ナーフ/調整」3分類＋
+ * 冒頭サマリ＋目次に対応）を組み立てる。
+ * パッチ記事刷新S2 F-S2-2: DOM抽出（`composeDetailedPatchBody`）が使えない（`candidate.html`未取得・
+ * DOM構造変化で空配列）場合のフォールバックとして温存する（優先順 DOM > 平テキスト > 事実速報）。
  * `extractPatchSectionsDeterministic` が返した逐語の変更点を使い、次の順で本文を構成する:
  * 1. `candidate.imageUrl`（og:image バナー）が安全なhttps画像URLなら先頭に画像ブロック。
  * 2. 冒頭1文サマリ（3分類の集計から純テンプレで生成、F-G3-3）。
@@ -1342,7 +1453,7 @@ function buildPatchIntroSummary(
  * ページ内リンクできるようにする（F-G3-4）。AIは使わない（決定的抽出・分類・集計・公式画像URLの
  * 組み立てのみ）。
  */
-function composeDetailedPatchBody(
+function composeDetailedPatchBodyFromText(
   candidate: GenerationCandidateInput,
   sections: PatchChangesSections,
 ): ArticleBodyBlock[] {
@@ -1420,6 +1531,158 @@ function composeDetailedPatchBody(
   blocks.push({
     type: "paragraph",
     text: buildPatchIntroSummary(label, buffChampions.length, nerfChampions.length, adjustChampions.length, sections.other.length),
+  });
+
+  if (tocItems.length > 0) {
+    blocks.push({ type: "toc", items: tocItems });
+  }
+
+  blocks.push(...contentBlocks);
+
+  if (sourceUrl && isHttpsUrl(sourceUrl)) {
+    blocks.push({ type: "linkButton", url: sourceUrl, label: `▶ ${label} 公式パッチノートを読む` });
+  } else {
+    blocks.push({
+      type: "paragraph",
+      text: "出典: Riot Games 公式サイトのパッチノートページをご確認ください。",
+    });
+  }
+
+  return blocks;
+}
+
+/** DOM抽出した1対象（`PatchChangeTarget`）を`patchChange`ブロックへ変換する（パッチ記事刷新S2 F-S2-2）。
+ * 対象名(h3)・スキルキー・変更前後・意図は本文の文字そのまま（逐語維持・捏造禁止）。画像URLは
+ * 保持するだけ（表示はS3）。 */
+function buildPatchChangeBlock(
+  target: PatchChangeTarget,
+  direction: "buff" | "nerf" | "adjust",
+): ArticleBodyPatchChangeBlock {
+  return {
+    type: "patchChange",
+    targetName: target.name,
+    ...(target.iconUrl ? { targetIconUrl: target.iconUrl } : {}),
+    targetKind: target.kind,
+    direction,
+    ...(target.intent ? { intent: target.intent } : {}),
+    groups: target.groups.map((g) => ({
+      ...(g.abilityKey ? { abilityKey: g.abilityKey } : {}),
+      ...(g.abilityName ? { abilityName: g.abilityName } : {}),
+      ...(g.abilityIconUrl ? { abilityIconUrl: g.abilityIconUrl } : {}),
+      changes: g.changes,
+    })),
+  };
+}
+
+/** 非チャンピオン対象（アイテム/ルーン/システム/バグ修正/その他）をまとめる見出しラベル。
+ * `target.section`（直近のh2、例「アイテム」「システム」）があればそれを使い、
+ * 無ければ総称見出し（`GENERIC_OTHER_HEADING`）にまとめる（対象名(h3)自体は各patchChangeブロックに
+ * 個別のまま残るため、総称に潰れるのは見出しのグルーピング単位だけ）。 */
+function otherTargetSectionHeading(target: PatchChangeTarget): string {
+  return target.section && target.section.trim().length > 0 ? target.section : GENERIC_OTHER_HEADING;
+}
+
+/**
+ * detailed パッチ本文（パッチ記事刷新S2 F-S2-2、DOM抽出ベース）を組み立てる。S1の
+ * `parsePatchNotesHtml(html)` が返した `PatchChangeTarget[]`（誤帰属ゼロ）から、G3の構造を
+ * 踏襲して本文を組み立てる:
+ * 1. `candidate.imageUrl`（og:image バナー）が安全なhttps画像URLなら先頭に画像ブロック。
+ * 2. 冒頭1文サマリ（3分類の集計から純テンプレで生成、F-G3-3を流用）。
+ * 3. 目次（toc、本文中の全ての章見出しへのページ内リンク一覧）。
+ * 4. チャンピオン対象（あれば）: `classifyPatchTargetDirection`（F-S2-3）で「主な強化」「主な弱体化」
+ *    「その他の調整」の3グループに振り分け、グループごとに見出し→各対象を`patchChange`ブロックで
+ *    出力する（対象名(h3)は各ブロックのtargetNameに個別のまま残る＝総称に潰さない）。
+ * 5. 非チャンピオン対象（あれば）: `target.section`（アイテム/システム等の直近h2）ごとにグルーピングし、
+ *    セクション見出し→各対象を`patchChange`ブロックで出力する（同様に対象名は個別のまま）。
+ * 6. 出典URLが安全なhttpsなら公式リンクボタン（linkButton）。
+ * 4・5はその回のパッチに実在する対象だけを出す（臨機応変）。各章見出しには決定論的な連番anchor
+ * （`sec-1`等）を付与し、tocのitemsから全見出しへページ内リンクできるようにする。
+ * AIは使わない（DOM抽出・分類・集計はすべて純ルール）。
+ */
+function composeDetailedPatchBody(
+  candidate: GenerationCandidateInput,
+  targets: PatchChangeTarget[],
+): ArticleBodyBlock[] {
+  const patchNumber = extractPatchNumberLabel(candidate);
+  const label = patchNumber ? `パッチ${patchNumber}` : "今回のパッチ";
+  const sourceUrl = candidate.sourceUrl?.trim();
+
+  const directionByTarget = new Map<PatchChangeTarget, "buff" | "nerf" | "adjust">(
+    targets.map((t) => [t, classifyPatchTargetDirection(t)]),
+  );
+
+  // バフ/ナーフ/調整の3分類（F-S2-3）。抽出順（本文出現順）を維持して振り分ける。チャンピオン対象のみ。
+  const championTargets = targets.filter((t) => t.kind === "champion");
+  const buffChampions = championTargets.filter((t) => directionByTarget.get(t) === "buff");
+  const nerfChampions = championTargets.filter((t) => directionByTarget.get(t) === "nerf");
+  const adjustChampions = championTargets.filter((t) => directionByTarget.get(t) === "adjust");
+  const championGroups: { heading: string; items: PatchChangeTarget[] }[] = [
+    { heading: "主な強化", items: buffChampions },
+    { heading: "主な弱体化", items: nerfChampions },
+    { heading: "その他の調整", items: adjustChampions },
+  ].filter((g) => g.items.length > 0);
+
+  // 非チャンピオン対象（アイテム/ルーン/システム/バグ修正/その他）: sectionごとに抽出順を維持してグルーピング。
+  const otherTargets = targets.filter((t) => t.kind !== "champion");
+  const otherSectionOrder: string[] = [];
+  const otherBySection = new Map<string, PatchChangeTarget[]>();
+  for (const t of otherTargets) {
+    const heading = otherTargetSectionHeading(t);
+    let list = otherBySection.get(heading);
+    if (!list) {
+      list = [];
+      otherBySection.set(heading, list);
+      otherSectionOrder.push(heading);
+    }
+    list.push(t);
+  }
+
+  // 本文ブロック（見出し以外の中身）を組み立てつつ、各見出しに連番anchorを付与する。
+  const contentBlocks: ArticleBodyBlock[] = [];
+  let anchorSeq = 0;
+  function pushHeading(text: string): void {
+    anchorSeq++;
+    contentBlocks.push({ type: "heading", text, anchor: `sec-${anchorSeq}` });
+  }
+
+  for (const g of championGroups) {
+    pushHeading(g.heading);
+    for (const t of g.items) {
+      contentBlocks.push(buildPatchChangeBlock(t, directionByTarget.get(t)!));
+    }
+  }
+
+  for (const heading of otherSectionOrder) {
+    pushHeading(heading);
+    for (const t of otherBySection.get(heading)!) {
+      contentBlocks.push(buildPatchChangeBlock(t, directionByTarget.get(t)!));
+    }
+  }
+
+  const tocItems = contentBlocks
+    .filter((b): b is Extract<ArticleBodyBlock, { type: "heading" }> => b.type === "heading")
+    .map((h) => ({ label: h.text, anchor: h.anchor as string }));
+
+  const blocks: ArticleBodyBlock[] = [];
+
+  if (isSafeImageUrl(candidate.imageUrl)) {
+    blocks.push({
+      type: "image",
+      url: candidate.imageUrl,
+      alt: `${label} 公式パッチノートのメイン画像`,
+      credit: "画像: Riot Games 公式パッチノートより",
+    });
+  }
+
+  blocks.push({
+    type: "paragraph",
+    text: buildPatchIntroSummary(
+      label,
+      buffChampions.length,
+      nerfChampions.length,
+      adjustChampions.length,
+      otherTargets.length,
+    ),
   });
 
   if (tocItems.length > 0) {
@@ -1686,12 +1949,20 @@ export async function composeArticleBody(
       return composePatchFactFlashBody(candidate);
     }
     if (mode === "detailed") {
+      // パッチ記事刷新S2 F-S2-2: 優先順は DOM抽出 > 平テキスト抽出 > 事実速報。
+      // 生HTML（candidate.html、riot-datadragon.tsが保持・post-pipeline.tsが配線）があれば、
+      // まずDOM構造パーサ（誤帰属ゼロ）を試みる。DOM構造変化・未取得等で空配列の場合のみ
+      // 平テキスト経路（フォールバック、S1以前の既存ロジック）に落ちる。
+      if (candidate.html) {
+        const targets = parsePatchNotesHtml(candidate.html);
+        if (targets.length > 0) return composeDetailedPatchBody(candidate, targets);
+      }
       // 実パッチノート本文（汎用の短いcontentではない）と見なせるときのみ、決定的（逐語）抽出を試みる。
       // 拡張E54 F-E54-1: チャンピオン節に加え、チャンピオン以外（アイテム/システム等）の変更点も
       // その回のパッチに存在するものだけ臨機応変に抽出する。
       if (candidate.content.length >= PATCH_NOTES_MIN_LENGTH) {
         const sections = extractPatchSectionsDeterministic(candidate.content);
-        if (sections) return composeDetailedPatchBody(candidate, sections);
+        if (sections) return composeDetailedPatchBodyFromText(candidate, sections);
       }
       // 変更点が抽出できない、または本文が無い（mock等）場合は事実速報にフォールバックする
       // （壊れない・捏造しない、拡張E53 F-E53-1）。
