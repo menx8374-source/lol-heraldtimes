@@ -23,6 +23,7 @@ import { PATCH_NOTES_MIN_LENGTH } from "@/lib/collection/adapters/riot-datadrago
 import { CHAMPIONS } from "@/lib/generation/title";
 import { isSafeImageUrl } from "@/lib/image-url";
 import { buildChampionSplashUrl, championNameToId } from "@/lib/generation/champion-splash";
+import { buildTranslationGlossaryText } from "@/lib/generation/translation-glossary";
 
 export type GenerationCandidateInput = {
   sourceType: SourceType;
@@ -224,9 +225,13 @@ async function selectReactionReses(
  * 行数厳密一致」から「レス（コメント）全体を文脈ごと自然な日本語にする」方針へ書き換えた。日本の
  * 『海外の反応』まとめサイトのように、日本人プレイヤーが書いたような自然な口語・スッと読める日本語に
  * 意訳してよい（逐語訳・翻訳調を避ける）。ただし事実・数値・固有名詞（チャンピオン名/選手名/チーム名/
- * スコア）の捏造・改変・重要情報の欠落は禁止する（ここで固定する）。
+ * スコア）の捏造・改変・重要情報の欠落は禁止する（ここで固定する）。成長G4 F-G4-3で末尾に
+ * LoLスラング対訳表（`buildTranslationGlossaryText()`）とFew-shot例を追記し訳ゆれを抑えた。
+ * 対訳表・例は完全に静的（日付・レス本文などの動的値を含まない）。プロンプトキャッシュ
+ * （llm-client.tsの`cache_control`）はsystemがプレフィックス一致であることが前提のため、
+ * ここに動的値を混ぜてはならない。
  */
-const REACTION_TRANSLATE_SYSTEM_PROMPT =
+export const REACTION_TRANSLATE_SYSTEM_PROMPT =
   "あなたは日本の『海外の反応』まとめサイトの翻訳担当です。渡す各レスはRedditのコメント全文（英語）です。" +
   "まるで日本人プレイヤーが自分の言葉で書いたような、スッと頭に入る自然な口語の日本語に翻訳してください。" +
   "逐語訳・翻訳調は避け、意味・ニュアンス・温度感が伝わるこなれた日本語にしてください" +
@@ -240,7 +245,15 @@ const REACTION_TRANSLATE_SYSTEM_PROMPT =
   "読みやすさ重視で自然な文にしてください。ただし元コメントに無い過度な脚色・煽り増しはしないでください。" +
   "誤字・脱字・変換ミス（同音異義語。例「視聴」を「試聴」、「体制」を「態勢」等）に注意し、正しい漢字表記にしてください。" +
   '出力はJSONのみとし、{"translations": [{"index": N, "text": "自然な日本語訳（1コメント分・複数文可）"}, ...]} ' +
-  "の形式にしてください（説明文・前置き・コードブロックは付けない）。";
+  "の形式にしてください（説明文・前置き・コードブロックは付けない）。\n\n" +
+  "以下のLoLスラングは日本のプレイヤーが使う自然な言い回しに寄せて訳すこと:\n" +
+  buildTranslationGlossaryText() +
+  "\n\n" +
+  "翻訳例（口調・記法の参考。数値/固有名詞は例のダミー値であり実データではない）:\n" +
+  '例1: 入力「>>3 nah this is just int, dude threw a 20k gold lead lmao」→ ' +
+  '出力「>>3 いやこれただの利敵行為でしょ、2万ゴールドのリード投げ捨てたのマジで草」\n' +
+  '例2: 入力「Riot pls, this champ is so broken it should be nerfed asap」→ ' +
+  '出力「Riotさん頼むよ、このチャンピオンぶっ壊れすぎて早急にナーフすべきでしょ」';
 
 /**
  * LLMが返した `{translations:[{index,text}]}` 生JSON値を検証・正規化する純関数（拡張E47 F-E47-1、

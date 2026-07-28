@@ -131,6 +131,9 @@ export function getGenerationMode(): "mock" | "live" {
 /** モデル既定値。コスト最小のHaiku固定（拡張E24: 月$3〜4程度の低頻度運用を想定）。 */
 const DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5";
 
+/** 成長G4 F-G4-1: usageログ(キャッシュ実測用)を過剰に出さないよう、プロセス内で1回だけに絞るフラグ。 */
+let cacheUsageLogged = false;
+
 /**
  * Anthropic Claude(Haiku) への本接続実装（拡張E24 F-E24-1）。
  * APIキーは env `ANTHROPIC_API_KEY`（SDKの既定解決に任せる。ハードコードしない）。
@@ -160,12 +163,31 @@ export class AnthropicLLMClient implements LLMClient {
     if (user.trim().length === 0) return "";
 
     try {
+      // 成長G4 F-G4-1: system が非空のときは cache_control 付きテキストブロック配列として渡す
+      // （プレフィックス一致で5分TTLのプロンプトキャッシュが効く）。
+      // 注意: Haiku 4.5 のキャッシュ最小長は4096トークン。未満のsystemはマーカーを付けても
+      // 静かにキャッシュされない（エラーにはならず usage.cache_creation_input_tokens が0＝
+      // 通常課金になるだけで害はない）。無理に4096トークンへ水増しする必要はない。
       const response = await this.client.messages.create({
         model: this.model,
         max_tokens: 1024,
-        ...(system.length > 0 ? { system } : {}),
+        ...(system.length > 0
+          ? { system: [{ type: "text" as const, text: system, cache_control: { type: "ephemeral" as const } }] }
+          : {}),
         messages: [{ role: "user", content: user }],
       });
+      if (!cacheUsageLogged) {
+        // デバッグ用: キャッシュが実際に効いているかを実測できるよう1回だけ軽量ログを出す。
+        console.log(
+          "[AnthropicLLMClient] usage:",
+          JSON.stringify({
+            input_tokens: response.usage?.input_tokens,
+            cache_read_input_tokens: response.usage?.cache_read_input_tokens,
+            cache_creation_input_tokens: response.usage?.cache_creation_input_tokens,
+          }),
+        );
+        cacheUsageLogged = true;
+      }
       return response.content
         .filter((block): block is Anthropic.TextBlock => block.type === "text")
         .map((block) => block.text)

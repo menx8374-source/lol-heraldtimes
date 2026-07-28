@@ -1739,6 +1739,54 @@ describe("REACTION_TRANSLATE_SYSTEM_PROMPT（reddit翻訳の自然な日本語�
     expect(text).toContain("事実・数値・固有名詞");
     expect(text).toContain("JSONのみ");
   });
+
+  it("成長G4 F-G4-3: LoLスラング対訳表とFew-shot例が注入される", async () => {
+    const stub = new StubLLMClient(JSON.stringify({ keep: [0], emphasize: [] }));
+    await composeArticleBody(
+      { sourceType: "reddit", title: "対訳表確認テスト", content: "1: This is a test comment." },
+      stub,
+    );
+    const translateCall = stub.calls.find((messages) => {
+      const user = messages.find((m) => m.role === "user");
+      if (!user) return false;
+      try {
+        return (JSON.parse(user.content) as { kind?: string }).kind === "reaction-translate";
+      } catch {
+        return false;
+      }
+    });
+    const systemMessage = translateCall!.find((m) => m.role === "system");
+    const text = systemMessage!.content;
+    // 対訳表(F-G4-2)
+    expect(text).toContain("inting");
+    expect(text).toContain("hard stuck");
+    expect(text).toContain("わざと負け");
+    // Few-shot例
+    expect(text).toContain("翻訳例");
+    expect(text).toContain(">>3");
+  });
+
+  it("成長G4: systemプロンプトが完全に静的(実行のたびに同一文字列)＝プレフィックスキャッシュの前提を満たす", async () => {
+    const stub1 = new StubLLMClient(JSON.stringify({ keep: [0], emphasize: [] }));
+    const stub2 = new StubLLMClient(JSON.stringify({ keep: [0], emphasize: [] }));
+    await composeArticleBody({ sourceType: "reddit", title: "フリーズ確認1", content: "1: Comment one." }, stub1);
+    await composeArticleBody({ sourceType: "reddit", title: "フリーズ確認2", content: "1: Comment two." }, stub2);
+
+    function findTranslateSystem(stub: StubLLMClient): string {
+      const call = stub.calls.find((messages) => {
+        const user = messages.find((m) => m.role === "user");
+        if (!user) return false;
+        try {
+          return (JSON.parse(user.content) as { kind?: string }).kind === "reaction-translate";
+        } catch {
+          return false;
+        }
+      });
+      return call!.find((m) => m.role === "system")!.content;
+    }
+
+    expect(findTranslateSystem(stub1)).toBe(findTranslateSystem(stub2));
+  });
 });
 
 describe("composeArticleBody（riot-news: Riot公式ニュース記事生成、リファクタリングS7b F-S7b-3）", () => {
