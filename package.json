@@ -13,6 +13,7 @@
     "update-metrics": "tsx scripts/update-metrics.ts",
     "update-articles": "tsx scripts/update-articles.ts",
     "confirm-patch-preview": "tsx scripts/confirm-patch-preview.ts",
+    "pbe-article": "tsx scripts/pbe-article.ts",
     "generate": "tsx scripts/generate.ts",
     "pipeline": "tsx scripts/pipeline.ts",
     "regenerate-titles": "tsx scripts/regenerate-titles.ts",
