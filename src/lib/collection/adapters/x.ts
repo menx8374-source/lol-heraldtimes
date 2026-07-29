@@ -45,14 +45,21 @@ function envIntLocal(name: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
-/** env `X_SEARCH_QUERIES`（`|||`区切り）をパースする。未設定・空・全て空文字列なら既定クエリ配列。 */
-export function parseSearchQueries(raw: string | undefined): string[] {
-  if (!raw || raw.trim().length === 0) return DEFAULT_SEARCH_QUERIES;
+/**
+ * env文字列（`|||`区切り）をクエリ配列にパースする。未設定・空・全て空文字列なら `defaultQueries`。
+ * `defaultQueries` 省略時は本アダプタの既定2クエリ（国内/海外）。PBE-S3の `pbe-x-source.ts` も
+ * この関数を共有し、PBE用の既定クエリを渡して再利用する（重複実装しない）。
+ */
+export function parseSearchQueries(
+  raw: string | undefined,
+  defaultQueries: string[] = DEFAULT_SEARCH_QUERIES,
+): string[] {
+  if (!raw || raw.trim().length === 0) return defaultQueries;
   const parsed = raw
     .split(QUERY_SEPARATOR)
     .map((q) => q.trim())
     .filter((q) => q.length > 0);
-  return parsed.length > 0 ? parsed : DEFAULT_SEARCH_QUERIES;
+  return parsed.length > 0 ? parsed : defaultQueries;
 }
 
 /** 日付をGetXAPIのsince:/until:operatorが期待する `YYYY-MM-DD` 形式にする（UTC基準）。 */
@@ -150,6 +157,31 @@ export function buildXItem(tweet: GetXApiTweet): RawCollectionItem | null {
   };
 }
 
+export type FetchTweetsOptions = {
+  product?: "Latest" | "Top";
+  timeoutMs?: number;
+};
+
+/**
+ * GetXAPI advanced_search を1クエリ分呼び出し、tweet配列を返す共通実装。認証（Bearer）・タイムアウト・
+ * 失敗時の空配列フォールバックをここに一元化し、`XAdapter`（成長G7）とPBE-S3 `pbe-x-source.ts`
+ * （Spideraxe/Phroxzon等のPBE関連ツイート取得）の両方から共有する（重複実装しない）。
+ */
+export async function fetchTweetsForQuery(
+  query: string,
+  apiKey: string,
+  options: FetchTweetsOptions = {},
+): Promise<GetXApiTweet[]> {
+  const { product = "Latest", timeoutMs = X_FETCH_TIMEOUT_MS } = options;
+  const url = buildAdvancedSearchUrl(query, product);
+  const json = await fetchJsonSafe<GetXApiSearchResponse>(
+    url,
+    { headers: { Authorization: `Bearer ${apiKey}` } },
+    { logLabel: "x", context: `query="${query.slice(0, 60)}"`, timeoutMs },
+  );
+  return json?.tweets ?? [];
+}
+
 export type XAdapterOptions = {
   /** テスト・注入用。既定は env `X_API_KEY`。 */
   apiKey?: string;
@@ -192,13 +224,10 @@ export class XAdapter implements SourceAdapter {
   }
 
   private async fetchQuery(query: string): Promise<RawCollectionItem[]> {
-    const url = buildAdvancedSearchUrl(query, this.product);
-    const json = await fetchJsonSafe<GetXApiSearchResponse>(
-      url,
-      { headers: { Authorization: `Bearer ${this.apiKey}` } },
-      { logLabel: "x", context: `query="${query.slice(0, 60)}"`, timeoutMs: X_FETCH_TIMEOUT_MS },
-    );
-    const tweets = json?.tweets ?? [];
+    const tweets = await fetchTweetsForQuery(query, this.apiKey!, {
+      product: this.product,
+      timeoutMs: X_FETCH_TIMEOUT_MS,
+    });
     const items: RawCollectionItem[] = [];
     for (const tweet of tweets) {
       const item = buildXItem(tweet);
