@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   composePbeArticleBody,
   buildPbeArticleTitle,
@@ -6,9 +6,13 @@ import {
   PBE_ARTICLE_BADGE_TEXT,
   PBE_SKILL_DETAIL_NOTICE_TEXT,
   PBE_ARTICLE_SOURCE_TEXT,
+  PBE_X_SECTION_HEADING,
+  PBE_X_SECTION_NOTICE_TEXT,
   CDRAGON_SITE_URL,
 } from "@/lib/generation/pbe-compose";
 import { parseArticleBody, blockText, type ArticleBodyPatchChangeBlock } from "@/lib/article-body";
+import type { PbeSourceTweet } from "@/lib/collection/adapters/pbe-x-source";
+import type { PbeCurationNote } from "@/lib/generation/pbe-curation";
 
 function championBlock(
   overrides: Partial<ArticleBodyPatchChangeBlock> = {},
@@ -30,6 +34,28 @@ function itemBlock(overrides: Partial<ArticleBodyPatchChangeBlock> = {}): Articl
     targetKind: "item",
     direction: "adjust",
     groups: [{ changes: [{ stat: "合計コスト", before: "3400", after: "3300" }] }],
+    ...overrides,
+  };
+}
+
+function tweet(overrides: Partial<PbeSourceTweet> = {}): PbeSourceTweet {
+  return {
+    author: "Spideraxe",
+    authorHandle: "Spideraxe30",
+    text: "PBE datamine: Ahri Q AP ratio nerf incoming. Numbers are on the infographic below.",
+    url: "https://x.com/Spideraxe30/status/1820000000000000001",
+    createdAt: new Date("2026-07-28T09:00:00.000Z"),
+    mediaUrls: ["https://pbs.twimg.com/media/mock-ahri-pbe-numbers.jpg"],
+    ...overrides,
+  };
+}
+
+function curationNote(overrides: Partial<PbeCurationNote> = {}): PbeCurationNote {
+  return {
+    champion: "アジール",
+    skill: "Q",
+    text: "ダメージ 60/85/110/135/160 -> 60/90/120/150/180（インフォグラフィックより人手書き起こし）",
+    source: "https://x.com/Spideraxe30/status/1820000000000000001",
     ...overrides,
   };
 }
@@ -194,6 +220,161 @@ describe("composePbeArticleBody（F-PBE4-1）", () => {
       pbeVersion: "16.16",
       championBlocks: [championBlock(), championBlock({ targetName: "弱体化対象", direction: "nerf" })],
       itemBlocks: [itemBlock()],
+    });
+    expect(() => parseArticleBody(body)).not.toThrow();
+  });
+});
+
+describe("composePbeArticleBody: Xツイート・人手キュレーション統合（PBE-S5 F-PBE5-2/F-PBE5-3）", () => {
+  afterEach(() => {
+    delete process.env.PBE_X_MAX_TWEETS;
+  });
+
+  it("tweets/curationNotes未指定なら従来どおりセクションを出さない（回帰ゼロ）", () => {
+    const body = composePbeArticleBody({
+      pbeVersion: "16.16",
+      championBlocks: [championBlock()],
+      itemBlocks: [itemBlock()],
+    });
+    const headingTexts = body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headingTexts).not.toContain(PBE_X_SECTION_HEADING);
+    expect(body.some((b) => b.type === "embed")).toBe(false);
+  });
+
+  it("有効なtweet status URLは公式oEmbed埋め込み(embedブロック)として統合される", () => {
+    const body = composePbeArticleBody({
+      pbeVersion: "16.16",
+      championBlocks: [],
+      itemBlocks: [],
+      tweets: [tweet()],
+    });
+    const headingTexts = body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headingTexts).toContain(PBE_X_SECTION_HEADING);
+    expect(body.some((b) => b.type === "paragraph" && b.text === PBE_X_SECTION_NOTICE_TEXT)).toBe(true);
+
+    const embeds = body.filter((b) => b.type === "embed");
+    expect(embeds).toEqual([
+      { type: "embed", provider: "twitter", url: "https://x.com/Spideraxe30/status/1820000000000000001", caption: "@Spideraxe30" },
+    ]);
+    expect(() => parseArticleBody(body)).not.toThrow();
+  });
+
+  it("tweet status URLでない場合は短い引用(逐語text)＋画像＋出典(作者ハンドル・URL)にフォールバックする", () => {
+    const nonStatusTweet = tweet({ url: "https://x.com/Spideraxe30" }); // statusパスを含まない
+    const body = composePbeArticleBody({
+      pbeVersion: "16.16",
+      championBlocks: [],
+      itemBlocks: [],
+      tweets: [nonStatusTweet],
+    });
+    expect(body.some((b) => b.type === "embed")).toBe(false);
+
+    const quote = body.find((b) => b.type === "quote" && b.text === nonStatusTweet.text);
+    expect(quote).toBeDefined();
+    if (quote?.type === "quote") {
+      expect(quote.source).toContain("@Spideraxe30");
+      expect(quote.source).toContain(nonStatusTweet.url);
+    }
+    const image = body.find((b) => b.type === "image" && b.url === nonStatusTweet.mediaUrls[0]);
+    expect(image).toBeDefined();
+    if (image?.type === "image") {
+      expect(image.credit).toContain("Spideraxe30");
+    }
+    expect(() => parseArticleBody(body)).not.toThrow();
+  });
+
+  it("数値をこちらで生成/OCRしていない: quoteのtextはPbeSourceTweet.textと完全一致（逐語のまま）", () => {
+    const original = "Q AP ratio 0.5 -> 0.45, W cooldown 14/13/12/11/10 -> 16/15/14/13/12.";
+    const nonStatusTweet = tweet({ url: "https://x.com/Spideraxe30", text: original });
+    const body = composePbeArticleBody({
+      pbeVersion: "16.16",
+      championBlocks: [],
+      itemBlocks: [],
+      tweets: [nonStatusTweet],
+    });
+    const quote = body.find((b) => b.type === "quote");
+    expect(quote).toMatchObject({ text: original });
+  });
+
+  it("件数上限(既定6/env PBE_X_MAX_TWEETS)を超える分は含めない", () => {
+    const many = Array.from({ length: 10 }, (_, i) =>
+      tweet({ url: `https://x.com/Spideraxe30/status/182000000000000${1000 + i}` }),
+    );
+    const bodyDefault = composePbeArticleBody({
+      pbeVersion: "16.16",
+      championBlocks: [],
+      itemBlocks: [],
+      tweets: many,
+    });
+    expect(bodyDefault.filter((b) => b.type === "embed")).toHaveLength(6);
+
+    process.env.PBE_X_MAX_TWEETS = "2";
+    const bodyEnvOverride = composePbeArticleBody({
+      pbeVersion: "16.16",
+      championBlocks: [],
+      itemBlocks: [],
+      tweets: many,
+    });
+    expect(bodyEnvOverride.filter((b) => b.type === "embed")).toHaveLength(2);
+
+    const bodyOptionOverride = composePbeArticleBody({
+      pbeVersion: "16.16",
+      championBlocks: [],
+      itemBlocks: [],
+      tweets: many,
+      maxTweets: 3,
+    });
+    expect(bodyOptionOverride.filter((b) => b.type === "embed")).toHaveLength(3);
+  });
+
+  it("人手キュレーションノート(curationNotes)は逐語で差し込まれる", () => {
+    const body = composePbeArticleBody({
+      pbeVersion: "16.16",
+      championBlocks: [],
+      itemBlocks: [],
+      curationNotes: [curationNote()],
+    });
+    const headingTexts = body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headingTexts).toContain(PBE_X_SECTION_HEADING);
+    const quote = body.find((b) => b.type === "quote" && b.text === curationNote().text);
+    expect(quote).toBeDefined();
+    if (quote?.type === "quote") {
+      expect(quote.source).toContain(curationNote().source);
+      expect(quote.source).toContain("アジール");
+    }
+  });
+
+  it("moderationを通す: NG語を含むツイート/キュレーション本文もbodyBlocksToText経由で検査対象になる（本文にそのまま含まれる）", () => {
+    const body = composePbeArticleBody({
+      pbeVersion: "16.16",
+      championBlocks: [],
+      itemBlocks: [],
+      tweets: [tweet({ url: "https://x.com/Spideraxe30", text: "普通のツイート本文" })],
+      curationNotes: [curationNote({ text: "普通のキュレーション本文" })],
+    });
+    const text = body.map(blockText).join("\n");
+    expect(text).toContain("普通のツイート本文");
+    expect(text).toContain("普通のキュレーション本文");
+  });
+
+  it("CDragon確定データ(patchChange)とX/キュレーション(未確定)は同じ見出し下ではなく別セクションで視覚的に区別される", () => {
+    const body = composePbeArticleBody({
+      pbeVersion: "16.16",
+      championBlocks: [championBlock()],
+      itemBlocks: [],
+      tweets: [tweet()],
+    });
+    const headingTexts = body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headingTexts).toEqual(["チャンピオンの強化", PBE_X_SECTION_HEADING, "スキル詳細について"]);
+  });
+
+  it("生成した本文(tweets/curationNotes込み)もparseArticleBodyの検証を必ず通過する", () => {
+    const body = composePbeArticleBody({
+      pbeVersion: "16.16",
+      championBlocks: [championBlock()],
+      itemBlocks: [itemBlock()],
+      tweets: [tweet(), tweet({ url: "https://x.com/Spideraxe30" })],
+      curationNotes: [curationNote()],
     });
     expect(() => parseArticleBody(body)).not.toThrow();
   });

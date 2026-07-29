@@ -5,9 +5,14 @@
  * collection-cdragon-pbe.test.ts と同じ方式）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { prisma } from "@/lib/prisma";
 import { runPbeArticleGeneration } from "@/lib/generation/pbe-article";
 import { parseArticleBody, blockText } from "@/lib/article-body";
+import { PBE_X_SECTION_HEADING } from "@/lib/generation/pbe-compose";
+import type { PbeSourceTweet } from "@/lib/collection/adapters/pbe-x-source";
 
 async function resetDb() {
   await prisma.articleSource.deleteMany();
@@ -76,13 +81,32 @@ function stubFetchVersionsOnly(pbeVersion: string | null, latestVersion: string 
 beforeEach(async () => {
   await resetDb();
   delete process.env.PBE_ARTICLE_MODE;
+  delete process.env.X_API_KEY;
+  delete process.env.PBE_X_MIN_INTERVAL_HOURS;
+  delete process.env.PBE_X_MAX_TWEETS;
 });
 
 afterEach(() => {
   delete process.env.PBE_ARTICLE_MODE;
+  delete process.env.X_API_KEY;
+  delete process.env.PBE_X_MIN_INTERVAL_HOURS;
+  delete process.env.PBE_X_MAX_TWEETS;
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
+
+/** PBE-S5テスト用のPbeSourceTweetビルダー（fixtureと同じ形の実データ相当）。 */
+function sourceTweet(overrides: Partial<PbeSourceTweet> = {}): PbeSourceTweet {
+  return {
+    author: "Spideraxe",
+    authorHandle: "Spideraxe30",
+    text: "PBE datamine: Ahri Q AP ratio nerf incoming. Numbers are on the infographic below.",
+    url: "https://x.com/Spideraxe30/status/1820000000000000001",
+    createdAt: new Date("2026-07-28T09:00:00.000Z"),
+    mediaUrls: ["https://pbs.twimg.com/media/mock-ahri-pbe-numbers.jpg"],
+    ...overrides,
+  };
+}
 
 describe("runPbeArticleGeneration（PBE-S4 F-PBE4-2）", () => {
   it("PBE_ARTICLE_MODE未設定(既定off)では即座にdisabledで返り、fetch・DBに一切アクセスしない（テスト1・回帰ゼロ）", async () => {
@@ -190,3 +214,196 @@ describe("runPbeArticleGeneration（PBE-S4 F-PBE4-2）", () => {
     expect(articleCount).toBe(1);
   });
 });
+
+describe("runPbeArticleGeneration: Xツイートのopt-in配線・レート制限・人手キュレーション（PBE-S5）", () => {
+  it("X_API_KEY未設定なら、onでもfetchTweetsを呼ばずCDragon自動分のみのPBE記事になる（テスト1・回帰ゼロ）", async () => {
+    process.env.PBE_ARTICLE_MODE = "on";
+    stubFetchWithDiff("16.16.8000032+branch.main.content.beta", "16.15.7996036+branch.releases-16-15");
+    const fetchTweets = vi.fn();
+
+    const result = await runPbeArticleGeneration(new Date("2026-07-29T00:00:00.000Z"), { fetchTweets });
+
+    expect(fetchTweets).not.toHaveBeenCalled();
+    expect(result.status).toBe("created");
+    if (result.status !== "created") throw new Error("expected created");
+    const article = await prisma.article.findUniqueOrThrow({ where: { id: result.articleId } });
+    const text = bodyText(article.body);
+    expect(text).not.toContain(PBE_X_SECTION_HEADING);
+  });
+
+  it("on＋apiKeyあり＋pbe≠latest＋レート内(前回取得なし)のとき、fetchTweetsが呼ばれツイートが未確定セクションとして統合される。moderationも通過する（テスト2）", async () => {
+    process.env.PBE_ARTICLE_MODE = "on";
+    stubFetchWithDiff("16.16.8000032+branch.main.content.beta", "16.15.7996036+branch.releases-16-15");
+    const fetchTweets = vi.fn(async () => [sourceTweet()]);
+    const writeLastXFetchAt = vi.fn();
+
+    const result = await runPbeArticleGeneration(new Date("2026-07-29T00:00:00.000Z"), {
+      apiKey: "test-x-key",
+      fetchTweets,
+      readLastXFetchAt: () => null,
+      writeLastXFetchAt,
+    });
+
+    expect(fetchTweets).toHaveBeenCalledWith({ apiKey: "test-x-key" });
+    expect(writeLastXFetchAt).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe("created");
+    if (result.status !== "created") throw new Error("expected created");
+
+    const article = await prisma.article.findUniqueOrThrow({ where: { id: result.articleId } });
+    const text = bodyText(article.body);
+    expect(text).toContain(PBE_X_SECTION_HEADING);
+    expect(text).toContain("未確定情報です");
+    expect(text).toContain("@Spideraxe30"); // 出典（作者ハンドル）
+
+    // 逐語＋出典URL（有効なtweet status URLなのでembedブロックになる。テキストの改変・数値の
+    // 機械再構成は行っていない＝urlがそのままembedとして本文に含まれる）
+    const embeds = parseArticleBody(article.body).filter((b) => b.type === "embed");
+    expect(embeds).toEqual([
+      { type: "embed", provider: "twitter", url: sourceTweet().url, caption: "@Spideraxe30" },
+    ]);
+  });
+
+  it("tweet status URLでないツイートは逐語text＋画像＋出典で統合される(OCR/機械生成していないことの担保)", async () => {
+    process.env.PBE_ARTICLE_MODE = "on";
+    stubFetchWithDiff("16.16.8000032+branch.main.content.beta", "16.15.7996036+branch.releases-16-15");
+    const original = "Q AP ratio 0.5 -> 0.45, W cooldown 14/13/12/11/10 -> 16/15/14/13/12.";
+    const nonStatusTweet = sourceTweet({ url: "https://x.com/Spideraxe30", text: original });
+    const fetchTweets = vi.fn(async () => [nonStatusTweet]);
+
+    const result = await runPbeArticleGeneration(new Date("2026-07-29T00:00:00.000Z"), {
+      apiKey: "test-x-key",
+      fetchTweets,
+      readLastXFetchAt: () => null,
+      writeLastXFetchAt: vi.fn(),
+    });
+    expect(result.status).toBe("created");
+    if (result.status !== "created") throw new Error("expected created");
+
+    const article = await prisma.article.findUniqueOrThrow({ where: { id: result.articleId } });
+    const text = bodyText(article.body);
+    expect(text).toContain(original); // ツイート本文が逐語のまま含まれる(改変・OCR・数値再構成なし)
+    const images = parseArticleBody(article.body).filter((b) => b.type === "image");
+    expect(images.some((b) => b.type === "image" && b.url === nonStatusTweet.mediaUrls[0])).toBe(true); // 画像URL(ホットリンク)
+  });
+
+  it("レート制限内(前回取得から間隔未満)なら、apiKeyがあってもfetchTweetsを呼ばず再取得しない（テスト3・X課金抑制）", async () => {
+    process.env.PBE_ARTICLE_MODE = "on";
+    stubFetchWithDiff("16.16.8000032+branch.main.content.beta", "16.15.7996036+branch.releases-16-15");
+    const now = new Date("2026-07-29T00:00:00.000Z");
+    const recentFetchAt = new Date("2026-07-28T20:00:00.000Z"); // 4時間前(既定6時間以内)
+    const fetchTweets = vi.fn(async () => [sourceTweet()]);
+    const writeLastXFetchAt = vi.fn();
+
+    const result = await runPbeArticleGeneration(now, {
+      apiKey: "test-x-key",
+      fetchTweets,
+      readLastXFetchAt: () => recentFetchAt,
+      writeLastXFetchAt,
+    });
+
+    expect(fetchTweets).not.toHaveBeenCalled();
+    expect(writeLastXFetchAt).not.toHaveBeenCalled();
+    expect(result.status).toBe("created");
+    if (result.status !== "created") throw new Error("expected created");
+    const article = await prisma.article.findUniqueOrThrow({ where: { id: result.articleId } });
+    expect(bodyText(article.body)).not.toContain(PBE_X_SECTION_HEADING);
+  });
+
+  it("実際のレート制限状態(readLastPbeXFetchAt/writeLastPbeXFetchAt既定実装・一時ファイル)でも、1回目は取得し2回目(直後)はスキップする", async () => {
+    process.env.PBE_ARTICLE_MODE = "on";
+    stubFetchWithDiff("16.16.8000032+branch.main.content.beta", "16.15.7996036+branch.releases-16-15");
+
+    // モジュール既定のファイルパス（data/pbe-x-last-fetch.json）は使わず、テスト内の
+    // in-memoryな状態でreadLastXFetchAt/writeLastXFetchAtを注入し、実運用の「1回目は叩き
+    // 2回目(直後)はレート制限で叩かない」という往復挙動を検証する。
+    let stored: Date | null = null;
+    const fetchTweets = vi.fn(async () => [sourceTweet()]);
+    const options = {
+      apiKey: "test-x-key",
+      fetchTweets,
+      readLastXFetchAt: () => stored,
+      writeLastXFetchAt: (at: Date) => {
+        stored = at;
+      },
+    };
+
+    const first = await runPbeArticleGeneration(new Date("2026-07-29T00:00:00.000Z"), options);
+    expect(first.status).toBe("created");
+    expect(fetchTweets).toHaveBeenCalledTimes(1);
+
+    const second = await runPbeArticleGeneration(new Date("2026-07-29T01:00:00.000Z"), options);
+    expect(second.status).toBe("updated");
+    expect(fetchTweets).toHaveBeenCalledTimes(1); // 1時間後の再実行(既定6h以内)では再取得しない
+  });
+
+  it("人手キュレーションファイルがあれば逐語で差し込まれ、無ければ何もしない（テスト4）", async () => {
+    process.env.PBE_ARTICLE_MODE = "on";
+
+    const dir = mkdtempSync(path.join(tmpdir(), "pbe-curation-integ-"));
+    try {
+      const curationFilePath = path.join(dir, "pbe-curation.json");
+      writeFileSync(
+        curationFilePath,
+        JSON.stringify({
+          notes: [
+            {
+              champion: "アジール",
+              skill: "Q",
+              text: "ダメージ 60/85/110/135/160 -> 60/90/120/150/180（人手書き起こし）",
+              source: "https://x.com/Spideraxe30/status/1820000000000000001",
+            },
+          ],
+        }),
+        "utf-8",
+      );
+
+      // ファイルあり: 差し込まれる。
+      stubFetchWithDiff("16.16.8000032+branch.main.content.beta", "16.15.7996036+branch.releases-16-15");
+      const withFile = await runPbeArticleGeneration(new Date("2026-07-29T00:00:00.000Z"), { curationFilePath });
+      expect(withFile.status).toBe("created");
+      if (withFile.status !== "created") throw new Error("expected created");
+      const articleWithFile = await prisma.article.findUniqueOrThrow({ where: { id: withFile.articleId } });
+      expect(bodyText(articleWithFile.body)).toContain("60/85/110/135/160 -> 60/90/120/150/180");
+
+      // ファイルなし(存在しないパス): 何も差し込まれない(記事は更新されても未確定セクションは出ない)。
+      const missingPath = path.join(dir, "does-not-exist.json");
+      stubFetchWithDiff("16.16.8000032+branch.main.content.beta", "16.15.7996036+branch.releases-16-15");
+      const withoutFile = await runPbeArticleGeneration(new Date("2026-07-29T02:00:00.000Z"), {
+        curationFilePath: missingPath,
+      });
+      expect(withoutFile.status).toBe("updated");
+      if (withoutFile.status !== "updated") throw new Error("expected updated");
+      const articleWithoutFile = await prisma.article.findUniqueOrThrow({ where: { id: withoutFile.articleId } });
+      expect(bodyText(articleWithoutFile.body)).not.toContain(PBE_X_SECTION_HEADING);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("Xツイート取得が失敗（例外）しても記事生成自体は継続する(CDragon自動分のみで作成、本体を止めない)", async () => {
+    process.env.PBE_ARTICLE_MODE = "on";
+    stubFetchWithDiff("16.16.8000032+branch.main.content.beta", "16.15.7996036+branch.releases-16-15");
+    const fetchTweets = vi.fn(async () => {
+      throw new Error("X API down");
+    });
+    const writeLastXFetchAt = vi.fn();
+
+    const result = await runPbeArticleGeneration(new Date("2026-07-29T00:00:00.000Z"), {
+      apiKey: "test-x-key",
+      fetchTweets,
+      readLastXFetchAt: () => null,
+      writeLastXFetchAt,
+    });
+
+    expect(result.status).toBe("created");
+    expect(writeLastXFetchAt).toHaveBeenCalledTimes(1); // 失敗時も取得を試みた事実は記録する
+    if (result.status !== "created") throw new Error("expected created");
+    const article = await prisma.article.findUniqueOrThrow({ where: { id: result.articleId } });
+    expect(bodyText(article.body)).not.toContain(PBE_X_SECTION_HEADING);
+  });
+});
+
+/** 記事本文JSONをパースして検索用の連結テキストへ変換するテスト用ヘルパ。 */
+function bodyText(body: unknown): string {
+  return parseArticleBody(body).map(blockText).join("\n");
+}

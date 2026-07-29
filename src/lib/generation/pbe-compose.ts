@@ -15,14 +15,20 @@
  *    済みの値をそのまま使う。実在するグループだけ出す）。
  * 5. アイテムの変更（`toArticleBodyPatchChangeBlock`(pbe-item-diff.ts)がdirection固定"adjust"を
  *    返すため分類はせず単一章にまとめる）。
- * 6. スキル詳細の注意書き（S1/S2はスキル効果量を一切扱っていないため常に明示する）。
- * 7. 出典（「データ: CommunityDragon / Riot Games」＋CommunityDragonへのリンク）。
+ * 6. PBE-S5 F-PBE5-2/F-PBE5-3で追加: 「PBEのスキル変更（データマイナー情報・未確定）」
+ *    （Xツイートの埋め込み/引用＋人手キュレーション、`tweets`/`curationNotes`いずれも未指定/空なら
+ *    このセクション自体を出さない＝既存挙動を変えない）。
+ * 7. スキル詳細の注意書き（S1/S2はスキル効果量を一切扱っていないため常に明示する）。
+ * 8. 出典（「データ: CommunityDragon / Riot Games」＋CommunityDragonへのリンク）。
  *
  * `[data-lol-patch]`のLoL公式風デザイン・目次(toc)は既存 `ArticleBodyView`
  * （patchChangeブロックを1つでも含む本文を自動検出してラップする）をそのまま流用する
  * （このモジュール自身は表示に関与しない）。
  */
 import type { ArticleBodyBlock, ArticleBodyPatchChangeBlock } from "@/lib/article-body";
+import { isValidTweetStatusUrl } from "@/lib/embed";
+import type { PbeSourceTweet } from "@/lib/collection/adapters/pbe-x-source";
+import type { PbeCurationNote } from "@/lib/generation/pbe-curation";
 
 /** 先頭固定の未確定バッジ段落（brief記載の文言そのまま）。 */
 export const PBE_ARTICLE_BADGE_TEXT =
@@ -34,6 +40,58 @@ export const PBE_SKILL_DETAIL_NOTICE_TEXT =
 
 /** データ出典の明記（`docs/pbe-research.md` §4 の結論どおりの表記）。 */
 export const PBE_ARTICLE_SOURCE_TEXT = "データ: CommunityDragon / Riot Games";
+
+/** X/人手キュレーションのスキル変更セクション見出し（PBE-S5 F-PBE5-2）。 */
+export const PBE_X_SECTION_HEADING = "PBEのスキル変更（データマイナー情報・未確定）";
+
+/** セクション冒頭の未確定注記（brief記載の文言そのまま、PBE-S5 F-PBE5-2）。 */
+export const PBE_X_SECTION_NOTICE_TEXT =
+  "以下はデータマイナー（Spideraxe氏）およびRiot開発陣のPBE投稿に基づく未確定情報です。数値は本番リリース時に変更される場合があります。正式な数値は公式パッチノートで確定します。";
+
+/** 1記事あたりのツイート埋め込み件数上限の既定値（env `PBE_X_MAX_TWEETS`で上書き可能）。 */
+const DEFAULT_PBE_X_MAX_TWEETS = 6;
+
+/** env `PBE_X_MAX_TWEETS`（未設定・不正値は既定6）を読む。`override`があればそちらを優先する（テスト用）。 */
+function resolvePbeXMaxTweets(override: number | undefined): number {
+  if (typeof override === "number" && Number.isFinite(override) && override >= 0) {
+    return Math.floor(override);
+  }
+  const raw = Number(process.env.PBE_X_MAX_TWEETS);
+  return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : DEFAULT_PBE_X_MAX_TWEETS;
+}
+
+/**
+ * PbeSourceTweet 1件をブロックへ変換する（F-PBE5-2）。有効なtweet status URL
+ * （`isValidTweetStatusUrl`）なら公式oEmbed埋め込み（`embed`ブロック、既存G7/E22の埋め込み表示を
+ * 流用）、そうでなければ短い引用（逐語text）＋画像（mediaUrls）＋出典（作者ハンドル・tweet URL）に
+ * する。逐語維持・数値を書き換えない（捏造禁止）。
+ */
+function buildTweetBlocks(tweet: PbeSourceTweet): ArticleBodyBlock[] {
+  if (isValidTweetStatusUrl(tweet.url)) {
+    return [{ type: "embed", provider: "twitter", url: tweet.url, caption: `@${tweet.authorHandle}` }];
+  }
+  const blocks: ArticleBodyBlock[] = [
+    { type: "quote", text: tweet.text, source: `@${tweet.authorHandle}（${tweet.url}）` },
+  ];
+  for (const mediaUrl of tweet.mediaUrls) {
+    blocks.push({
+      type: "image",
+      url: mediaUrl,
+      alt: `${tweet.author}氏の投稿画像`,
+      credit: `@${tweet.authorHandle}`,
+    });
+  }
+  return blocks;
+}
+
+/** 人手キュレーションノート1件をブロックへ変換する（F-PBE5-3）。逐語のtextをそのまま引用表示する。 */
+function buildCurationBlocks(note: PbeCurationNote): ArticleBodyBlock[] {
+  const label = [note.champion, note.skill].filter((s): s is string => Boolean(s)).join(" ");
+  const source = label
+    ? `${label}（人手キュレーション・出典: ${note.source}）`
+    : `人手キュレーション・出典: ${note.source}`;
+  return [{ type: "quote", text: note.text, source }];
+}
 
 /** CommunityDragon（人間可読サイト）への出典リンク。キー不要・無料の公開サイト。 */
 export const CDRAGON_SITE_URL = "https://www.communitydragon.org/";
@@ -65,6 +123,12 @@ export type PbeComposeInput = {
   championBlocks: ArticleBodyPatchChangeBlock[];
   /** PBE-S1 `diffItems`→`toArticleBodyPatchChangeBlock`変換済み（kind:"item"）。 */
   itemBlocks: ArticleBodyPatchChangeBlock[];
+  /** PBE-S5 F-PBE5-2: データマイナー(Spideraxe/Phroxzon)のXツイート。未指定/空ならセクション自体を出さない。 */
+  tweets?: PbeSourceTweet[];
+  /** PBE-S5 F-PBE5-3: 人手キュレーションノート。未指定/空ならセクション自体を出さない。 */
+  curationNotes?: PbeCurationNote[];
+  /** テスト・注入用。既定は env `PBE_X_MAX_TWEETS`（未設定時6）。 */
+  maxTweets?: number;
 };
 
 /**
@@ -102,6 +166,21 @@ export function composePbeArticleBody(input: PbeComposeInput): ArticleBodyBlock[
   if (itemBlocks.length > 0) {
     pushHeading("アイテムの変更");
     contentBlocks.push(...itemBlocks);
+  }
+
+  // PBE-S5 F-PBE5-2/F-PBE5-3: X（データマイナー）ツイート・人手キュレーションの統合。
+  // 両方とも未指定/空ならこのセクション自体を出さない（既存挙動を変えない＝回帰ゼロ）。
+  const tweets = (input.tweets ?? []).slice(0, resolvePbeXMaxTweets(input.maxTweets));
+  const curationNotes = input.curationNotes ?? [];
+  if (tweets.length > 0 || curationNotes.length > 0) {
+    pushHeading(PBE_X_SECTION_HEADING);
+    contentBlocks.push({ type: "paragraph", text: PBE_X_SECTION_NOTICE_TEXT });
+    for (const note of curationNotes) {
+      contentBlocks.push(...buildCurationBlocks(note));
+    }
+    for (const tweet of tweets) {
+      contentBlocks.push(...buildTweetBlocks(tweet));
+    }
   }
 
   pushHeading("スキル詳細について");

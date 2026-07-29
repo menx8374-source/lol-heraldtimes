@@ -48,3 +48,7 @@ docs/pipeline-status.js
 
 # spec-pipeline: Playwright MCPのスクラッチ出力(evaluatorがプレビュー画像をdocs/sprints/へコピーした後の残骸)
 .playwright-mcp/
+
+# PBE-S5: 実行時ローカル状態（Xレート制限の最終取得時刻）・任意の人手キュレーションファイル。
+# いずれもDBスキーマ変更なしの簡易ファイルベース状態で、成果物ではない。
+data/
