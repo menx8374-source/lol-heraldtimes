@@ -43,7 +43,10 @@ export default async function RootLayout({
   const categories = await listVisibleCategoryLabels();
 
   return (
-    <html lang="ja" className="h-full antialiased">
+    <html lang="ja" className="h-full antialiased" suppressHydrationWarning>
+      {/* suppressHydrationWarning: <head>のNO_FLASH_THEME/DESIGN_SCRIPTが水和前に<html>へ
+          dark/design-newsクラスを付与するため、SSR(クラス無し)とクライアント(クラス有り)で
+          <html>の属性が意図的に食い違う。この1階層のみ警告を抑制する(子孫の本物の不一致は検知される)。 */}
       <head>
         <script dangerouslySetInnerHTML={{ __html: NO_FLASH_THEME_SCRIPT }} />
         <script dangerouslySetInnerHTML={{ __html: NO_FLASH_DESIGN_SCRIPT }} />
