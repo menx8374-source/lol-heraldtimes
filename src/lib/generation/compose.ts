@@ -1457,6 +1457,45 @@ function buildPatchIntroSummary(
 }
 
 /**
+ * パッチ記事刷新S8 F-S8-2: DOM抽出経路（`composeDetailedPatchBody`）専用の冒頭1文サマリ。
+ * champion/itemのみの集計にする（system/arena/bugfix/rune等の除外カテゴリは件数を出さず、
+ * `hasOtherExcluded`が真の場合のみ「その他は公式パッチノートで」という定型の誘導文を末尾に添える）。
+ * 0体/0件の項目（チャンピオンの内訳・チャンピオン全体・アイテム）は文から省く（純テンプレ・AI不使用）。
+ */
+function buildPatchIntroSummaryChampionItem(
+  label: string,
+  buffCount: number,
+  nerfCount: number,
+  adjustCount: number,
+  itemCount: number,
+  hasOtherExcluded: boolean,
+): string {
+  const champTotal = buffCount + nerfCount + adjustCount;
+  const champParts: string[] = [];
+  if (buffCount > 0) champParts.push(`強化${buffCount}`);
+  if (nerfCount > 0) champParts.push(`弱体化${nerfCount}`);
+  if (adjustCount > 0) champParts.push(`調整${adjustCount}`);
+
+  const champClause = champTotal > 0 ? `チャンピオン${champTotal}体（${champParts.join("・")}）` : "";
+  const itemClause = itemCount > 0 ? `アイテム${itemCount}件` : "";
+
+  let mainSentence: string;
+  if (champClause && itemClause) {
+    mainSentence = `${label}では、${champClause}と${itemClause}の変更をまとめました。`;
+  } else if (champClause) {
+    mainSentence = `${label}では、${champClause}の変更をまとめました。`;
+  } else if (itemClause) {
+    mainSentence = `${label}では、${itemClause}の変更をまとめました。`;
+  } else {
+    mainSentence = `${label}の変更点をまとめます。`;
+  }
+
+  return hasOtherExcluded
+    ? `${mainSentence}システム・アリーナ・バグ修正などその他の変更点は公式パッチノートをご覧ください。`
+    : mainSentence;
+}
+
+/**
  * detailed パッチ本文の平テキスト経路フォールバック（拡張E53 F-E53-1、lol-times風の詳細記事。
  * 拡張E54 F-E54-1でチャンピオン以外の変更点にも対応。成長G3で「バフ/ナーフ/調整」3分類＋
  * 冒頭サマリ＋目次に対応）を組み立てる。
@@ -1627,30 +1666,26 @@ function buildPatchChangeBlock(
   };
 }
 
-/** 非チャンピオン対象（アイテム/ルーン/システム/バグ修正/その他）をまとめる見出しラベル。
- * `target.section`（直近のh2、例「アイテム」「システム」）があればそれを使い、
- * 無ければ総称見出し（`GENERIC_OTHER_HEADING`）にまとめる（対象名(h3)自体は各patchChangeブロックに
- * 個別のまま残るため、総称に潰れるのは見出しのグルーピング単位だけ）。 */
-function otherTargetSectionHeading(target: PatchChangeTarget): string {
-  return target.section && target.section.trim().length > 0 ? target.section : GENERIC_OTHER_HEADING;
-}
-
 /**
  * detailed パッチ本文（パッチ記事刷新S2 F-S2-2、DOM抽出ベース）を組み立てる。S1の
  * `parsePatchNotesHtml(html)` が返した `PatchChangeTarget[]`（誤帰属ゼロ）から、G3の構造を
  * 踏襲して本文を組み立てる:
  * 1. `candidate.imageUrl`（og:image バナー）が安全なhttps画像URLなら先頭に画像ブロック。
- * 2. 冒頭1文サマリ（3分類の集計から純テンプレで生成、F-G3-3を流用）。
- * 3. 目次（toc、本文中の全ての章見出しへのページ内リンク一覧）。
+ * 2. 冒頭1文サマリ（champion/itemの集計から純テンプレで生成、パッチ記事刷新S8 F-S8-2）。
+ * 3. 目次（toc、本文中の全ての章見出しへのページ内リンク一覧。champion 3グループ＋
+ *    「アイテムの変更」のみ、パッチ記事刷新S8 F-S8-2）。
  * 4. チャンピオン対象（あれば）: `classifyPatchTargetDirection`（F-S2-3）で「主な強化」「主な弱体化」
  *    「その他の調整」の3グループに振り分け、グループごとに見出し→各対象を`patchChange`ブロックで
  *    出力する（対象名(h3)は各ブロックのtargetNameに個別のまま残る＝総称に潰さない）。
- * 5. 非チャンピオン対象（あれば）: `target.section`（アイテム/システム等の直近h2）ごとにグルーピングし、
- *    セクション見出し→各対象を`patchChange`ブロックで出力する（同様に対象名は個別のまま）。
- * 6. 出典URLが安全なhttpsなら公式リンクボタン（linkButton）。
+ * 5. アイテム対象（あれば）: 独立の「アイテムの変更」章にまとめ、対象名付きで`patchChange`ブロックを列挙する
+ *    （パッチ記事刷新S8 F-S8-1）。
+ * 6. system/arena/bugfix/rune/augment/other等の非champion/item対象は本文に出さない
+ *    （パッチ記事刷新S8 F-S8-1。フィルタは`bodyTargets`算出の1箇所に集約し、絞りは可逆）。
+ *    除外があれば「その他の変更点は公式で」誘導セクション（見出し＋短文）を末尾近くに出す（F-S8-3）。
+ * 7. 出典URLが安全なhttpsなら公式リンクボタン（linkButton）。
  * 4・5はその回のパッチに実在する対象だけを出す（臨機応変）。各章見出しには決定論的な連番anchor
  * （`sec-1`等）を付与し、tocのitemsから全見出しへページ内リンクできるようにする。
- * AIは使わない（DOM抽出・分類・集計はすべて純ルール）。
+ * AIは使わない（DOM抽出・分類・集計はすべて純ルール）。S1〜S7の抽出ロジック(`targets`自体)は不変。
  */
 function composeDetailedPatchBody(
   candidate: GenerationCandidateInput,
@@ -1660,12 +1695,17 @@ function composeDetailedPatchBody(
   const label = patchNumber ? `パッチ${patchNumber}` : "今回のパッチ";
   const sourceUrl = candidate.sourceUrl?.trim();
 
+  // パッチ記事刷新S8 F-S8-1: 本文化の対象をchampion/itemのみに絞る唯一の箇所（1箇所に集約・可逆）。
+  // system/arena/bugfix/rune/augment/other は抽出(targets)には残るが本文には出さない。
+  const bodyTargets = targets.filter((t) => t.kind === "champion" || t.kind === "item");
+  const excludedCount = targets.length - bodyTargets.length;
+
   const directionByTarget = new Map<PatchChangeTarget, "buff" | "nerf" | "adjust">(
-    targets.map((t) => [t, classifyPatchTargetDirection(t)]),
+    bodyTargets.map((t) => [t, classifyPatchTargetDirection(t)]),
   );
 
   // バフ/ナーフ/調整の3分類（F-S2-3）。抽出順（本文出現順）を維持して振り分ける。チャンピオン対象のみ。
-  const championTargets = targets.filter((t) => t.kind === "champion");
+  const championTargets = bodyTargets.filter((t) => t.kind === "champion");
   const buffChampions = championTargets.filter((t) => directionByTarget.get(t) === "buff");
   const nerfChampions = championTargets.filter((t) => directionByTarget.get(t) === "nerf");
   const adjustChampions = championTargets.filter((t) => directionByTarget.get(t) === "adjust");
@@ -1675,22 +1715,11 @@ function composeDetailedPatchBody(
     { heading: "その他の調整", items: adjustChampions },
   ].filter((g) => g.items.length > 0);
 
-  // 非チャンピオン対象（アイテム/ルーン/システム/バグ修正/その他）: sectionごとに抽出順を維持してグルーピング。
-  const otherTargets = targets.filter((t) => t.kind !== "champion");
-  const otherSectionOrder: string[] = [];
-  const otherBySection = new Map<string, PatchChangeTarget[]>();
-  for (const t of otherTargets) {
-    const heading = otherTargetSectionHeading(t);
-    let list = otherBySection.get(heading);
-    if (!list) {
-      list = [];
-      otherBySection.set(heading, list);
-      otherSectionOrder.push(heading);
-    }
-    list.push(t);
-  }
+  // アイテム対象（あれば）: 3分類はせず、独立の「アイテムの変更」章に対象名付きで列挙する（F-S8-1）。
+  const itemTargets = bodyTargets.filter((t) => t.kind === "item");
 
   // 同一パッチ内の他アイコンURLからDDragonバージョンを推定する（S3 F-S3-3のフォールバック画像組み立てに使う）。
+  // 除外された対象(system/arena等)のアイコンも推定材料に使えるよう、targets全体を渡す（抽出は不変）。
   const ddragonVersion = inferDdragonVersionFromTargets(targets);
 
   // 本文ブロック（見出し以外の中身）を組み立てつつ、各見出しに連番anchorを付与する。
@@ -1708,9 +1737,9 @@ function composeDetailedPatchBody(
     }
   }
 
-  for (const heading of otherSectionOrder) {
-    pushHeading(heading);
-    for (const t of otherBySection.get(heading)!) {
+  if (itemTargets.length > 0) {
+    pushHeading("アイテムの変更");
+    for (const t of itemTargets) {
       contentBlocks.push(buildPatchChangeBlock(t, directionByTarget.get(t)!, ddragonVersion));
     }
   }
@@ -1732,12 +1761,13 @@ function composeDetailedPatchBody(
 
   blocks.push({
     type: "paragraph",
-    text: buildPatchIntroSummary(
+    text: buildPatchIntroSummaryChampionItem(
       label,
       buffChampions.length,
       nerfChampions.length,
       adjustChampions.length,
-      otherTargets.length,
+      itemTargets.length,
+      excludedCount > 0,
     ),
   });
 
@@ -1746,6 +1776,16 @@ function composeDetailedPatchBody(
   }
 
   blocks.push(...contentBlocks);
+
+  // パッチ記事刷新S8 F-S8-3: 除外(system/arena/bugfix/rune等)があれば、情報を隠さず公式へ誘導する
+  // 見出し＋短文を出す（除外0件なら誘導文は出さず、公式リンクボタンのみ従来どおり出す）。
+  if (excludedCount > 0) {
+    blocks.push({ type: "heading", text: "その他の変更点は公式で" });
+    blocks.push({
+      type: "paragraph",
+      text: "システム・アリーナ・バグ修正・ルーン等、チャンピオン/アイテム以外の変更点は公式パッチノートでご確認ください。",
+    });
+  }
 
   if (sourceUrl && isHttpsUrl(sourceUrl)) {
     blocks.push({ type: "linkButton", url: sourceUrl, label: `▶ ${label} 公式パッチノートを読む` });

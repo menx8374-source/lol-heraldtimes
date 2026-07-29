@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { composeArticleBody, classifyPatchChange } from "@/lib/generation/compose";
+import { parsePatchNotesHtml } from "@/lib/generation/patch-notes-parser";
 import { MockLLMClient } from "@/lib/generation/llm-client";
 import type { ArticleBodyBlock, ArticleBodyPatchChangeBlock } from "@/lib/article-body";
 
@@ -57,7 +58,7 @@ describe("composeArticleBody（riot detailedパッチ本文、DOM抽出、パッ
     expect(corki!.direction).toBe("buff");
   });
 
-  it("アイテム/システムが対象名付き(総称に潰れない)で出る", async () => {
+  it("パッチ記事刷新S8: アイテムが対象名付き(総称に潰れない)で「アイテムの変更」章に出る。システムは本文に出ない", async () => {
     const body = await composeArticleBody(
       { sourceType: "riot", title: "パッチ26.14ノート公開", content: dummyContent, sourceUrl, html: fixtureHtml },
       llm,
@@ -65,24 +66,24 @@ describe("composeArticleBody（riot detailedパッチ本文、DOM抽出、パッ
 
     const names = patchChangeBlocks(body).map((b) => b.targetName);
     expect(names).toEqual(
-      expect.arrayContaining(["不滅の道", "プロトプラズム ハーネス", "ヘクステック ロケットベルト", "ブルーバフ"]),
+      expect.arrayContaining(["不滅の道", "プロトプラズム ハーネス", "ヘクステック ロケットベルト"]),
     );
-    // 総称(「アイテム」「システム」)自体はpatchChangeブロックのtargetNameとしては出ない(個別名のみ)
+    // 総称(「アイテム」)自体はpatchChangeブロックのtargetNameとしては出ない(個別名のみ)
     expect(names).not.toContain("アイテム");
-    expect(names).not.toContain("システム");
+    // システム対象(ブルーバフ)はS8でchampion/item限定になったため本文に一切出ない
+    expect(names).not.toContain("ブルーバフ");
 
-    // ただし見出し(グルーピング単位)としては「アイテム」「システム」が出る
+    // 見出し(グルーピング単位)は「アイテムの変更」(S8で単一章に統一・「システム」見出しは出ない)
     const headings = headingTexts(body);
-    expect(headings).toContain("アイテム");
-    expect(headings).toContain("システム");
+    expect(headings).toContain("アイテムの変更");
+    expect(headings).not.toContain("アイテム");
+    expect(headings).not.toContain("システム");
 
     const immortalPath = patchChangeBlocks(body).find((b) => b.targetName === "不滅の道")!;
     expect(immortalPath.targetKind).toBe("item");
-    const blueBuff = patchChangeBlocks(body).find((b) => b.targetName === "ブルーバフ")!;
-    expect(blueBuff.targetKind).toBe("system");
   });
 
-  it("3グループ見出し(主な強化/主な弱体化/その他の調整)・冒頭サマリ・目次が出る", async () => {
+  it("パッチ記事刷新S8: 3グループ見出し(主な強化/主な弱体化/その他の調整)＋アイテムの変更・冒頭サマリ・目次が出る", async () => {
     const body = await composeArticleBody(
       {
         sourceType: "riot",
@@ -99,18 +100,44 @@ describe("composeArticleBody（riot detailedパッチ本文、DOM抽出、パッ
     expect(body[1].type).toBe("paragraph");
     expect(body[2].type).toBe("toc");
 
-    const headings = headingTexts(body);
-    expect(headings).toEqual(expect.arrayContaining(["主な強化", "主な弱体化", "その他の調整", "アイテム", "システム"]));
+    // 冒頭サマリはchampion/itemの集計＋「その他は公式で」の文言を含む
+    const intro = body[1];
+    expect(intro.type === "paragraph" && intro.text).toContain("チャンピオン");
+    expect(intro.type === "paragraph" && intro.text).toContain("アイテム");
+    expect(intro.type === "paragraph" && intro.text).toContain("その他の変更点は公式パッチノートをご覧ください");
 
+    // toc.itemsはchampion 3グループ＋「アイテムの変更」のみ（末尾の誘導見出しは含まない）
     const toc = body.find((b) => b.type === "toc");
-    expect(toc?.type === "toc" && toc.items.map((i) => i.label)).toEqual(headings);
+    expect(toc?.type === "toc" && toc.items.map((i) => i.label)).toEqual([
+      "主な強化",
+      "主な弱体化",
+      "その他の調整",
+      "アイテムの変更",
+    ]);
     for (const h of body.filter((b): b is Extract<ArticleBodyBlock, { type: "heading" }> => b.type === "heading")) {
-      expect(h.anchor).toMatch(/^sec-\d+$/);
+      if (h.anchor !== undefined) expect(h.anchor).toMatch(/^sec-\d+$/);
     }
 
+    // 全heading（toc対象＋末尾の誘導見出し）にはシステム/アリーナ/バグ修正/ルーンが出ない
+    const headings = headingTexts(body);
+    expect(headings).not.toContain("システム");
+    expect(headings).not.toContain("アリーナ");
+    expect(headings).not.toContain("バグ修正＆QoLの変更");
+    expect(headings).not.toContain("ルーン");
+
+    // 末尾は「その他の変更点は公式で」見出し＋短文＋公式リンクボタンの順
     const last = body[body.length - 1];
     expect(last.type).toBe("linkButton");
     expect(last.type === "linkButton" && last.url).toBe(sourceUrl);
+    expect(last.type === "linkButton" && last.label).toBe("▶ パッチ26.14 公式パッチノートを読む");
+    const guidanceHeadingIndex = body.findIndex((b) => b.type === "heading" && b.text === "その他の変更点は公式で");
+    expect(guidanceHeadingIndex).toBeGreaterThan(-1);
+    const guidanceParagraph = body[guidanceHeadingIndex + 1];
+    expect(guidanceParagraph.type).toBe("paragraph");
+    expect(guidanceParagraph.type === "paragraph" && guidanceParagraph.text).toContain(
+      "チャンピオン/アイテム以外の変更点は公式パッチノートでご確認ください",
+    );
+    expect(body[guidanceHeadingIndex + 2]).toBe(last);
   });
 
   it("imageUrl未指定でもDOM抽出本文が組まれる(バナー省略、冒頭サマリから始まる)", async () => {
@@ -159,13 +186,13 @@ describe("composeArticleBody（patchChangeブロックのアイコンURL、パ�
     );
   });
 
-  it("system対象(ブルーバフ)はアイコンURLを持たない(壊れない・undefinedのまま)", async () => {
+  it("パッチ記事刷新S8: system対象(ブルーバフ)はそもそも本文に出ない(champion/item限定)", async () => {
     const body = await composeArticleBody(
       { sourceType: "riot", title: "パッチ26.14ノート公開", content: dummyContent, sourceUrl, html: fixtureHtml },
       llm,
     );
-    const blueBuff = patchChangeBlocks(body).find((b) => b.targetName === "ブルーバフ")!;
-    expect(blueBuff.targetIconUrl).toBeUndefined();
+    const blueBuff = patchChangeBlocks(body).find((b) => b.targetName === "ブルーバフ");
+    expect(blueBuff).toBeUndefined();
   });
 });
 
@@ -231,29 +258,93 @@ describe("composeArticleBody（S6: 記述式変更のdirection・非チャンピ
     expect(wGroup.changes.every((c) => c.text !== undefined)).toBe(true);
   });
 
-  it("リー・シン/死神の残り火/アリーナ(対象名「アリーナ」、S7 F-S7-2で「チャンピオン」から解消)が対象名付きカードで出る(総称に潰れない)", async () => {
+  it("リー・シン(champion)は対象名付きカードで出るが、死神の残り火(rune)/アリーナ(arena)はS8で本文から除外される", async () => {
     const body = await composeArticleBody(
       { sourceType: "riot", title: "パッチ26.14ノート公開", content: dummyContent, sourceUrl, html: fixtureHtml },
       llm,
     );
     const names = patchChangeBlocks(body).map((b) => b.targetName);
-    expect(names).toEqual(expect.arrayContaining(["リー・シン", "死神の残り火", "アリーナ"]));
-    const deathfire = patchChangeBlocks(body).find((b) => b.targetName === "死神の残り火")!;
-    expect(deathfire.targetKind).toBe("rune");
-    const arena = patchChangeBlocks(body).find((b) => b.targetName === "アリーナ" && b.targetKind === "arena")!;
+    expect(names).toContain("リー・シン");
+    expect(names).not.toContain("死神の残り火");
+    expect(names).not.toContain("アリーナ");
+
+    // 抽出自体(parsePatchNotesHtml)は不変であることを直接確認する(S1〜S7の抽出ロジックは触っていない)
+    const extractedTargets = parsePatchNotesHtml(fixtureHtml);
+    const deathfire = extractedTargets.find((t) => t.name === "死神の残り火")!;
+    expect(deathfire.kind).toBe("rune");
+    const arena = extractedTargets.find((t) => t.name === "アリーナ" && t.kind === "arena")!;
     expect(arena).toBeDefined();
   });
 
-  it("バグ修正＆QoLの変更ブロックが記述式変更を含んだまま(数値化しない)出る", async () => {
+  it("バグ修正＆QoLの変更ブロックはS8で本文から除外される(抽出自体は残る)", async () => {
     const body = await composeArticleBody(
       { sourceType: "riot", title: "パッチ26.14ノート公開", content: dummyContent, sourceUrl, html: fixtureHtml },
       llm,
     );
-    const bugfix = patchChangeBlocks(body).find((b) => b.targetName === "バグ修正＆QoLの変更")!;
-    expect(bugfix).toBeDefined();
-    expect(bugfix.targetKind).toBe("bugfix");
-    const allChanges = bugfix.groups.flatMap((g) => g.changes);
+    const bugfix = patchChangeBlocks(body).find((b) => b.targetName === "バグ修正＆QoLの変更");
+    expect(bugfix).toBeUndefined();
+
+    const extractedTargets = parsePatchNotesHtml(fixtureHtml);
+    const extractedBugfix = extractedTargets.find((t) => t.name === "バグ修正＆QoLの変更")!;
+    expect(extractedBugfix).toBeDefined();
+    expect(extractedBugfix.kind).toBe("bugfix");
+    const allChanges = extractedBugfix.groups.flatMap((g) => g.changes);
     expect(allChanges.some((c) => c.text?.includes("ケイトリンの「ヘッドショット」"))).toBe(true);
+  });
+});
+
+describe("composeArticleBody（パッチ記事刷新S8 F-S8-3: 除外0件でも壊れない誘導セクションの出し分け）", () => {
+  /** チャンピオン1体＋アイテム1件のみ(system/arena/bugfix/rune無し)の最小フィクスチャ。 */
+  const championItemOnlyHtml = [
+    "<!doctype html><html><body><main>",
+    '<header class="header-primary"><h2 id="patch-champions">チャンピオン</h2></header>',
+    '<div class="content-border"><div class="patch-change-block white-stone accent-before"><div>',
+    '<p><a class="reference-link" href="x"><img src="https://am-a.akamaihd.net/image?f=https://ddragon.leagueoflegends.com/cdn/16.13.1/img/champion/Azir.png"></a></p>',
+    '<h3 class="change-title" id="patch-azir">アジール</h3>',
+    '<blockquote class="blockquote context"><p>調整の意図テキスト。</p></blockquote>',
+    '<hr class="divider">',
+    '<h4 class="change-detail-title">基本ステータス</h4><ul><li><strong>攻撃力</strong>：55 ⇒ <strong>58</strong></li></ul>',
+    "</div></div></div>",
+    '<header class="header-primary"><h2 id="patch-items">アイテム</h2></header>',
+    '<div class="content-border"><div class="patch-change-block white-stone accent-before"><div>',
+    '<p><a class="reference-link" href="x"><img src="https://am-a.akamaihd.net/image?f=https://ddragon.leagueoflegends.com/cdn/16.13.1/img/item/3168.png"></a></p>',
+    '<h3 class="change-title" id="patch-item">不滅の道</h3>',
+    '<blockquote class="blockquote context"><p>アイテム調整の意図。</p></blockquote>',
+    '<hr class="divider">',
+    '<ul><li><strong>コスト</strong>：2500 ⇒ <strong>2600</strong></li></ul>',
+    "</div></div></div>",
+    "</main></body></html>",
+  ].join("");
+
+  it("champion/itemしか無いパッチ(除外0件)では誘導文は出さずリンクボタンのみ出る", async () => {
+    const body = await composeArticleBody(
+      {
+        sourceType: "riot",
+        title: "パッチ26.14ノート公開",
+        content: dummyContent,
+        sourceUrl,
+        html: championItemOnlyHtml,
+      },
+      llm,
+    );
+
+    // 誘導見出しは出ない(除外が無いため)
+    expect(headingTexts(body)).not.toContain("その他の変更点は公式で");
+
+    // 冒頭サマリにも「その他は公式で」の文言は付かない
+    const intro = body.find((b) => b.type === "paragraph" && b.text.includes("変更をまとめました"));
+    expect(intro).toBeDefined();
+    expect(intro!.type === "paragraph" && intro!.text).not.toContain("その他の変更点は公式パッチノートをご覧ください");
+
+    // 公式リンクボタンは従来どおり出る
+    const last = body[body.length - 1];
+    expect(last.type).toBe("linkButton");
+
+    // champion/itemは逐語のまま出る(捏造禁止)
+    const names = patchChangeBlocks(body).map((b) => b.targetName);
+    expect(names).toEqual(expect.arrayContaining(["アジール", "不滅の道"]));
+    const azir = patchChangeBlocks(body).find((b) => b.targetName === "アジール")!;
+    expect(azir.groups.flatMap((g) => g.changes)).toEqual([{ stat: "攻撃力", before: "55", after: "58" }]);
   });
 });
 
