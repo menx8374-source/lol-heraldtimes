@@ -224,12 +224,13 @@ const PATCH_DIRECTION_STYLE: Record<
 
 /**
  * 3グループ見出し（パッチ記事刷新S4 F-S4-3）の下線色を、見出しテキストの先頭一致で判定する純関数
- * （compose.ts側の固定文言「主な強化」「主な弱体化」に対応。それ以外＝「その他の調整」・
- * アイテム/システム等のセクション見出しは金下線を既定にする）。
+ * （compose.ts側の固定文言「チャンピオンの強化」「チャンピオンの弱体化」に対応。パッチ記事刷新S9で
+ * 「主な〜」から文言変更。それ以外＝「チャンピオンの調整」・アイテム/システム等のセクション見出しは
+ * 金下線を既定にする）。
  */
 function patchHeadingDirectionStyle(headingText: string): (typeof PATCH_DIRECTION_STYLE)["adjust"] {
-  if (headingText.startsWith("主な強化")) return PATCH_DIRECTION_STYLE.buff;
-  if (headingText.startsWith("主な弱体化")) return PATCH_DIRECTION_STYLE.nerf;
+  if (headingText.startsWith("チャンピオンの強化")) return PATCH_DIRECTION_STYLE.buff;
+  if (headingText.startsWith("チャンピオンの弱体化")) return PATCH_DIRECTION_STYLE.nerf;
   return PATCH_DIRECTION_STYLE.adjust;
 }
 

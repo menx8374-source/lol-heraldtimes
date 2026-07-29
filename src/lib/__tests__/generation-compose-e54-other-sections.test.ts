@@ -277,9 +277,9 @@ describe("composeArticleBody（riot detailedパッチ本文のチャンピオン
     );
 
     const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
-    // アジール(攻撃力55⇒58、増加)は「主な強化」、ガレン(確定ダメージ150/250/350⇒130/230/330、減少)は
-    // 「主な弱体化」に分類される（成長G3）。3グループ→アイテム→システムの順
-    expect(headings).toEqual(["主な強化", "アジール", "主な弱体化", "ガレン", "アイテム", "システム"]);
+    // アジール(攻撃力55⇒58、増加)は「チャンピオンの強化」、ガレン(確定ダメージ150/250/350⇒130/230/330、減少)は
+    // 「チャンピオンの弱体化」に分類される（成長G3）。3グループ→アイテム→システムの順
+    expect(headings).toEqual(["チャンピオンの強化", "アジール", "チャンピオンの弱体化", "ガレン", "アイテム", "システム"]);
 
     // チャンピオン節は画像付き（E53のまま）
     const azirHeadingIndex = body.findIndex((b) => b.type === "heading" && b.text === "アジール");
@@ -316,7 +316,7 @@ describe("composeArticleBody（riot detailedパッチ本文のチャンピオン
       llm,
     );
     const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
-    expect(headings).toEqual(["主な強化", "アジール", "主な弱体化", "ガレン"]);
+    expect(headings).toEqual(["チャンピオンの強化", "アジール", "チャンピオンの弱体化", "ガレン"]);
     expect(headings).not.toContain("アイテム");
     expect(headings).not.toContain("システム");
   });

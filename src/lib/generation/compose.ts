@@ -1537,9 +1537,9 @@ function composeDetailedPatchBodyFromText(
     else adjustChampions.push(c);
   }
   const groups: { heading: string; champions: PatchChampionChanges[] }[] = [
-    { heading: "主な強化", champions: buffChampions },
-    { heading: "主な弱体化", champions: nerfChampions },
-    { heading: "その他の調整", champions: adjustChampions },
+    { heading: "チャンピオンの強化", champions: buffChampions },
+    { heading: "チャンピオンの弱体化", champions: nerfChampions },
+    { heading: "チャンピオンの調整", champions: adjustChampions },
   ].filter((g) => g.champions.length > 0);
 
   // 本文ブロック（見出し以外の中身）を組み立てつつ、各見出しに連番anchorを付与する（F-G3-4）。
@@ -1674,9 +1674,10 @@ function buildPatchChangeBlock(
  * 2. 冒頭1文サマリ（champion/itemの集計から純テンプレで生成、パッチ記事刷新S8 F-S8-2）。
  * 3. 目次（toc、本文中の全ての章見出しへのページ内リンク一覧。champion 3グループ＋
  *    「アイテムの変更」のみ、パッチ記事刷新S8 F-S8-2）。
- * 4. チャンピオン対象（あれば）: `classifyPatchTargetDirection`（F-S2-3）で「主な強化」「主な弱体化」
- *    「その他の調整」の3グループに振り分け、グループごとに見出し→各対象を`patchChange`ブロックで
- *    出力する（対象名(h3)は各ブロックのtargetNameに個別のまま残る＝総称に潰さない）。
+ * 4. チャンピオン対象（あれば）: `classifyPatchTargetDirection`（F-S2-3）で「チャンピオンの強化」
+ *    「チャンピオンの弱体化」「チャンピオンの調整」の3グループに振り分け、グループごとに見出し→
+ *    各対象を`patchChange`ブロックで出力する（対象名(h3)は各ブロックのtargetNameに個別のまま
+ *    残る＝総称に潰さない。パッチ記事刷新S9で見出し文言を「主な〜」から変更）。
  * 5. アイテム対象（あれば）: 独立の「アイテムの変更」章にまとめ、対象名付きで`patchChange`ブロックを列挙する
  *    （パッチ記事刷新S8 F-S8-1）。
  * 6. system/arena/bugfix/rune/augment/other等の非champion/item対象は本文に出さない
@@ -1710,9 +1711,9 @@ function composeDetailedPatchBody(
   const nerfChampions = championTargets.filter((t) => directionByTarget.get(t) === "nerf");
   const adjustChampions = championTargets.filter((t) => directionByTarget.get(t) === "adjust");
   const championGroups: { heading: string; items: PatchChangeTarget[] }[] = [
-    { heading: "主な強化", items: buffChampions },
-    { heading: "主な弱体化", items: nerfChampions },
-    { heading: "その他の調整", items: adjustChampions },
+    { heading: "チャンピオンの強化", items: buffChampions },
+    { heading: "チャンピオンの弱体化", items: nerfChampions },
+    { heading: "チャンピオンの調整", items: adjustChampions },
   ].filter((g) => g.items.length > 0);
 
   // アイテム対象（あれば）: 3分類はせず、独立の「アイテムの変更」章に対象名付きで列挙する（F-S8-1）。

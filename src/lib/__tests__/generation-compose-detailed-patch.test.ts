@@ -57,10 +57,10 @@ describe("composeArticleBody（riot detailedパッチ本文、拡張E53 F-E53-1�
     expect(body[1].type).toBe("paragraph");
     expect(body[2].type).toBe("toc");
 
-    // アジール(攻撃力55⇒58、増加)は「主な強化」、ガレン(確定ダメージ150/250/350⇒130/230/330、減少)は
-    // 「主な弱体化」に分類される。3グループ見出しが分類どおりに並ぶ（空グループ「その他の調整」は非表示）。
+    // アジール(攻撃力55⇒58、増加)は「チャンピオンの強化」、ガレン(確定ダメージ150/250/350⇒130/230/330、減少)は
+    // 「チャンピオンの弱体化」に分類される。3グループ見出しが分類どおりに並ぶ（空グループ「チャンピオンの調整」は非表示）。
     const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
-    expect(headings).toEqual(["主な強化", "アジール", "主な弱体化", "ガレン"]);
+    expect(headings).toEqual(["チャンピオンの強化", "アジール", "チャンピオンの弱体化", "ガレン"]);
     expect(headings).toContain("アジール");
     expect(headings).toContain("ガレン");
 

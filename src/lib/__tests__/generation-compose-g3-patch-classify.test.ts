@@ -124,7 +124,7 @@ describe("composeArticleBody（detailedパッチの3グループ振り分け・�
     const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
     // アジール: 攻撃力増加→buff。ガレン: 確定ダメージ減少→nerf。
     // セナ: ダメージ増加(buff)＋クールダウン増加(反転語→nerf)が混在するためadjust。
-    expect(headings).toEqual(["主な強化", "アジール", "主な弱体化", "ガレン", "その他の調整", "セナ", "アイテム"]);
+    expect(headings).toEqual(["チャンピオンの強化", "アジール", "チャンピオンの弱体化", "ガレン", "チャンピオンの調整", "セナ", "アイテム"]);
 
     // 逐語（部分文字列）維持の確認
     const paragraphs = body.filter((b) => b.type === "paragraph").map((b) => b.text);
@@ -224,8 +224,8 @@ describe("composeArticleBody（detailedパッチの3グループ振り分け・�
       );
       expect(body.some((b) => b.type === "toc")).toBe(false);
       const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
-      expect(headings).not.toContain("主な強化");
-      expect(headings).not.toContain("主な弱体化");
+      expect(headings).not.toContain("チャンピオンの強化");
+      expect(headings).not.toContain("チャンピオンの弱体化");
     } finally {
       if (prev === undefined) delete process.env.PATCH_ARTICLE_MODE;
       else process.env.PATCH_ARTICLE_MODE = prev;
@@ -240,7 +240,7 @@ describe("composeArticleBody（detailedパッチの3グループ振り分け・�
     const toc = body.find((b) => b.type === "toc");
     expect(toc).toBeDefined();
     if (toc) {
-      expect(blockText(toc)).toContain("主な強化");
+      expect(blockText(toc)).toContain("チャンピオンの強化");
     }
   });
 });

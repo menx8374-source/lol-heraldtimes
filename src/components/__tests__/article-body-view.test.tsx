@@ -711,19 +711,19 @@ describe("ArticleBodyView（LoL公式風パッチ意匠、パッチ記事刷新S
     expect(adjustHtml).toContain('<span data-patch-after="true" class="text-[#C8AA6E]">15</span>');
   });
 
-  it("3グループ見出し（主な強化=teal下線・主な弱体化=赤下線・その他の調整=金下線）が付く(F-S4-3)", () => {
+  it("3グループ見出し（チャンピオンの強化=teal下線・チャンピオンの弱体化=赤下線・チャンピオンの調整=金下線）が付く(F-S4-3、パッチ記事刷新S9)", () => {
     const blocks: ArticleBodyBlock[] = [
-      { type: "heading", text: "主な強化" },
+      { type: "heading", text: "チャンピオンの強化" },
       buffBlock,
-      { type: "heading", text: "主な弱体化" },
+      { type: "heading", text: "チャンピオンの弱体化" },
       nerfBlock,
-      { type: "heading", text: "その他の調整" },
+      { type: "heading", text: "チャンピオンの調整" },
       adjustBlock,
     ];
     const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
-    const buffHeadingIndex = html.indexOf("主な強化");
-    const nerfHeadingIndex = html.indexOf("主な弱体化");
-    const adjustHeadingIndex = html.indexOf("その他の調整");
+    const buffHeadingIndex = html.indexOf("チャンピオンの強化");
+    const nerfHeadingIndex = html.indexOf("チャンピオンの弱体化");
+    const adjustHeadingIndex = html.indexOf("チャンピオンの調整");
     // 各見出し<h2>直前のclass属性を大まかに検証(下線色クラスが含まれる)
     const buffH2Start = html.lastIndexOf("<h2", buffHeadingIndex);
     const nerfH2Start = html.lastIndexOf("<h2", nerfHeadingIndex);

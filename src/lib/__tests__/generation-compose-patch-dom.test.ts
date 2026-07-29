@@ -83,7 +83,7 @@ describe("composeArticleBody（riot detailedパッチ本文、DOM抽出、パッ
     expect(immortalPath.targetKind).toBe("item");
   });
 
-  it("パッチ記事刷新S8: 3グループ見出し(主な強化/主な弱体化/その他の調整)＋アイテムの変更・冒頭サマリ・目次が出る", async () => {
+  it("パッチ記事刷新S9: 3グループ見出し(チャンピオンの強化/チャンピオンの弱体化/チャンピオンの調整)＋アイテムの変更・冒頭サマリ・目次が出る", async () => {
     const body = await composeArticleBody(
       {
         sourceType: "riot",
@@ -109,9 +109,9 @@ describe("composeArticleBody（riot detailedパッチ本文、DOM抽出、パッ
     // toc.itemsはchampion 3グループ＋「アイテムの変更」のみ（末尾の誘導見出しは含まない）
     const toc = body.find((b) => b.type === "toc");
     expect(toc?.type === "toc" && toc.items.map((i) => i.label)).toEqual([
-      "主な強化",
-      "主な弱体化",
-      "その他の調整",
+      "チャンピオンの強化",
+      "チャンピオンの弱体化",
+      "チャンピオンの調整",
       "アイテムの変更",
     ]);
     for (const h of body.filter((b): b is Extract<ArticleBodyBlock, { type: "heading" }> => b.type === "heading")) {

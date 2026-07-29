@@ -10,8 +10,9 @@
  * 1. 未確定バッジ段落（先頭固定）。
  * 2. 冒頭サマリ（数値集計のみの純テンプレ）。
  * 3. 目次（toc、既存パッチ記事と同じ構造を流用）。
- * 4. チャンピオンの変更（既存の3グループ振り分け=主な強化/主な弱体化/その他の調整、
- *    `championBlocks[].direction` 済みの値をそのまま使う。実在するグループだけ出す）。
+ * 4. チャンピオンの変更（既存の3グループ振り分け=チャンピオンの強化/チャンピオンの弱体化/
+ *    チャンピオンの調整（パッチ記事刷新S9で見出し文言変更）、`championBlocks[].direction`
+ *    済みの値をそのまま使う。実在するグループだけ出す）。
  * 5. アイテムの変更（`toArticleBodyPatchChangeBlock`(pbe-item-diff.ts)がdirection固定"adjust"を
  *    返すため分類はせず単一章にまとめる）。
  * 6. スキル詳細の注意書き（S1/S2はスキル効果量を一切扱っていないため常に明示する）。
@@ -80,9 +81,9 @@ export function composePbeArticleBody(input: PbeComposeInput): ArticleBodyBlock[
   const nerfChampions = championBlocks.filter((b) => b.direction === "nerf");
   const adjustChampions = championBlocks.filter((b) => b.direction === "adjust");
   const championGroups: { heading: string; blocks: ArticleBodyPatchChangeBlock[] }[] = [
-    { heading: "主な強化", blocks: buffChampions },
-    { heading: "主な弱体化", blocks: nerfChampions },
-    { heading: "その他の調整", blocks: adjustChampions },
+    { heading: "チャンピオンの強化", blocks: buffChampions },
+    { heading: "チャンピオンの弱体化", blocks: nerfChampions },
+    { heading: "チャンピオンの調整", blocks: adjustChampions },
   ].filter((g) => g.blocks.length > 0);
 
   const contentBlocks: ArticleBodyBlock[] = [];

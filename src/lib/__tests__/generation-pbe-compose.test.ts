@@ -82,11 +82,11 @@ describe("composePbeArticleBody（F-PBE4-1）", () => {
 
     // 見出し（3グループ振り分け＋アイテムの変更）が存在する
     const headingTexts = body.filter((b) => b.type === "heading").map((b) => b.text);
-    expect(headingTexts).toContain("主な強化"); // champ.direction === "buff"
+    expect(headingTexts).toContain("チャンピオンの強化"); // champ.direction === "buff"
     expect(headingTexts).toContain("アイテムの変更");
   });
 
-  it("チャンピオンをdirectionで3グループ(主な強化/主な弱体化/その他の調整)に振り分ける", () => {
+  it("チャンピオンをdirectionで3グループ(チャンピオンの強化/チャンピオンの弱体化/チャンピオンの調整)に振り分ける", () => {
     const buff = championBlock({ targetName: "強化対象", direction: "buff" });
     const nerf = championBlock({ targetName: "弱体化対象", direction: "nerf" });
     const adjust = championBlock({ targetName: "調整対象", direction: "adjust" });
@@ -96,7 +96,7 @@ describe("composePbeArticleBody（F-PBE4-1）", () => {
       itemBlocks: [],
     });
     const headingTexts = body.filter((b) => b.type === "heading").map((b) => b.text);
-    expect(headingTexts).toEqual(["主な強化", "主な弱体化", "その他の調整", "スキル詳細について"]);
+    expect(headingTexts).toEqual(["チャンピオンの強化", "チャンピオンの弱体化", "チャンピオンの調整", "スキル詳細について"]);
   });
 
   it("該当データが無いグループの見出しは出さない（0件のグループは省略）", () => {
@@ -106,8 +106,8 @@ describe("composePbeArticleBody（F-PBE4-1）", () => {
       itemBlocks: [],
     });
     const headingTexts = body.filter((b) => b.type === "heading").map((b) => b.text);
-    expect(headingTexts).not.toContain("主な弱体化");
-    expect(headingTexts).not.toContain("その他の調整");
+    expect(headingTexts).not.toContain("チャンピオンの弱体化");
+    expect(headingTexts).not.toContain("チャンピオンの調整");
     expect(headingTexts).not.toContain("アイテムの変更");
   });
 
