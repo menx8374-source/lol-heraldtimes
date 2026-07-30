@@ -2,26 +2,36 @@
 
 import { useSyncExternalStore } from "react";
 
-export type ClassToggleOption = { value: string; label: string };
+/**
+ * セグメントの1択。`htmlClass` を持つ選択肢を選ぶとそのクラスを `<html>` に付け、
+ * 同じグループ（同一トグル）の他クラスは外す（相互排他）。`htmlClass` 省略の選択肢が
+ * 「クラス無し＝既定」（例: テーマのライト、デザインのclassic）。各グループにちょうど1つ置く。
+ */
+export type ClassToggleOption = { value: string; label: string; htmlClass?: string };
 
 /**
- * `<html>` のクラス有無で2状態を切り替えるセグメント式トグルの共通コンポーネント（拡張E14）。
- * テーマ（ライト/ダーク＝`dark`クラス）・デザイン（標準/ニュース記事風＝`design-news`クラス）で共用する。
+ * `<html>` のクラスで表示状態を切り替えるセグメント式トグルの共通コンポーネント
+ * （拡張E14、拡張E45でN択の相互排他クラス群に一般化）。
+ * テーマ（ライト/ダーク＝`dark`クラスの有無）と、デザイン（標準/ニュース記事風/Hextech＝
+ * `design-news`/`design-hextech`の相互排他）で共用する。
  *
- * - `options[0]` = クラス無し（既定）、`options[1]` = クラス有り。
- * - 現在状態は `<html>` のクラス（描画前に layout.tsx のフラッシュ防止スクリプトが localStorage を
- *   読んで付与済み）を単一の真実として `useSyncExternalStore` で購読する。`getServerSnapshot` は常に
- *   クラス無し（=options[0]）を返して SSR/初回クライアント描画のDOMを一致させ、hydration 後に実際の
- *   状態へ再レンダーするため、リロード後も「いまどちらのモードか」のハイライトが確実に表示される
- *   （useState 遅延初期化＋suppressHydrationWarning ではハイライトが復元されないため不採用）。
+ * - グループの「排他クラス群」= options のうち htmlClass を持つものの集合。選択で1つだけ付く。
+ * - 現在状態は `<html>` のクラス（描画前に layout.tsx/no-flashスクリプトが localStorage を
+ *   読んで付与済み）を単一の真実として `useSyncExternalStore` で購読する。`getServerSnapshot` は
+ *   常に既定（クラス無しの選択肢）を返して SSR/初回クライアント描画のDOMを一致させ、hydration 後に
+ *   実際の状態へ再レンダーするため、リロード後も「いまどのモードか」のハイライトが確実に表示される。
  */
-const listenersByClass = new Map<string, Set<() => void>>();
+const listenersByGroup = new Map<string, Set<() => void>>();
 
-function subscribeToClass(htmlClass: string, onStoreChange: () => void): () => void {
-  let listeners = listenersByClass.get(htmlClass);
+function groupKey(classes: string[]): string {
+  return classes.join("|");
+}
+
+function subscribeToGroup(key: string, onStoreChange: () => void): () => void {
+  let listeners = listenersByGroup.get(key);
   if (!listeners) {
     listeners = new Set();
-    listenersByClass.set(htmlClass, listeners);
+    listenersByGroup.set(key, listeners);
   }
   listeners.add(onStoreChange);
   return () => {
@@ -32,7 +42,6 @@ function subscribeToClass(htmlClass: string, onStoreChange: () => void): () => v
 export function HtmlClassToggle({
   label,
   ariaLabel,
-  htmlClass,
   storageKey,
   options,
 }: {
@@ -40,29 +49,38 @@ export function HtmlClassToggle({
   label: string;
   /** グループの aria-label（例: 「サイトのテーマを切り替え」）。 */
   ariaLabel: string;
-  /** options[1] を選んだときに `<html>` に付与するクラス（例: 「dark」「design-news」）。 */
-  htmlClass: string;
   /** 選択値を保存する localStorage キー。 */
   storageKey: string;
-  /** [クラス無し(既定), クラス有り] の2択。 */
-  options: [ClassToggleOption, ClassToggleOption];
+  /** N択（既定=htmlClass無しをちょうど1つ含む）。選ぶとその htmlClass だけが `<html>` に付く。 */
+  options: ClassToggleOption[];
 }) {
-  const [offOption, onOption] = options;
+  const groupClasses = options
+    .map((o) => o.htmlClass)
+    .filter((c): c is string => Boolean(c));
+  const key = groupKey(groupClasses);
+  const defaultOption = options.find((o) => !o.htmlClass) ?? options[0];
 
   const current = useSyncExternalStore(
-    (onStoreChange) => subscribeToClass(htmlClass, onStoreChange),
-    () => (document.documentElement.classList.contains(htmlClass) ? onOption.value : offOption.value),
-    () => offOption.value,
+    (onStoreChange) => subscribeToGroup(key, onStoreChange),
+    () => {
+      const active = options.find(
+        (o) => o.htmlClass && document.documentElement.classList.contains(o.htmlClass),
+      );
+      return (active ?? defaultOption).value;
+    },
+    () => defaultOption.value,
   );
 
   function select(option: ClassToggleOption): void {
-    document.documentElement.classList.toggle(htmlClass, option.value === onOption.value);
+    for (const cls of groupClasses) {
+      document.documentElement.classList.toggle(cls, cls === option.htmlClass);
+    }
     try {
       window.localStorage.setItem(storageKey, option.value);
     } catch {
       // 保存できなくても表示上の切替自体はそのまま成立させる。
     }
-    listenersByClass.get(htmlClass)?.forEach((listener) => listener());
+    listenersByGroup.get(key)?.forEach((listener) => listener());
   }
 
   return (

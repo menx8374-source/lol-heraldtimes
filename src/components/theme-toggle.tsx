@@ -16,11 +16,10 @@ export function ThemeToggle() {
     <HtmlClassToggle
       label="テーマ"
       ariaLabel="サイトのテーマ（ライト/ダーク）を切り替え"
-      htmlClass="dark"
       storageKey={THEME_STORAGE_KEY}
       options={[
         { value: "light", label: "ライト" },
-        { value: "dark", label: "ダーク" },
+        { value: "dark", label: "ダーク", htmlClass: "dark" },
       ]}
     />
   );

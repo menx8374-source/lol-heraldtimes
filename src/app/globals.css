@@ -267,6 +267,251 @@
 }
 
 /*
+ * ============================================================================
+ * 第3デザイン（Hextech / eSportsダーク、拡張E45）: テーマ（light/dark）とは独立した
+ * デザイン軸の3つめ（classic/news/hextech の hextech＝.design-hextech）。
+ * LoLクライアント自身のHextech意匠（黒曜石地・ゴールド枠・マジックティール）を題材に、
+ * 「コミットしたダーク世界観」として組む（ライト/ダーク切替に関わらず黒紺で統一する
+ * 単一テーマの意図的な選択＝LoLのHextechは本来ダークな世界観のため）。
+ *
+ * design-news と同じく意図的にアンレイヤー（レイヤー外）で書き、共通マークアップの
+ * data-* フックに被せて既存のTailwindユーティリティを上書きする。header/main/footer 起点で
+ * スコープするため /admin 配下（header/main/footer非描画）には一切影響しない。
+ *
+ * シグネチャ: 記事カード左上の「ゴールドのコーナーブラケット」がホバーでティールに発光し
+ * わずかに浮く（クライアントのパネル枠を想起）。ボールドはここ一点に集約し他は静かに保つ。
+ * ============================================================================ */
+.design-hextech {
+  --hx-bg: #010a13;
+  --hx-panel: #0a1428;
+  --hx-panel-2: #071019;
+  --hx-gold: #c8aa6e;
+  --hx-gold-lite: #f0e6d2;
+  --hx-gold-dark: #785a28;
+  --hx-teal: #0ac8b9;
+  --hx-teal-dark: #0397ab;
+  --hx-text: #c8c3b8;
+  --hx-text-strong: #f0e6d2;
+  --hx-rule: #1e3a52;
+}
+
+/* body: 黒曜石地＋上部にごく淡いティールの魔力グロー。文字は可読な淡パーチメント。
+   font-family は既存の和文スタックのまま（記事サイトの表示速度優先で新規Webフォントは足さない）。 */
+.design-hextech body {
+  background:
+    radial-gradient(120% 60% at 50% 0%, rgba(10, 200, 185, 0.06), transparent 60%),
+    var(--hx-bg);
+  color: var(--hx-text);
+}
+
+/* 見出し: Hextechゴールドで角ばった存在感（字間を少し開ける）。 */
+.design-hextech main :is(h1, h2, h3) {
+  color: var(--hx-gold-lite);
+  letter-spacing: 0.01em;
+}
+
+/* リンク: 本文はティール、ホバーで明ゴールド。シェアアイコン/リンクボタンは自前配色を保つ。 */
+.design-hextech main a:not([data-share-icon]):not([data-link-button]) {
+  color: var(--hx-teal);
+}
+.design-hextech main a:not([data-share-icon]):not([data-link-button]):hover {
+  color: var(--hx-gold-lite);
+  text-decoration: none;
+}
+/* 記事カード/PICKUPカードの見出しリンクは記事タイトルなので明パーチメント（アクセント色にしない）。 */
+.design-hextech [data-article-card] h2 a,
+.design-hextech [data-pickup-card] {
+  color: var(--hx-text-strong);
+}
+
+/* ヘッダー/フッター（常時ダーク背景）: 紺グラデ＋ゴールドの下罫。ナビ/リンクのホバーはゴールド。 */
+.design-hextech header[data-site-header] {
+  background: linear-gradient(180deg, var(--hx-panel), var(--hx-bg));
+  border-bottom: 1px solid var(--hx-gold-dark);
+  box-shadow:
+    0 1px 0 rgba(200, 170, 110, 0.15),
+    0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.design-hextech header[data-site-header] nav a:hover {
+  color: var(--hx-gold);
+}
+.design-hextech footer[data-site-footer] a {
+  color: var(--hx-gold);
+}
+
+/* パンくず・出典・トップへ戻る: ティール。 */
+.design-hextech [data-breadcrumbs] a,
+.design-hextech [data-article-sources] a,
+.design-hextech [data-back-link] {
+  color: var(--hx-teal);
+}
+
+/* タグチップ: 角ばったブロンズ枠＋淡ゴールド地。 */
+.design-hextech [data-tag-chip] {
+  border-color: var(--hx-gold-dark);
+  border-radius: 0;
+  background: rgba(200, 170, 110, 0.06);
+  color: var(--hx-gold);
+  font-weight: 700;
+}
+
+/* カテゴリバッジ: ティールの角ばったラベル（大文字・字間広め）。 */
+.design-hextech [data-category-badge] {
+  border: 1px solid var(--hx-teal-dark);
+  border-radius: 0;
+  background: rgba(10, 200, 185, 0.08);
+  color: var(--hx-teal);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ── シグネチャ: Hextechパネル（記事カード） ─────────────────────────────
+   紺グラデ地＋ブロンズ罫＋ゴールドの上罫。左上のゴールド・コーナーブラケットが目印で、
+   ホバーでティールに発光しわずかに浮く。角丸は0（角ばったクライアント意匠）。 */
+.design-hextech [data-article-card] {
+  position: relative;
+  background: linear-gradient(180deg, var(--hx-panel), var(--hx-panel-2));
+  border: 1px solid var(--hx-rule);
+  border-top: 2px solid var(--hx-gold-dark);
+  border-radius: 0;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+  padding: 0.85rem 0.9rem;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+.design-hextech [data-article-card]::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  width: 14px;
+  height: 14px;
+  border-top: 2px solid var(--hx-gold);
+  border-left: 2px solid var(--hx-gold);
+  pointer-events: none;
+  transition: border-color 0.18s ease;
+}
+.design-hextech [data-article-card]:hover {
+  border-color: var(--hx-teal-dark);
+  box-shadow:
+    0 0 0 1px rgba(10, 200, 185, 0.25),
+    0 6px 20px rgba(0, 0, 0, 0.55);
+  transform: translateY(-2px);
+}
+.design-hextech [data-article-card]:hover::before {
+  border-color: var(--hx-teal);
+}
+.design-hextech [data-article-card] img,
+.design-hextech [data-article-card] [aria-hidden="true"],
+.design-hextech [data-pickup-card] img,
+.design-hextech [data-pickup-card] [aria-hidden="true"] {
+  border-radius: 0;
+  border: 1px solid var(--hx-rule);
+}
+
+/* PICKUPカード（トップページ）もパネル調に。 */
+.design-hextech [data-pickup-card] {
+  background: linear-gradient(180deg, var(--hx-panel), var(--hx-panel-2));
+  border: 1px solid var(--hx-gold-dark);
+  border-radius: 0;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+
+/* サイドバーwidget: 同じパネル調＋ゴールド上罫。 */
+.design-hextech [data-sidebar-widget] {
+  background: linear-gradient(180deg, var(--hx-panel), var(--hx-panel-2));
+  border: 1px solid var(--hx-rule);
+  border-top: 2px solid var(--hx-gold-dark);
+  border-radius: 0;
+}
+.design-hextech [data-sidebar-widget] a {
+  color: var(--hx-text-strong);
+}
+.design-hextech [data-sidebar-widget] a:hover {
+  color: var(--hx-gold);
+}
+.design-hextech [data-rank-number] {
+  color: var(--hx-gold);
+}
+.design-hextech [data-sidebar-widget] [role="tablist"] button[aria-selected="true"] {
+  background: var(--hx-gold-dark);
+  color: var(--hx-gold-lite);
+}
+
+/* まとめレス枠・引用・コメント: 紺パネル＋ゴールド/ティールのアクセント。 */
+.design-hextech [data-reaction-group] {
+  background: var(--hx-panel);
+  border-color: var(--hx-rule);
+  border-radius: 0;
+  box-shadow: none;
+}
+.design-hextech [data-reaction-group] > div {
+  border-color: var(--hx-rule);
+}
+.design-hextech [data-article-quote] {
+  border-left-color: var(--hx-teal);
+  background: rgba(10, 200, 185, 0.05);
+  border-radius: 0;
+  color: var(--hx-text-strong);
+}
+.design-hextech [data-reddit-source] {
+  background: var(--hx-panel);
+  border-left-color: var(--hx-gold);
+  color: var(--hx-text-strong);
+}
+.design-hextech [data-comment-row] {
+  background: var(--hx-panel);
+  border-left-color: var(--hx-gold-dark);
+  border-radius: 0;
+  box-shadow: none;
+}
+.design-hextech [data-reply-toggle] {
+  color: var(--hx-teal);
+}
+.design-hextech [data-comment-form] button[type="submit"] {
+  border-radius: 0;
+  border-color: var(--hx-gold-dark);
+  background: transparent;
+  color: var(--hx-gold);
+}
+.design-hextech [data-comment-form] button[type="submit"]:hover:not(:disabled) {
+  background: var(--hx-gold-dark);
+  color: var(--hx-gold-lite);
+}
+
+/* リアクション/投票ボタン: ティールアクセント・角ばり。 */
+.design-hextech [data-reaction-buttons] button,
+.design-hextech [data-comment-vote-buttons] button {
+  border-radius: 0;
+}
+.design-hextech [data-reaction-buttons] button[aria-pressed="true"],
+.design-hextech [data-comment-vote-buttons] button[aria-pressed="true"] {
+  border-color: var(--hx-teal-dark);
+  background: rgba(10, 200, 185, 0.1);
+  color: var(--hx-teal);
+}
+
+/* ページネーション。 */
+.design-hextech main nav[aria-label="ページネーション"] a {
+  border-radius: 0;
+  border-color: var(--hx-gold-dark);
+  color: var(--hx-text-strong);
+}
+
+/* モーション削減設定を尊重（カードの浮き・トランジションを無効化）。 */
+@media (prefers-reduced-motion: reduce) {
+  .design-hextech [data-article-card] {
+    transition: none;
+  }
+  .design-hextech [data-article-card]:hover {
+    transform: none;
+  }
+}
+
+/*
  * パッチ記事刷新S4: LoL公式風ダーク意匠のカラートークン（research §5.1・公式CSS実測:
  * 金 #C8AA6E・区切り #3b4353）。`[data-lol-patch]`（パッチ記事本文ラッパ、article-body-view.tsxの
  * ArticleBodyViewがpatchChangeブロックを含む本文にのみ付与）の内側だけに適用する専用トークンで、
