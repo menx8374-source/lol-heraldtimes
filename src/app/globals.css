@@ -4,8 +4,13 @@
  * ダークモード（拡張E1）: Tailwind v4 は既定で prefers-color-scheme のみを見るため、
  * <html class="dark"> によるユーザー切替（ThemeToggle）を dark: バリアントに反映させるには
  * このカスタムバリアント定義が必要（v4のクラスベースdark mode設定方法）。
+ *
+ * 拡張E45: Hextechデザイン（.design-hextech）は「テーマ(light/dark)に関わらず暗い背景」に
+ * コミットするダーク意匠のため、`.design-hextech` 配下も dark: バリアントの対象に含める。
+ * これにより各コンポーネントが元々持つ `dark:text-*`/`dark:bg-*`（＝ダーク前提の可読な配色）が
+ * Hextech時に必ず有効化され、暗い背景に暗い文字が乗る不可読を防ぐ（テーマがライトのままでも読める）。
  */
-@custom-variant dark (&:where(.dark, .dark *));
+@custom-variant dark (&:where(.dark, .dark *, .design-hextech, .design-hextech *));
 
 :root {
   --background: #f3f4f6;
