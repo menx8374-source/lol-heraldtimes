@@ -432,6 +432,41 @@ function EmbedBlockView({ block }: { block: Extract<ArticleBodyBlock, { type: "e
   );
 }
 
+/**
+ * reddit反応記事の先頭に出す、参考サイト風のソース引用ブロック（Reddit-source F-RS-3）。
+ * 元スレタイトル（強調）＋`by u/{author} in r/{subreddit}`（author/subredditがあるときのみ）＋
+ * 元スレへのリンク（新規タブ・"Redditで見る"）を、サムネ・アイコンなしのテキスト引用カードで表示する。
+ * 逐語表示のため`dangerouslySetInnerHTML`は使わない（プレーンテキストとしてJSXに渡すだけ）。
+ */
+function RedditSourceBlockView({ block }: { block: Extract<ArticleBodyBlock, { type: "redditSource" }> }) {
+  return (
+    <blockquote
+      data-reddit-source
+      className="border-l-4 border-orange-400 bg-orange-50 py-2 pl-3 text-sm dark:border-orange-600 dark:bg-neutral-900"
+    >
+      <span className="mb-1 inline-block rounded bg-orange-200 px-1.5 py-0.5 text-[10px] font-bold text-orange-800 dark:bg-orange-900 dark:text-orange-200">
+        Reddit
+      </span>
+      <p className="font-bold text-neutral-800 dark:text-neutral-100">{block.title}</p>
+      {(block.author || block.subreddit) && (
+        <p className="mt-0.5 text-xs text-neutral-600 dark:text-neutral-400">
+          {block.author && `by u/${block.author}`}
+          {block.author && block.subreddit && " "}
+          {block.subreddit && `in r/${block.subreddit}`}
+        </p>
+      )}
+      <a
+        href={block.url}
+        target="_blank"
+        rel="noopener noreferrer nofollow"
+        className="mt-1 inline-block text-xs text-sky-700 underline dark:text-sky-400"
+      >
+        Redditで見る
+      </a>
+    </blockquote>
+  );
+}
+
 /** 連続するまとめ速報レス（reactionブロック）群を1つの枠にまとめて描画する（拡張E12）。
  * 各レスは枠内で縦に連続し、レス間は薄い区切り線（divide-y）で仕切る（レスごとの独立ボックスにしない）。
  * 各レスの中身（番号:名前緑＋本文行＋赤/オレンジ強調＋">>N"アンカー）は従来どおり。 */
@@ -539,6 +574,9 @@ export function ArticleBodyView({ blocks }: { blocks: ArticleBodyBlock[] }) {
           return (
             <PatchChangeBlockView key={index} block={block} showCredit={index === firstPatchChangeIndex} />
           );
+        }
+        if (block.type === "redditSource") {
+          return <RedditSourceBlockView key={index} block={block} />;
         }
         // 冒頭サマリ段落（パッチ記事のみ、F-S4-3）は紺地金文字のカードにする。それ以外の段落は従来どおり。
         return (

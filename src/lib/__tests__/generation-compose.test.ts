@@ -228,6 +228,106 @@ describe("composeArticleBody", () => {
     expect(reactionBlocks.every((b) => b.type === "reaction" && b.name === "海外プレイヤーさん")).toBe(true);
   });
 
+  it("reddit由来はsourceUrlがあれば本文先頭にredditSourceブロックが入る(原題・author・subreddit抽出・url, Reddit-source F-RS-2)", async () => {
+    const body = await composeArticleBody(
+      {
+        sourceType: "reddit",
+        title: "Is Kiriko going to be meta until the end of existence?",
+        content: "1: Yeah probably.\n2: I don't think so.",
+        sourceUrl: "https://www.reddit.com/r/leagueoflegends/comments/abc123/is_kiriko_meta/",
+        author: "Jetnjet",
+      },
+      llm,
+    );
+    expect(body[0]).toEqual({
+      type: "redditSource",
+      title: "Is Kiriko going to be meta until the end of existence?",
+      author: "Jetnjet",
+      subreddit: "leagueoflegends",
+      url: "https://www.reddit.com/r/leagueoflegends/comments/abc123/is_kiriko_meta/",
+    });
+    // 先頭に1件増えるだけで、既存の見出し・反応レス構成は維持される
+    const headings = body.filter((b) => b.type === "heading").map((b) => b.text);
+    expect(headings).toEqual(["反応まとめ"]);
+  });
+
+  it("reddit由来でもsourceUrlが無ければredditSourceブロックは付かない(従来どおり見出し先頭, Reddit-source F-RS-2)", async () => {
+    const body = await composeArticleBody(
+      { sourceType: "reddit", title: "sourceUrl無しテスト", content: "1: テスト。" },
+      llm,
+    );
+    expect(body.some((b) => b.type === "redditSource")).toBe(false);
+    expect(body[0].type).toBe("heading");
+  });
+
+  it("5ch由来はsourceUrlがreddit形式でもredditSourceブロックは付かない(Reddit-source F-RS-2、reddit限定)", async () => {
+    const body = await composeArticleBody(
+      {
+        sourceType: "5ch",
+        title: "5chスレタイトル",
+        content: "1: テスト。",
+        sourceUrl: "https://www.reddit.com/r/leagueoflegends/comments/abc123/thread/",
+      },
+      llm,
+    );
+    expect(body.some((b) => b.type === "redditSource")).toBe(false);
+  });
+
+  it("riot由来はredditSourceブロックが付かない(既存構成不変, Reddit-source F-RS-2)", async () => {
+    const body = await composeArticleBody(
+      {
+        sourceType: "riot",
+        title: "パッチ14.6ノート公開",
+        content: "テスト用の本文。",
+        sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/game-updates/league-of-legends-patch-14-6-notes",
+      },
+      llm,
+    );
+    expect(body.some((b) => b.type === "redditSource")).toBe(false);
+  });
+
+  it("reddit由来でsourceUrlがreddit以外のドメインなら安全のためredditSourceブロックを付けない(なりすまし防止, Reddit-source F-RS-2)", async () => {
+    const body = await composeArticleBody(
+      {
+        sourceType: "reddit",
+        title: "不正URLテスト",
+        content: "1: テスト。",
+        sourceUrl: "https://evil.example.com/r/leagueoflegends/comments/abc123/thread/",
+      },
+      llm,
+    );
+    expect(body.some((b) => b.type === "redditSource")).toBe(false);
+  });
+
+  it("subredditはsourceUrlの/r/{subreddit}/部分から抽出できる(Reddit-source F-RS-2)", async () => {
+    const body = await composeArticleBody(
+      {
+        sourceType: "reddit",
+        title: "抽出テスト",
+        content: "1: テスト。",
+        sourceUrl: "https://www.reddit.com/r/leagueoflegends/comments/xxx/some_title/",
+      },
+      llm,
+    );
+    const source = body.find((b) => b.type === "redditSource");
+    expect(source?.type === "redditSource" && source.subreddit).toBe("leagueoflegends");
+  });
+
+  it("subredditが抽出できない形式のsourceUrlはsubredditを省略する(Reddit-source F-RS-2)", async () => {
+    const body = await composeArticleBody(
+      {
+        sourceType: "reddit",
+        title: "抽出不可テスト",
+        content: "1: テスト。",
+        sourceUrl: "https://www.reddit.com/comments/xxx/some_title/",
+      },
+      llm,
+    );
+    const source = body.find((b) => b.type === "redditSource");
+    expect(source).toBeDefined();
+    expect(source?.type === "redditSource" && source.subreddit).toBeUndefined();
+  });
+
   it("PATCH_ARTICLE_MODE=summaryのとき、引用ブロックには出典ラベル(source)が付与される(riot由来、回帰なし)", async () => {
     const body = await withPatchMode("summary", () =>
       composeArticleBody(

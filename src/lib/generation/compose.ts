@@ -10,6 +10,7 @@
 import {
   PATCH_PREVIEW_BADGE_TEXT,
   isPatchPreviewArticleBody,
+  isRedditSourceUrl,
   type ArticleBodyBlock,
   type ArticleBodyEmbedBlock,
   type ArticleBodyEmphasisColor,
@@ -1836,11 +1837,44 @@ async function composeFactBody(
 }
 
 /**
+ * reddit スレURL（`https://www.reddit.com/r/{subreddit}/comments/{id}/...`）からサブレディット名を
+ * 純ルールで抽出する（Reddit-source F-RS-2）。抽出できない形式なら undefined（捏造しない・省略する）。
+ */
+function extractRedditSubreddit(url: string): string | undefined {
+  const match = url.match(/\/r\/([A-Za-z0-9_]+)\//);
+  return match ? match[1] : undefined;
+}
+
+/**
+ * reddit反応記事の本文先頭に出す、参考サイト風のソース引用ブロックを組み立てる（Reddit-source
+ * F-RS-2）。`candidate.sourceUrl` が安全なreddit httpsのURLのときだけブロックを1件返し、
+ * それ以外（未取得・不正な形式）は空配列（記事は壊さず単に付けない）。title/author は
+ * candidateの値をそのまま逐語で使う（捏造しない）。
+ */
+function buildRedditSourceBlocks(candidate: GenerationCandidateInput): ArticleBodyBlock[] {
+  const sourceUrl = candidate.sourceUrl?.trim();
+  if (!sourceUrl || !isRedditSourceUrl(sourceUrl)) return [];
+  const author = candidate.author?.trim();
+  const subreddit = extractRedditSubreddit(sourceUrl);
+  return [
+    {
+      type: "redditSource",
+      title: candidate.title,
+      ...(author ? { author } : {}),
+      ...(subreddit ? { subreddit } : {}),
+      url: sourceUrl,
+    },
+  ];
+}
+
+/**
  * 掲示板/Reddit（5ch/reddit）由来: 「まとめ速報レス形式」で本文ブロックを組み立てる。
  * AI要約段落は付けず、「反応まとめ」見出し＋スレッドのレス群を逐語のまま並べた reaction ブロックのみで
  * 構成する（2026-07-25 ユーザー決定: レスの羅列中心のシンプルなまとめ構成への改修）。
  * さらにレス本文中に埋め込み許可URL（YouTube/Twitchクリップ）があれば、逐語テキストはそのまま保持しつつ
  * embedブロックを加算する（拡張E22 F-E22-1。0件なら従来どおり何も足さない）。
+ * reddit（海外の反応）のときだけ、先頭に元スレのソース引用ブロック（redditSource）を1つ追加する
+ * （Reddit-source F-RS-2。5chには付けない）。
  */
 async function composeReactionBody(
   candidate: GenerationCandidateInput,
@@ -1849,6 +1883,9 @@ async function composeReactionBody(
 ): Promise<ArticleBodyBlock[]> {
   const blocks: ArticleBodyBlock[] = [];
 
+  if (sourceType === "reddit") {
+    blocks.push(...buildRedditSourceBlocks(candidate));
+  }
   blocks.push({ type: "heading", text: "反応まとめ" });
   blocks.push(...(await buildReactionBlocks(candidate, sourceType, llmClient)));
   blocks.push(...detectClipEmbedBlocks(candidate.content));

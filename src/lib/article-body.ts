@@ -15,6 +15,10 @@
  *
  * ⚠ 拡張E42: `linkButton`（大きく目立つボタン風の外部リンク）ブロックを追加。パッチ記事で
  * 公式パッチノートへ誘導するために使う。url は https のみ許可する。
+ *
+ * ⚠ Reddit-source: `redditSource`（reddit反応記事の先頭に出す、参考サイト風のソース引用ブロック。
+ * 元スレタイトル＋`by u/{author} in r/{subreddit}`＋元スレURL）を追加。url は https の reddit.com
+ * のみ許可し、内容は逐語（捏造しない）。
  */
 import { isAllowedEmbedUrl, isEmbedProvider, type EmbedProvider } from "@/lib/embed";
 import { isSafeLocalAssetPath } from "@/lib/image-url";
@@ -65,6 +69,20 @@ export type ArticleBodyEmbedBlock = { type: "embed"; provider: EmbedProvider; ur
  * `url` は https のみ許可（`javascript:` 等は弾く）。`label` を表示しURL文字列自体は出さない。 */
 export type ArticleBodyLinkButtonBlock = { type: "linkButton"; url: string; label: string };
 
+/**
+ * reddit反応記事の先頭に出す、参考サイト風のソース引用ブロック（Reddit-source F-RS-1）。
+ * 元スレの原題・作者・サブレディット・元スレURLを逐語のまま保持する（捏造禁止）。
+ * `author`/`subreddit` は任意（抽出できない場合は省略、表示時は`u/`/`r/`を付与）。
+ * `url` は `parseRedditSourceBlock` で https の reddit.com のみに検証する。
+ */
+export type ArticleBodyRedditSourceBlock = {
+  type: "redditSource";
+  title: string;
+  author?: string;
+  subreddit?: string;
+  url: string;
+};
+
 /** 章見出しブロック。`anchor`（成長G3）は目次からページ内リンクするための任意のid。
  * 未指定の既存見出し（旧記事・fact/summaryモード等）は従来どおり anchor なしで表示される（後方互換）。 */
 export type ArticleBodyHeadingBlock = { type: "heading"; text: string; anchor?: string };
@@ -114,7 +132,8 @@ export type ArticleBodyBlock =
   | ArticleBodyEmbedBlock
   | ArticleBodyLinkButtonBlock
   | ArticleBodyTocBlock
-  | ArticleBodyPatchChangeBlock;
+  | ArticleBodyPatchChangeBlock
+  | ArticleBodyRedditSourceBlock;
 
 export class InvalidArticleBodyError extends Error {
   constructor(message: string) {
@@ -224,6 +243,47 @@ function parseImageBlock(b: Record<string, unknown>, index: number): ArticleBody
  */
 function isSafeLinkButtonUrl(url: string): boolean {
   return /^https:\/\//i.test(url);
+}
+
+/**
+ * redditSource ブロックの url として許可するホスト・スキームか（純関数、Reddit-source F-RS-1）。
+ * https の reddit.com（www./old./サブドメイン含む）のみ許可し、なりすまし・危険スキームを弾く。
+ * `compose.ts`（挿入可否の判定）・`parseRedditSourceBlock`（DB読み出し時の検証）の両方から使う。
+ */
+export function isRedditSourceUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.protocol === "https:" && (u.hostname === "reddit.com" || u.hostname.endsWith(".reddit.com"));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * redditSource ブロックの検証（Reddit-source F-RS-1）。title/url は必須（url は
+ * `isRedditSourceUrl` でhttpsのreddit.comのみ許可）。author/subredditは任意で、指定時は
+ * 非空文字列であることのみ検証する（逐語のまま・改変しない）。
+ */
+export function parseRedditSourceBlock(b: Record<string, unknown>, index: number): ArticleBodyRedditSourceBlock {
+  if (typeof b.title !== "string" || b.title.trim().length === 0) {
+    throw new InvalidArticleBodyError(`本文ブロック[${index}]のredditSource titleが空です`);
+  }
+  if (typeof b.url !== "string" || b.url.trim().length === 0 || !isRedditSourceUrl(b.url)) {
+    throw new InvalidArticleBodyError(`本文ブロック[${index}]のredditSource urlが不正です（reddit httpsのみ許可）`);
+  }
+  if (b.author !== undefined && (typeof b.author !== "string" || b.author.trim().length === 0)) {
+    throw new InvalidArticleBodyError(`本文ブロック[${index}]のredditSource authorが不正です`);
+  }
+  if (b.subreddit !== undefined && (typeof b.subreddit !== "string" || b.subreddit.trim().length === 0)) {
+    throw new InvalidArticleBodyError(`本文ブロック[${index}]のredditSource subredditが不正です`);
+  }
+  return {
+    type: "redditSource",
+    title: b.title,
+    ...(b.author ? { author: b.author as string } : {}),
+    ...(b.subreddit ? { subreddit: b.subreddit as string } : {}),
+    url: b.url,
+  };
 }
 
 function parseLinkButtonBlock(b: Record<string, unknown>, index: number): ArticleBodyLinkButtonBlock {
@@ -426,6 +486,9 @@ export function parseArticleBody(value: unknown): ArticleBodyBlock[] {
     if (b.type === "patchChange") {
       return parsePatchChangeBlock(b, index);
     }
+    if (b.type === "redditSource") {
+      return parseRedditSourceBlock(b, index);
+    }
     if (typeof b.type !== "string" || !TEXT_TYPES.has(b.type)) {
       throw new InvalidArticleBodyError(
         `本文ブロック[${index}]の type が不正です: ${String(b.type)}`,
@@ -558,6 +621,9 @@ export function blockText(block: ArticleBodyBlock): string {
       for (const c of g.changes) parts.push(`${c.stat}：${c.before} ⇒ ${c.after}`);
     }
     return parts.join("\n");
+  }
+  if (block.type === "redditSource") {
+    return [block.title, block.author, block.subreddit].filter((s): s is string => Boolean(s)).join("\n");
   }
   return block.text;
 }

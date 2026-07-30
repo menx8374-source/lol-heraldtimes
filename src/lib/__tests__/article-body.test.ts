@@ -328,6 +328,48 @@ describe("parseArticleBody", () => {
     ).toThrow(InvalidArticleBodyError);
   });
 
+  it("redditSourceブロックをパースできる(title/author/subreddit/url, Reddit-source F-RS-1)", () => {
+    const input = [
+      {
+        type: "redditSource",
+        title: "Is Kiriko going to be meta until the end of existence?",
+        author: "Jetnjet",
+        subreddit: "leagueoflegends",
+        url: "https://www.reddit.com/r/leagueoflegends/comments/abc123/some_thread/",
+      },
+    ];
+    const result = parseArticleBody(input);
+    expect(result[0]).toEqual(input[0]);
+  });
+
+  it("redditSourceブロックはauthor/subreddit省略時もパースできる(任意項目、後方互換)", () => {
+    const input = [{ type: "redditSource", title: "元スレタイトル", url: "https://www.reddit.com/r/lol/comments/xyz/thread/" }];
+    const result = parseArticleBody(input);
+    expect(result[0]).toEqual(input[0]);
+  });
+
+  it("redditSourceブロックのurlがreddit.com以外ならエラーを投げる(Reddit-source F-RS-1、なりすまし防止)", () => {
+    expect(() =>
+      parseArticleBody([
+        { type: "redditSource", title: "タイトル", url: "https://evil.example.com/r/lol/comments/xyz/thread/" },
+      ]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
+  it("redditSourceブロックのurlがhttpならエラーを投げる(Reddit-source F-RS-1、https必須)", () => {
+    expect(() =>
+      parseArticleBody([
+        { type: "redditSource", title: "タイトル", url: "http://www.reddit.com/r/lol/comments/xyz/thread/" },
+      ]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
+  it("redditSourceブロックのtitleが空ならエラーを投げる(Reddit-source F-RS-1)", () => {
+    expect(() =>
+      parseArticleBody([{ type: "redditSource", title: "", url: "https://www.reddit.com/r/lol/comments/xyz/thread/" }]),
+    ).toThrow(InvalidArticleBodyError);
+  });
+
   it("headingブロックはanchor省略時、従来どおりtextのみになる(成長G3、後方互換)", () => {
     const result = parseArticleBody([{ type: "heading", text: "見出し" }]);
     expect(result[0]).toEqual({ type: "heading", text: "見出し" });
@@ -537,6 +579,24 @@ describe("blockText", () => {
     expect(
       blockText({ type: "linkButton", url: "https://example.com/patch-notes", label: "公式パッチノートを読む" }),
     ).toBe("公式パッチノートを読む\nhttps://example.com/patch-notes");
+  });
+
+  it("redditSourceはtitle/author/subredditを改行連結して返す(Reddit-source、検索・要約対象に含める)", () => {
+    expect(
+      blockText({
+        type: "redditSource",
+        title: "Is Kiriko going to be meta until the end of existence?",
+        author: "Jetnjet",
+        subreddit: "leagueoflegends",
+        url: "https://www.reddit.com/r/leagueoflegends/comments/abc123/some_thread/",
+      }),
+    ).toBe("Is Kiriko going to be meta until the end of existence?\nJetnjet\nleagueoflegends");
+  });
+
+  it("redditSourceはauthor/subreddit省略時titleのみ返す(Reddit-source)", () => {
+    expect(
+      blockText({ type: "redditSource", title: "元スレタイトル", url: "https://www.reddit.com/r/lol/comments/xyz/thread/" }),
+    ).toBe("元スレタイトル");
   });
 
   it("tocは各itemのlabelを改行連結して返す(成長G3 F-G3-4)", () => {

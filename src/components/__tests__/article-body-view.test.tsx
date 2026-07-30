@@ -832,3 +832,45 @@ describe("ArticleBodyView（LoL公式風パッチ意匠、パッチ記事刷新S
     expect(html).toContain("max-width:100%");
   });
 });
+
+describe("ArticleBodyView（redditSourceブロック、Reddit-source F-RS-3）", () => {
+  it("タイトル＋by u/author in r/subreddit＋元スレへのリンクを表示する", () => {
+    const blocks: ArticleBodyBlock[] = [
+      {
+        type: "redditSource",
+        title: "Is Kiriko going to be meta until the end of existence?",
+        author: "Jetnjet",
+        subreddit: "leagueoflegends",
+        url: "https://www.reddit.com/r/leagueoflegends/comments/abc123/is_kiriko_meta/",
+      },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("<blockquote");
+    expect(html).toContain("Is Kiriko going to be meta until the end of existence?");
+    expect(html).toContain("by u/Jetnjet");
+    expect(html).toContain("in r/leagueoflegends");
+    expect(html).toContain('href="https://www.reddit.com/r/leagueoflegends/comments/abc123/is_kiriko_meta/"');
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="noopener noreferrer nofollow"');
+    expect(html).toContain("Redditで見る");
+  });
+
+  it("author/subredditが無くても崩れずタイトル＋リンクだけ表示する(任意項目)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "redditSource", title: "元スレタイトルのみ", url: "https://www.reddit.com/r/lol/comments/xyz/thread/" },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("元スレタイトルのみ");
+    expect(html).not.toContain("by u/");
+    expect(html).not.toContain("in r/");
+    expect(html).toContain("Redditで見る");
+  });
+
+  it("サムネ・アイコン画像は含まない(<img>タグが無い、参考どおりシンプルなテキスト引用)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "redditSource", title: "サムネ無しテスト", url: "https://www.reddit.com/r/lol/comments/xyz/thread/" },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).not.toContain("<img");
+  });
+});
