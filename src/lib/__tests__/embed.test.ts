@@ -5,6 +5,7 @@ import {
   EMBED_PROVIDER_LABELS,
   extractYoutubeVideoId,
   extractTwitchClipSlug,
+  extractTweetStatusId,
   embedIframeSrc,
 } from "@/lib/embed";
 
@@ -90,6 +91,19 @@ describe("extractYoutubeVideoId（動画ID抽出, 拡張E22）", () => {
   });
 });
 
+describe("extractTweetStatusId（ツイートID抽出, X-embed F-XE-1）", () => {
+  it("x.com/twitter.comの正規status URLから数値のツイートIDを抽出する", () => {
+    expect(extractTweetStatusId("https://x.com/example_user/status/1234567890")).toBe("1234567890");
+    expect(extractTweetStatusId("https://twitter.com/example_user/status/9876543210")).toBe("9876543210");
+  });
+
+  it("status URLでない同ホストのページ(プロフィール等)・許可外ホスト・URL不正はnull", () => {
+    expect(extractTweetStatusId("https://x.com/example_user")).toBeNull();
+    expect(extractTweetStatusId("https://evil.example/example_user/status/123")).toBeNull();
+    expect(extractTweetStatusId("not a url")).toBeNull();
+  });
+});
+
 describe("extractTwitchClipSlug（クリップslug抽出, 拡張E22）", () => {
   it("clips.twitch.tv・twitch.tv/*/clip/ の正規URLからslugを抽出する", () => {
     expect(extractTwitchClipSlug("https://clips.twitch.tv/SampleClip-123")).toBe("SampleClip-123");
@@ -123,7 +137,17 @@ describe("embedIframeSrc（iframe用src組み立て, 拡張E22）", () => {
     expect(embedIframeSrc("clip", "https://clips.twitch.tv/", "localhost")).toBeNull();
   });
 
-  it("twitterは実iframe対象外のため常にnull", () => {
-    expect(embedIframeSrc("twitter", "https://x.com/example/status/123", "localhost")).toBeNull();
+  it("twitterは検証済みstatus URLからplatform.twitter.com/embed/Tweet.htmlのsrcを返す(X-embed F-XE-1)", () => {
+    expect(embedIframeSrc("twitter", "https://x.com/example/status/1234567890", "localhost")).toBe(
+      "https://platform.twitter.com/embed/Tweet.html?id=1234567890",
+    );
+    expect(embedIframeSrc("twitter", "https://twitter.com/example/status/9876543210", "localhost")).toBe(
+      "https://platform.twitter.com/embed/Tweet.html?id=9876543210",
+    );
+  });
+
+  it("twitterで不正なURL(プロフィール等・別ドメイン)はnull(X-embed F-XE-1)", () => {
+    expect(embedIframeSrc("twitter", "https://x.com/example", "localhost")).toBeNull();
+    expect(embedIframeSrc("twitter", "https://youtube.com/example/status/123", "localhost")).toBeNull();
   });
 });

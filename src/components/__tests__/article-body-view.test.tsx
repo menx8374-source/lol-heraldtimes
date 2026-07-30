@@ -164,7 +164,7 @@ describe("ArticleBodyView（linkButtonブロック, 拡張E42）", () => {
 });
 
 describe("ArticleBodyView（埋め込みブロック, 拡張E3）", () => {
-  it("正当なprovider/urlはプレースホルダーカードとして表示し、元URLへのリンクと注記を含む", () => {
+  it("正当なprovider/urlで実iframe化に失敗する場合はプレースホルダーカードとして表示し、元URLへのリンクを含む(X-embedで誤解文言は撤廃)", () => {
     const blocks: ArticleBodyBlock[] = [
       { type: "embed", provider: "youtube", url: "https://www.youtube.com/watch?v=abc", caption: "サンプル動画" },
     ];
@@ -172,7 +172,8 @@ describe("ArticleBodyView（埋め込みブロック, 拡張E3）", () => {
     expect(html).toContain("YouTube");
     expect(html).toContain("サンプル動画");
     expect(html).toContain("https://www.youtube.com/watch?v=abc");
-    expect(html).toContain("本番接続時に表示されます");
+    expect(html).toContain("YouTubeで見る");
+    expect(html).not.toContain("本番接続時に表示されます");
     // 実iframe/scriptを読み込まない
     expect(html).not.toContain("<iframe");
     expect(html).not.toContain("<script");
@@ -209,21 +210,14 @@ describe("ArticleBodyView（埋め込みブロックの実iframe化, 拡張E22�
     expect(html).toContain("https://clips.twitch.tv/embed?clip=SampleClip");
   });
 
-  it("動画IDの抽出に失敗するURL(不正な形式)は従来のプレースホルダーカードにフォールバックする", () => {
+  it("動画IDの抽出に失敗するURL(不正な形式)は従来のプレースホルダーカードにフォールバックする(誤解文言なし)", () => {
     const blocks: ArticleBodyBlock[] = [
       { type: "embed", provider: "youtube", url: "https://www.youtube.com/watch?v=abc", caption: "サンプル動画" },
     ];
     const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
     expect(html).not.toContain("<iframe");
-    expect(html).toContain("本番接続時に表示されます");
-  });
-
-  it("twitterの埋め込みは実iframe対象外のため常にプレースホルダーカードのまま", () => {
-    const blocks: ArticleBodyBlock[] = [
-      { type: "embed", provider: "twitter", url: "https://x.com/example/status/123" },
-    ];
-    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
-    expect(html).not.toContain("<iframe");
+    expect(html).not.toContain("本番接続時に表示されます");
+    expect(html).toContain("YouTubeで見る");
   });
 
   it("iframeにはloading=lazy・allowfullscreen・referrerpolicyを設定する(dangerouslySetInnerHTMLは使わない)", () => {
@@ -234,6 +228,64 @@ describe("ArticleBodyView（埋め込みブロックの実iframe化, 拡張E22�
     expect(html).toContain('loading="lazy"');
     expect(html).toContain('allowFullScreen=""');
     expect(html).toContain('referrerPolicy="strict-origin-when-cross-origin"');
+  });
+});
+
+describe("ArticleBodyView（Xツイートの実iframe化・サンドボックス化埋め込み, X-embed F-XE-1〜F-XE-2）", () => {
+  it("検証済みのtweetステータスURLはplatform.twitter.com/embed/Tweet.htmlの実iframeとして描画し、誤解文言が無い", () => {
+    const blocks: ArticleBodyBlock[] = [
+      {
+        type: "embed",
+        provider: "twitter",
+        url: "https://x.com/example_user/status/1234567890",
+        caption: "話題のツイート",
+      },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("<iframe");
+    expect(html).toContain("https://platform.twitter.com/embed/Tweet.html?id=1234567890");
+    expect(html).toContain("話題のツイート");
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("本番接続時に表示されます");
+  });
+
+  it("ツイートiframeにsandbox（allow-scripts allow-popups allow-same-origin）・referrerPolicy・loading=lazy・titleを設定する", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "embed", provider: "twitter", url: "https://x.com/example_user/status/1234567890" },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain('sandbox="allow-scripts allow-popups allow-same-origin"');
+    expect(html).toContain('referrerPolicy="strict-origin-when-cross-origin"');
+    expect(html).toContain('loading="lazy"');
+    expect(html).toContain('title="X（Twitter）投稿の埋め込み"');
+  });
+
+  it("不正なtweet URL(プロフィール等・status形式でない)はカードにフォールバックし、iframeは描画されない(誤解文言も無い)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "embed", provider: "twitter", url: "https://x.com/example_user" },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).not.toContain("<iframe");
+    expect(html).toContain("Xで見る");
+    expect(html).not.toContain("本番接続時に表示されます");
+  });
+
+  it("youtube/clipの実iframe化は従来どおり回帰しない(twitter対応追加後も他providerは不変)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "embed", provider: "youtube", url: "https://youtu.be/dQw4w9WgXcQ", caption: "神プレイ集" },
+      { type: "embed", provider: "clip", url: "https://clips.twitch.tv/SampleClip" },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ");
+    expect(html).toContain("https://clips.twitch.tv/embed?clip=SampleClip");
+    // youtube/clipにはtwitter専用のsandbox属性を付けない(回帰なし)
+    expect(html).not.toContain("sandbox=");
+  });
+
+  it("dangerouslySetInnerHTMLは使わない(twitter埋め込み対応後もコンポーネントソースに不在)", async () => {
+    const fs = await import("node:fs/promises");
+    const src = await fs.readFile(new URL("../article-body-view.tsx", import.meta.url), "utf-8");
+    expect(src).not.toContain("dangerouslySetInnerHTML=");
   });
 });
 

@@ -343,33 +343,64 @@ function PatchChangeBlockView({
 
 const EMBED_PROVIDER_ICON: Record<EmbedProvider, string> = { twitter: "X", youtube: "▶", clip: "🎬" };
 
+/** カードフォールバック時のリンク文言（provider別、X-embedで誤解を招く「本番接続時に表示されます」文言を撤廃）。
+ * 中立に「〜で見る」と表記し、元URLへの外部リンク自体は変わらない。 */
+const EMBED_FALLBACK_LINK_TEXT: Record<EmbedProvider, string> = {
+  twitter: "Xで見る",
+  youtube: "YouTubeで見る",
+  clip: "Twitchで見る",
+};
+
 /**
- * SNS/動画の埋め込みブロック（拡張E3、拡張E22で実再生対応）。
- * provider が youtube/clip のときは、embed.ts の厳格なID/slug抽出関数で組み立てた src
- * （youtube-nocookie.com / clips.twitch.tv の許可ドメインのみ）で実際に再生可能なiframeを描画する。
+ * Twitter公式のサンドボックス化iframe（`platform.twitter.com/embed/Tweet.html`）に付与するsandbox属性
+ * （X-embed セキュリティ方針）。実際に埋め込みが機能する最小権限に絞る:
+ * - `allow-scripts`: Twitter公式のTweet.html自体が動くために必要（当サイトのDOM/originでは実行されない）。
+ * - `allow-popups`: ツイート内リンク/いいね等のクリックで新規タブを開けるようにする。
+ * - `allow-same-origin`: iframe srcが `platform.twitter.com`（cross-origin）のため、付与してもTwitter側
+ *   originの権限に閉じる（当サイトoriginの権限にはならない）。
+ * camera/microphone等の`allow`は一切付けない。
+ */
+const TWITTER_IFRAME_SANDBOX = "allow-scripts allow-popups allow-same-origin";
+
+/**
+ * SNS/動画の埋め込みブロック（拡張E3、拡張E22で実再生対応、X-embedでtwitterも実iframe化）。
+ * provider が youtube/clip/twitter のときは、embed.ts の厳格なID抽出関数で組み立てた src
+ * （youtube-nocookie.com / clips.twitch.tv / platform.twitter.com の許可ドメインのみ、
+ * widgets.js等の外部スクリプトは読み込まない）で実際にiframeを描画する。
  * 生URLをそのままsrcに使うことはなく、抽出に失敗した場合（不正なID等）は従来の
- * プレースホルダーカードにフォールバックする。twitter は実iframe対象外のため常にカード表示のまま
- * （著作権・CSP・SSRF回避のため。dangerouslySetInnerHTMLは使わない）。
+ * プレースホルダーカードにフォールバックする（記事は壊れない。dangerouslySetInnerHTMLは使わない）。
+ * tweetは16:9ではなく高さが可変のため、twitterのみ `aspect-video` を使わず、
+ * min-height＋max-height＋overflow-autoの専用コンテナ（崩れ防止。origin検証が必要なpostMessage
+ * resizeは使わず静的な高さ制約のみで対応する）にする。
  * parseArticleBody時点でホワイトリスト検証済みだが、表示前にも再検証し不正値は描画しない（二重防御）。
  */
 function EmbedBlockView({ block }: { block: Extract<ArticleBodyBlock, { type: "embed" }> }) {
   if (!isAllowedEmbedUrl(block.provider, block.url)) return null;
 
-  // iframe化可能なproviderの列挙は embedIframeSrc（twitter等は null を返す）に一元化し、
-  // ここでは戻り値の有無だけで実iframeとカードを分岐する（真実源を1箇所に保つ）。
+  // iframe化可能なproviderの列挙は embedIframeSrc に一元化し、ここでは戻り値の有無だけで
+  // 実iframeとカードを分岐する（真実源を1箇所に保つ）。
   const src = embedIframeSrc(block.provider, block.url, new URL(getSiteUrl()).hostname);
   if (src) {
+    const isTwitter = block.provider === "twitter";
     return (
       <div className="flex flex-col gap-1">
-        <div className="aspect-video w-full overflow-hidden rounded border border-neutral-300 dark:border-neutral-700">
+        <div
+          className={
+            isTwitter
+              ? "w-full overflow-y-auto rounded border border-neutral-300 dark:border-neutral-700"
+              : "aspect-video w-full overflow-hidden rounded border border-neutral-300 dark:border-neutral-700"
+          }
+          style={isTwitter ? { minHeight: 300, maxHeight: 750 } : undefined}
+        >
           <iframe
             src={src}
             loading="lazy"
-            allow="autoplay; encrypted-media; picture-in-picture; web-share"
-            allowFullScreen
+            {...(isTwitter
+              ? { sandbox: TWITTER_IFRAME_SANDBOX }
+              : { allow: "autoplay; encrypted-media; picture-in-picture; web-share", allowFullScreen: true })}
             referrerPolicy="strict-origin-when-cross-origin"
             title={EMBED_PROVIDER_LABELS[block.provider]}
-            className="h-full w-full border-0"
+            className={isTwitter ? "h-full min-h-[300px] w-full border-0" : "h-full w-full border-0"}
           />
         </div>
         {block.caption && <p className="text-sm text-neutral-600 dark:text-neutral-400">{block.caption}</p>}
@@ -395,11 +426,8 @@ function EmbedBlockView({ block }: { block: Extract<ArticleBodyBlock, { type: "e
         rel="noopener noreferrer"
         className="break-all text-sky-700 underline dark:text-sky-400"
       >
-        {block.url}
+        {EMBED_FALLBACK_LINK_TEXT[block.provider]}
       </a>
-      <p className="text-xs text-neutral-400 dark:text-neutral-500">
-        ※埋め込みは本番接続時に表示されます（現在はリンクのみのプレースホルダー表示です）
-      </p>
     </div>
   );
 }
