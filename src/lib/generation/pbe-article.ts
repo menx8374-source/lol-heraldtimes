@@ -23,6 +23,10 @@
  * を確認済みの経路でのみ呼ばれるため、PBE窓の判定は`runPbeArticleGeneration`側の早期returnに委ねる。
  * X取得の成否に関わらず、実行した時刻を`pbe-x-rate-limit.ts`（ファイルベースの簡易状態保存、
  * DBスキーマ変更なし）に記録し、次回以降のレート制限判定に使う。
+ *
+ * PBE-S6 F-PBE6-3: `Article.thumbnailUrl`（既存の任意String列、スキーマ変更なし）に
+ * `resolvePbeThumbnailUrl`（pbe-compose.ts）の結果を設定する。該当が無ければnullのままとし、
+ * 表示側`ArticleThumbnail`の既存カテゴリ既定サムネイルへのフォールバックに委ねる。
  */
 import { prisma } from "@/lib/prisma";
 import {
@@ -43,6 +47,7 @@ import {
   composePbeArticleBody,
   buildPbeArticleTitle,
   extractPbeVersionLabel,
+  resolvePbeThumbnailUrl,
   CDRAGON_SITE_URL,
 } from "@/lib/generation/pbe-compose";
 import { fetchPbeSourceTweets, type PbeSourceTweet } from "@/lib/collection/adapters/pbe-x-source";
@@ -186,6 +191,9 @@ export async function runPbeArticleGeneration(
     });
     const title = buildPbeArticleTitle(pbeVersion);
     const bodyText = bodyBlocksToText(body);
+    // PBE-S6 F-PBE6-3: サムネイル（チャンピオンのスプラッシュ→先頭アイテムのアイコン→null＝
+    // 呼び出し側ArticleThumbnailの既存カテゴリ既定にフォールバック）。
+    const thumbnailUrl = resolvePbeThumbnailUrl(championChanges, itemChanges);
 
     // sourceCount=1（CommunityDragon）を渡し、出典欠落チェックを通過させる（実際のArticleSourceも作成する）。
     const moderation = moderateArticleContent({ title, bodyText, sourceCount: 1 });
@@ -223,7 +231,7 @@ export async function runPbeArticleGeneration(
       if (existingArticle) {
         await tx.article.update({
           where: { id: existingArticle.id },
-          data: { title, body },
+          data: { title, body, thumbnailUrl },
         });
         return { status: "updated" as const, articleId: existingArticle.id, postId: post.id };
       }
@@ -234,6 +242,7 @@ export async function runPbeArticleGeneration(
           title,
           category: PBE_CATEGORY,
           body,
+          thumbnailUrl,
           publishedAt: now,
           status: "published",
           postId: post.id,

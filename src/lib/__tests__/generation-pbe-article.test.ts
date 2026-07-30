@@ -39,6 +39,7 @@ const PBE_ITEM = {
   from: [1038, 1037],
   to: [],
   inStore: true,
+  displayInItemSets: true, // PBE-S6: 実在の店売りアイテムのみを対象にする絞り込み条件
   iconPath: "/lol-game-data/assets/items/icons2d/3031.png",
 };
 
@@ -192,6 +193,15 @@ describe("runPbeArticleGeneration（PBE-S4 F-PBE4-2）", () => {
 
     const sources = await prisma.articleSource.findMany({ where: { articleId: article.id } });
     expect(sources.length).toBeGreaterThan(0);
+
+    // PBE-S6 F-PBE6-3: チャンピオン変更が無いこのフィクスチャでは、先頭アイテムのアイコンURLが
+    // thumbnailUrlに設定される。
+    expect(article.thumbnailUrl).toBe(
+      "https://raw.communitydragon.org/pbe/game/lol-game-data/assets/items/icons2d/3031.png",
+    );
+
+    // 冒頭サマリに件数を数える文言(チャンピオンN体・アイテムM件等)が出ない(PBE-S6 F-PBE6-2)。
+    expect(text).not.toMatch(/体・アイテム|体の変更|件の変更が確認されています/);
   });
 
   it("一意化: 同一pbeバージョンで再実行しても記事が重複せず、同一Article/Postをin-place上書き更新する（テスト4）", async () => {

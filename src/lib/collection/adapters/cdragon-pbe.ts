@@ -49,6 +49,15 @@ export type CDragonItem = {
   from: number[];
   to: number[];
   inStore: boolean;
+  /**
+   * 実測フィールド（PBE-S6 F-PBE6-1、`raw.communitydragon.org/.../items.json`をcurlで確認済み）。
+   * `inStore:true`のみでは削除済み/アリーナ等の専用アイテム（例 Deathfire Grasp・Eleisa's Miracle、
+   * 実測では`inStore:true`のまま残っている）や内部専用アイテム（クエスト/建造物系等）を除外できない。
+   * `inStore && displayInItemSets`の組み合わせのみが実際のSR通常ショップの通常アイテム集合と一致する
+   * ことを実データで確認済み（`diffItems`の絞り込みに使う）。任意フィールド（既存フィクスチャ・呼び出し
+   * 元との互換のため）。
+   */
+  displayInItemSets?: boolean;
   iconPath?: string;
 };
 

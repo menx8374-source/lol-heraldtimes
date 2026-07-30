@@ -3,6 +3,7 @@ import {
   composePbeArticleBody,
   buildPbeArticleTitle,
   extractPbeVersionLabel,
+  resolvePbeThumbnailUrl,
   PBE_ARTICLE_BADGE_TEXT,
   PBE_SKILL_DETAIL_NOTICE_TEXT,
   PBE_ARTICLE_SOURCE_TEXT,
@@ -87,8 +88,16 @@ describe("composePbeArticleBody（F-PBE4-1）", () => {
     expect(body[0]).toEqual({ type: "paragraph", text: PBE_ARTICLE_BADGE_TEXT });
     expect(body[1]).toEqual({
       type: "paragraph",
-      text: "PBE 16.16 時点で、チャンピオン1体・アイテム1件の変更が確認されています（スキル効果量の詳細は公式パッチノートで確定）。",
+      text: "PBE 16.16（テストサーバー）で確認された変更のまとめです。正式な数値は公式パッチノートで確定します。",
     });
+  });
+
+  it("冒頭サマリに件数を数える文言(チャンピオンN体・アイテムM件等)を出さない（PBE-S6 F-PBE6-2）", () => {
+    // championBlocks/itemBlocksが0件（＝以前は「チャンピオン0体」という不体裁な文言になっていた）でも
+    // 件数に一切言及しない。
+    const body = composePbeArticleBody({ pbeVersion: "16.16", championBlocks: [], itemBlocks: [] });
+    const text = body.map(blockText).join("\n");
+    expect(text).not.toMatch(/体・アイテム|体の変更|0体|件の変更が確認されています/);
   });
 
   it("チャンピオンの変更(基本ステータス/cost/cooldown)とアイテムの変更を逐語のまま含む（テスト2）", () => {
@@ -377,5 +386,33 @@ describe("composePbeArticleBody: Xツイート・人手キュレーション統�
       curationNotes: [curationNote()],
     });
     expect(() => parseArticleBody(body)).not.toThrow();
+  });
+});
+
+describe("resolvePbeThumbnailUrl（PBE-S6 F-PBE6-3: チャンピオン→アイテム→既定の優先順）", () => {
+  it("チャンピオン変更があれば公式スプラッシュURLを優先する", () => {
+    const url = resolvePbeThumbnailUrl(
+      [{ id: "Ahri" }],
+      [{ iconPath: "/lol-game-data/assets/ASSETS/Items/Icons2D/1001_Boots.png" }],
+    );
+    expect(url).toBe("https://ddragon.leagueoflegends.com/cdn/img/champion/splash/Ahri_0.jpg");
+  });
+
+  it("チャンピオン変更が無ければ先頭アイテムのアイコンURLを使う", () => {
+    const url = resolvePbeThumbnailUrl(
+      [],
+      [{ iconPath: "/lol-game-data/assets/ASSETS/Items/Icons2D/1001_Boots.png" }],
+    );
+    expect(url).toBe(
+      "https://raw.communitydragon.org/pbe/game/lol-game-data/assets/assets/items/icons2d/1001_boots.png",
+    );
+  });
+
+  it("チャンピオン・アイテムともに無ければnull(呼び出し側のカテゴリ既定サムネイルにフォールバック)", () => {
+    expect(resolvePbeThumbnailUrl([], [])).toBeNull();
+  });
+
+  it("先頭アイテムにiconPathが無い(壊れたURLを組み立てられない)場合はnullにフォールバックする", () => {
+    expect(resolvePbeThumbnailUrl([], [{ iconPath: undefined }])).toBeNull();
   });
 });

@@ -8,7 +8,7 @@
  *
  * 構成（brief F-PBE4-1）:
  * 1. 未確定バッジ段落（先頭固定）。
- * 2. 冒頭サマリ（数値集計のみの純テンプレ）。
+ * 2. 冒頭サマリ（簡潔な導入文のみ・ルール生成。PBE-S6 F-PBE6-2で件数を数える文言は削除した）。
  * 3. 目次（toc、既存パッチ記事と同じ構造を流用）。
  * 4. チャンピオンの変更（既存の3グループ振り分け=チャンピオンの強化/チャンピオンの弱体化/
  *    チャンピオンの調整（パッチ記事刷新S9で見出し文言変更）、`championBlocks[].direction`
@@ -29,6 +29,11 @@ import type { ArticleBodyBlock, ArticleBodyPatchChangeBlock } from "@/lib/articl
 import { isValidTweetStatusUrl } from "@/lib/embed";
 import type { PbeSourceTweet } from "@/lib/collection/adapters/pbe-x-source";
 import type { PbeCurationNote } from "@/lib/generation/pbe-curation";
+import type { PbeChampionChange } from "@/lib/generation/pbe-champion-diff";
+import type { PbeItemChange } from "@/lib/generation/pbe-item-diff";
+import { buildChampionSplashUrl } from "@/lib/generation/champion-splash";
+import { buildCDragonItemIconUrl } from "@/lib/collection/adapters/cdragon-pbe";
+import { isSafeImageUrl } from "@/lib/image-url";
 
 /** 先頭固定の未確定バッジ段落（brief記載の文言そのまま）。 */
 export const PBE_ARTICLE_BADGE_TEXT =
@@ -111,9 +116,36 @@ export function buildPbeArticleTitle(pbeVersion: string): string {
   return `【PBE先行】パッチ${pbeVersion}のチャンピオン・アイテム変更まとめ（テストサーバー・随時更新）`;
 }
 
-/** 冒頭サマリ（数値集計のみの純テンプレ、AI不使用）。 */
-function buildIntroSummary(pbeVersion: string, championCount: number, itemCount: number): string {
-  return `PBE ${pbeVersion} 時点で、チャンピオン${championCount}体・アイテム${itemCount}件の変更が確認されています（スキル効果量の詳細は公式パッチノートで確定）。`;
+/**
+ * 冒頭サマリ（AI不使用・ルール生成）。PBE-S6 F-PBE6-2: 件数を数える文言は削除する
+ * （「チャンピオン0体」等の不体裁を避ける。件数を出さない簡潔な導入文のみ）。
+ */
+function buildIntroSummary(pbeVersion: string): string {
+  return `PBE ${pbeVersion}（テストサーバー）で確認された変更のまとめです。正式な数値は公式パッチノートで確定します。`;
+}
+
+/**
+ * PBE記事のサムネイルURLを決定する（PBE-S6 F-PBE6-3、優先順: チャンピオンのスプラッシュ→
+ * 変更のあった先頭アイテムのアイコン→null）。`isSafeImageUrl`で検証し、壊れた/組み立てられない
+ * URLは次の優先順位にフォールバックする。すべて該当が無い/壊れている場合は null を返し、
+ * 呼び出し側（`ArticleThumbnail`）の既存カテゴリ既定サムネイル（例 `/default-thumb-patch-meta.svg`）
+ * へのフォールバックに委ねる（新規デフォルト画像を用意しなくても記事は壊れない）。
+ */
+export function resolvePbeThumbnailUrl(
+  championChanges: Pick<PbeChampionChange, "id">[],
+  itemChanges: Pick<PbeItemChange, "iconPath">[],
+): string | null {
+  const firstChampionId = championChanges[0]?.id;
+  if (firstChampionId) {
+    const splashUrl = buildChampionSplashUrl(firstChampionId);
+    if (isSafeImageUrl(splashUrl)) return splashUrl;
+  }
+
+  const firstItemIconPath = itemChanges[0]?.iconPath;
+  const itemIconUrl = buildCDragonItemIconUrl(firstItemIconPath);
+  if (isSafeImageUrl(itemIconUrl)) return itemIconUrl;
+
+  return null;
 }
 
 export type PbeComposeInput = {
@@ -194,7 +226,7 @@ export function composePbeArticleBody(input: PbeComposeInput): ArticleBodyBlock[
   blocks.push({ type: "paragraph", text: PBE_ARTICLE_BADGE_TEXT });
   blocks.push({
     type: "paragraph",
-    text: buildIntroSummary(pbeVersion, championBlocks.length, itemBlocks.length),
+    text: buildIntroSummary(pbeVersion),
   });
   if (tocItems.length > 0) {
     blocks.push({ type: "toc", items: tocItems });
