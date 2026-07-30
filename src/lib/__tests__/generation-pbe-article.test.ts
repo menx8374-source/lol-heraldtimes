@@ -63,6 +63,20 @@ function stubFetchWithDiff(pbeVersion: string, latestVersion: string) {
   );
 }
 
+/** pbe≠latestだがCDragon側のitem/champion差分が0件（PBE-S6でクリーン化された後の実データ相当）のフィクスチャ。 */
+function stubFetchNoDiff(pbeVersion: string, latestVersion: string) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      if (url.includes("/pbe/content-metadata.json")) return jsonResponse({ version: pbeVersion });
+      if (url.includes("/latest/content-metadata.json")) return jsonResponse({ version: latestVersion });
+      if (url.includes("/v1/items.json")) return jsonResponse([]); // item差分なし
+      if (url.includes("/v1/champion-summary.json")) return jsonResponse([]); // champion差分なし
+      throw new Error(`unexpected url in test: ${url}`);
+    }),
+  );
+}
+
 /** バージョン取得のみのスタブ（items/champion-summaryへは到達しないはずのテスト用）。 */
 function stubFetchVersionsOnly(pbeVersion: string | null, latestVersion: string | null) {
   vi.stubGlobal(
@@ -410,6 +424,130 @@ describe("runPbeArticleGeneration: Xツイートのopt-in配線・レート制�
     if (result.status !== "created") throw new Error("expected created");
     const article = await prisma.article.findUniqueOrThrow({ where: { id: result.articleId } });
     expect(bodyText(article.body)).not.toContain(PBE_X_SECTION_HEADING);
+  });
+});
+
+describe("runPbeArticleGeneration: no_diff判定を「全ソース空」に修正（PBE-S7）", () => {
+  it("CDragon0件（item/champion差分なし）でもXツイートがあれば記事が生成される（テスト1・不具合の再現と修正確認）", async () => {
+    process.env.PBE_ARTICLE_MODE = "on";
+    stubFetchNoDiff("16.16.8000032+branch.main.content.beta", "16.15.7996036+branch.releases-16-15");
+    const fetchTweets = vi.fn(async () => [sourceTweet()]);
+    const writeLastXFetchAt = vi.fn();
+
+    const result = await runPbeArticleGeneration(new Date("2026-07-29T00:00:00.000Z"), {
+      apiKey: "test-x-key",
+      fetchTweets,
+      readLastXFetchAt: () => null,
+      writeLastXFetchAt,
+    });
+
+    expect(fetchTweets).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe("created");
+    if (result.status !== "created") throw new Error("expected created");
+
+    const article = await prisma.article.findUniqueOrThrow({ where: { id: result.articleId } });
+    const text = bodyText(article.body);
+    expect(text).toContain(PBE_X_SECTION_HEADING);
+    expect(text).toContain("@Spideraxe30");
+  });
+
+  it("CDragon0件でも人手キュレーションがあれば記事が生成される（Xと同様に全ソース空判定に含む）", async () => {
+    process.env.PBE_ARTICLE_MODE = "on";
+    stubFetchNoDiff("16.16.8000032+branch.main.content.beta", "16.15.7996036+branch.releases-16-15");
+
+    const dir = mkdtempSync(path.join(tmpdir(), "pbe-curation-s7-"));
+    try {
+      const curationFilePath = path.join(dir, "pbe-curation.json");
+      writeFileSync(
+        curationFilePath,
+        JSON.stringify({
+          notes: [
+            { champion: "アジール", skill: "Q", text: "人手書き起こし内容", source: "https://x.com/Spideraxe30/status/1" },
+          ],
+        }),
+        "utf-8",
+      );
+
+      const result = await runPbeArticleGeneration(new Date("2026-07-29T00:00:00.000Z"), { curationFilePath });
+      expect(result.status).toBe("created");
+      if (result.status !== "created") throw new Error("expected created");
+      const article = await prisma.article.findUniqueOrThrow({ where: { id: result.articleId } });
+      expect(bodyText(article.body)).toContain("人手書き起こし内容");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("CDragon変更あり（従来ケース）は従来どおり生成される（回帰なし・テスト2）", async () => {
+    process.env.PBE_ARTICLE_MODE = "on";
+    stubFetchWithDiff("16.16.8000032+branch.main.content.beta", "16.15.7996036+branch.releases-16-15");
+
+    const result = await runPbeArticleGeneration(new Date("2026-07-29T00:00:00.000Z"));
+    expect(result.status).toBe("created");
+    if (result.status !== "created") throw new Error("expected created");
+    const article = await prisma.article.findUniqueOrThrow({ where: { id: result.articleId } });
+    expect(bodyText(article.body)).toContain("3300");
+  });
+
+  it("全ソース空（item/champion/tweets/curation全て0）ならno_diffで、既存記事はそのまま残す（テスト3）", async () => {
+    process.env.PBE_ARTICLE_MODE = "on";
+
+    // 1回目: CDragon差分ありで記事を作成しておく。
+    stubFetchWithDiff("16.16.8000032+branch.main.content.beta", "16.15.7996036+branch.releases-16-15");
+    const created = await runPbeArticleGeneration(new Date("2026-07-29T00:00:00.000Z"));
+    expect(created.status).toBe("created");
+    if (created.status !== "created") throw new Error("expected created");
+    const before = await prisma.article.findUniqueOrThrow({ where: { id: created.articleId } });
+
+    // 2回目: 同じpbeバージョンのまま全ソースが空（CDragon差分なし・X未設定・キュレーションなし）。
+    vi.unstubAllGlobals();
+    stubFetchNoDiff("16.16.8000032+branch.main.content.beta", "16.15.7996036+branch.releases-16-15");
+    const fetchTweets = vi.fn();
+    const result = await runPbeArticleGeneration(new Date("2026-07-29T01:00:00.000Z"), {
+      curationFilePath: path.join(tmpdir(), "does-not-exist-pbe-s7.json"),
+      fetchTweets,
+    });
+
+    expect(result).toEqual({ status: "no_diff" });
+    expect(fetchTweets).not.toHaveBeenCalled(); // X_API_KEY未設定のため呼ばれない(無駄打ちなし)
+
+    // 既存記事は消えず、内容もそのまま残る（ツイート等を消さない）。
+    const after = await prisma.article.findUniqueOrThrow({ where: { id: created.articleId } });
+    expect(after.body).toEqual(before.body);
+    expect(after.title).toBe(before.title);
+  });
+
+  it("X_API_KEY未設定・CDragonも0件ならno_diff（コスト安全設計は不変・テスト4）", async () => {
+    process.env.PBE_ARTICLE_MODE = "on";
+    stubFetchNoDiff("16.16.8000032+branch.main.content.beta", "16.15.7996036+branch.releases-16-15");
+    const fetchTweets = vi.fn();
+
+    const result = await runPbeArticleGeneration(new Date("2026-07-29T00:00:00.000Z"), { fetchTweets });
+
+    expect(result).toEqual({ status: "no_diff" });
+    expect(fetchTweets).not.toHaveBeenCalled();
+    const postCount = await prisma.post.count();
+    expect(postCount).toBe(0);
+  });
+
+  it("レート制限内(前回取得から間隔未満)ならCDragon0件でもfetchTweetsを呼ばずno_diffになる（無駄打ちなし）", async () => {
+    process.env.PBE_ARTICLE_MODE = "on";
+    stubFetchNoDiff("16.16.8000032+branch.main.content.beta", "16.15.7996036+branch.releases-16-15");
+    const now = new Date("2026-07-29T00:00:00.000Z");
+    const recentFetchAt = new Date("2026-07-28T20:00:00.000Z"); // 4時間前(既定6時間以内)
+    const fetchTweets = vi.fn(async () => [sourceTweet()]);
+    const writeLastXFetchAt = vi.fn();
+
+    const result = await runPbeArticleGeneration(now, {
+      apiKey: "test-x-key",
+      fetchTweets,
+      readLastXFetchAt: () => recentFetchAt,
+      writeLastXFetchAt,
+    });
+
+    expect(fetchTweets).not.toHaveBeenCalled();
+    expect(writeLastXFetchAt).not.toHaveBeenCalled();
+    expect(result).toEqual({ status: "no_diff" });
   });
 });
 

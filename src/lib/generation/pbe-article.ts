@@ -169,17 +169,26 @@ export async function runPbeArticleGeneration(
     const jaChampionNames = buildJaChampionNameMap(pbeChampionsJa);
     const championChanges = diffChampions(pbeChampions, latestChampions, jaChampionNames);
 
-    if (itemChanges.length === 0 && championChanges.length === 0) {
-      return { status: "no_diff" };
-    }
-
     const pbeVersion = extractPbeVersionLabel(versions.pbe);
 
-    // F-PBE5-1/F-PBE5-3: X（opt-in・コスト安全設計）と人手キュレーション（ファイルベース・任意）。
-    // ここまで到達した時点でpbe≠latest（PBE窓）・差分ありが確定しているため、記事化されない
-    // ケースへのX APIの無駄打ちは発生しない。
+    // PBE-S7 F-PBE7-1: X（opt-in・コスト安全設計）と人手キュレーション（ファイルベース・任意）を
+    // no_diff判定より前に取得する。ここまで到達した時点でpbe≠latest（PBE窓）は確定しているため、
+    // X APIのコスト安全設計（キー未設定/レート制限中はそもそも呼ばない）は維持されたまま、
+    // CDragon側のitem/champion差分が0件でもXツイート・キュレーションの有無を判定に含められる。
     const tweets = await maybeFetchPbeXTweets(now, options);
     const curationNotes = readPbeCurationNotes(pbeVersion, options.curationFilePath);
+
+    // PBE-S7 F-PBE7-2: 全ソース（CDragon item/champion・Xツイート・人手キュレーション）が
+    // 空のときだけno_diff。いずれか1つでも内容があれば記事を生成/in-place更新する
+    // （CDragon差分が0件でもXツイートがあれば「PBEのスキル変更（X）」セクションを含む記事になる）。
+    if (
+      itemChanges.length === 0 &&
+      championChanges.length === 0 &&
+      tweets.length === 0 &&
+      curationNotes.length === 0
+    ) {
+      return { status: "no_diff" };
+    }
 
     const body = composePbeArticleBody({
       pbeVersion,
