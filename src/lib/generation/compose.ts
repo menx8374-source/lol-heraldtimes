@@ -24,7 +24,7 @@ import { splitIntoSentences, excerptForQuote } from "@/lib/generation/text-utils
 import { parseThreadReses, extractAnchors, computeLineEmphasis, type ThreadRes } from "@/lib/generation/thread-format";
 import { selectScoredAnchorReses } from "@/lib/generation/reaction-select";
 import { isAllowedEmbedUrl, embedProviderForUrl, isValidTweetStatusUrl } from "@/lib/embed";
-import { findNgWord } from "@/lib/moderation/ng-words";
+import { findNgWord, maskNgWords } from "@/lib/moderation/ng-words";
 import { PATCH_NOTES_MIN_LENGTH } from "@/lib/collection/adapters/riot-datadragon";
 import { CHAMPIONS } from "@/lib/generation/title";
 import { isSafeImageUrl } from "@/lib/image-url";
@@ -309,6 +309,97 @@ export const REACTION_TRANSLATE_SYSTEM_PROMPT =
   '出力「Riotさん頼むよ、このチャンピオンぶっ壊れすぎて早急にナーフすべきでしょ」';
 
 /**
+ * NG婉曲言い換え（ng-soften、resel-S3 F-RS3-1）の system 指示。暴言・侮蔑・差別語を含む1文だけを、
+ * 意味・論点・批判対象・強度（褒めているか貶しているか等の向き）を保ったまま穏当な日本語に
+ * 言い換えさせる。事実・数値・固有名詞の改変・捏造・新情報追加・意味反転は禁止し、出力に
+ * NGワードを一切残さないことを明示する（呼び出し側`softenNgSentences`が`findNgWord`で再検査し、
+ * それでも残っていれば不採用にする安全側の設計と二重に担保する）。完全に静的なプロンプト
+ * （動的値を混ぜない、プロンプトキャッシュ整合のため）。
+ */
+export const NG_SOFTEN_SYSTEM_PROMPT =
+  "あなたはLoLまとめサイトの編集者です。渡す各文には暴言・侮蔑・差別語などのNGワードが含まれています。" +
+  "各文を1文ずつ、元の意味・論点・批判対象・強度（褒めているか貶しているか等の向き）を保ったまま、" +
+  "穏当で読みやすい日本語表現に言い換えてください。" +
+  "事実・数値・固有名詞（チャンピオン名/選手名/チーム名/スコア）は変えない・作ってはいけません。" +
+  "新しい情報を付け加えたり、意味を反転させたりしてはいけません。" +
+  "言い換え後の文に暴言・侮蔑・差別語などのNGワードを一切残してはいけません。" +
+  '出力はJSONのみとし、{"softened": [{"index": N, "text": "言い換え後の1文"}, ...]} ' +
+  "の形式にしてください（説明文・前置き・コードブロックは付けない）。";
+
+/**
+ * LLMが返した `{softened:[{index,text}]}` 生JSON値を検証・正規化する純関数（resel-S3 F-RS3-2）。
+ * index が入力の sentences に実在し、text が非空文字列であれば採用する。NGワード再検査は
+ * 呼び出し側の `softenNgSentences` で行う（ここでは形式の正規化のみ）。
+ */
+function normalizeSoftened(
+  raw: unknown,
+  sentences: { index: number; text: string }[],
+): Map<number, string> | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const obj = raw as Record<string, unknown>;
+  if (!Array.isArray(obj.softened)) return null;
+
+  const validIndices = new Set(sentences.map((s) => s.index));
+  const result = new Map<number, string>();
+  for (const rawEntry of obj.softened) {
+    if (typeof rawEntry !== "object" || rawEntry === null) continue;
+    const e = rawEntry as Record<string, unknown>;
+    const index = e.index;
+    if (typeof index !== "number" || !Number.isInteger(index) || !validIndices.has(index)) continue;
+    if (result.has(index)) continue;
+    if (typeof e.text !== "string" || e.text.trim().length === 0) continue;
+    result.set(index, e.text.trim());
+  }
+  return result;
+}
+
+/**
+ * NGワードを含む文（1文単位）をLLMでバッチ言い換えさせ、結果を`findNgWord`で再検査したうえで
+ * 採用分だけ返す（resel-S3 F-RS3-2）。渡された文をまとめて1回のLLM呼び出しに送る（翻訳と同様の
+ * バッチ設計）。安全側の設計:
+ * - 言い換え結果にまだNGワードが残る／空文字／欠落（LLMが該当indexを返さない）場合は採用しない
+ *   （`moderateArticleContent`の`ng_word`保留を招かないため）。
+ * - API失敗・空応答・JSON parse不能・全件不採用の場合は空Mapを返す（本体を止めない。呼び出し側は
+ *   採用できなかった分を従来の削除にフォールバックする）。
+ */
+async function softenNgSentences(
+  llmClient: LLMClient,
+  sentences: { index: number; text: string }[],
+): Promise<Map<number, string>> {
+  if (sentences.length === 0) return new Map();
+  try {
+    const task: GenerationTask = { kind: "ng-soften", sentences };
+    const raw = await llmClient.generate([
+      { role: "system", content: NG_SOFTEN_SYSTEM_PROMPT },
+      { role: "user", content: JSON.stringify(task) },
+    ]);
+    if (!raw || raw.trim().length === 0) return new Map();
+    const jsonStr = extractJsonObject(raw);
+    if (!jsonStr) return new Map();
+    const parsed: unknown = JSON.parse(jsonStr);
+    const normalized = normalizeSoftened(parsed, sentences);
+    if (!normalized) return new Map();
+
+    // 安全側の再検査: 言い換え結果にNGワードが残っていれば不採用にする(moderation保留の回避)。
+    const verified = new Map<number, string>();
+    for (const [index, text] of normalized) {
+      if (findNgWord(text) === null) verified.set(index, text);
+    }
+    return verified;
+  } catch {
+    return new Map();
+  }
+}
+
+/** NG文の表示上の扱いモード（resel-S3 F-RS3-3）。秘密情報ではなく任意設定、既定 soften。 */
+type NgRephraseMode = "soften" | "remove" | "mask";
+function ngRephraseMode(): NgRephraseMode {
+  const raw = process.env.NG_REPHRASE_MODE?.trim().toLowerCase();
+  if (raw === "remove" || raw === "mask") return raw;
+  return "soften";
+}
+
+/**
  * LLMが返した `{translations:[{index,text}]}` 生JSON値を検証・正規化する純関数（拡張E47 F-E47-1、
  * 拡張E51 F-E51-1でレス単位の全文翻訳に変更。行数一致の制約は撤廃）。index が入力に実在し、text が
  * 非空文字列であれば採用する。上位の `translateReactionLines` が最終的に null を返すかどうかを
@@ -546,60 +637,101 @@ function applyMinColorFallback(blocks: ArticleBodyReactionBlock[]): ArticleBodyR
 }
 
 /**
- * 行テキストのうち、NGワード（findNgWord）を含む文（splitIntoSentencesで分割した1文単位）だけを
- * 削除し、残りの文をそのまま結合して返す（拡張E36 F-E36-3、伏字(*)化からの置き換え）。
- * NGワードを含まない文は一切書き換えない（逐語維持）。全ての文がNGで削除された場合は空文字列を
- * 返す（呼び出し側でその行を落とす判断に使う）。
+ * 表示テキストの確定（NG処理・強調判定より前、純関数）。訳があれば改行区切りで行に分割（空行除去、
+ * 改行が無ければ1行）、訳が全く無い（5ch・reddit翻訳失敗）場合は抽出行（英語の逐語）そのまま
+ * （拡張E47 F-E47-1、拡張E51 F-E51-3でレス全体の自然な日本語全文からの組み立てに変更＝行数一致の
+ * 制約は撤廃）。
  */
-function removeNgSentences(text: string): string {
-  return splitIntoSentences(text)
-    .filter((sentence) => findNgWord(sentence) === null)
-    .join("");
-}
-
-/**
- * レス1件分の表示行（ArticleBodyReactionLine[]）を、抽出行（英語の逐語）と翻訳結果（reddit時のみ、
- * 自然な日本語の全文。無ければnull）から組み立てる（拡張E47 F-E47-1、拡張E51 F-E51-3でレス全体の
- * 自然な日本語全文からの組み立てに変更＝行数一致の制約は撤廃）。
- * - 訳がある → 訳文（1コメント分の自然な日本語）を改行で行に分割（空行は除去、改行が無ければ1行）
- *   して組む。text=日本語訳のみ（拡張E50で原文英語併記=originalの付与は廃止）。
- * - 訳が全く無い（5ch・reddit翻訳失敗） → 抽出行そのまま（originalなし、英語原文フォールバック）。
- * いずれの場合もNGワードを含む文はremoveNgSentencesで削除し、削除後に空になった行は落とす
- * （全行がNGで空になれば、そのレスは戻り値が空配列になり呼び出し側で不掲載になる）。
- * 強調(computeLineEmphasis)は表示テキスト（訳があれば日本語）に対して判定する。
- */
-function buildReactionDisplayLines(
-  extractedLines: string[],
-  translatedText: string | null,
-): ArticleBodyReactionBlock["lines"] {
+function resolveReactionDisplayLines(extractedLines: string[], translatedText: string | null): string[] {
   if (translatedText && translatedText.trim().length > 0) {
     const splitLines = translatedText
       .split(/\r?\n/)
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
-    const jaLines = splitLines.length > 0 ? splitLines : [translatedText.trim()];
-    const emphasis = computeLineEmphasis(jaLines);
-    const lines: ArticleBodyReactionBlock["lines"] = [];
-    jaLines.forEach((jaText, li) => {
-      const cleanedText = removeNgSentences(jaText);
-      if (cleanedText.length === 0) return;
-      lines.push({
-        text: cleanedText,
-        ...(emphasis[li] ? { emphasis: emphasis[li] } : {}),
+    return splitLines.length > 0 ? splitLines : [translatedText.trim()];
+  }
+  return extractedLines;
+}
+
+/**
+ * 複数レス分の表示行をまとめて確定し、**1記事(=1回のbuildReactionBlocks/buildXReactionBlocks呼び出し)
+ * につき`softenNgSentences`（ng-soften、LLM呼び出し）を最大1回**に統合する
+ * （resel-S3 コスト最適化リファインメント。以前はレス単位で呼んでおりNGを含むレスがN件あればLLM
+ * 呼び出しもN回だった＝翻訳のバッチ設計と不整合・コスト増・429リスク）。
+ * - 各エントリ（`key`はレスを一意に識別する呼び出し側のindex）ごとに`resolveReactionDisplayLines`で
+ *   表示テキストを確定し、`computeLineEmphasis`で強調判定・`splitIntoSentences`で文分割する
+ *   （ここまではLLM不使用）。
+ * - 全エントリ横断で`findNgWord`該当のNG文を1回だけ収集し、通し番号(index)を振る。NG文が1つも無ければ
+ *   `softenNgSentences`を含め一切のNG処理コストをかけない（コスト最小、既存動作と同じ）。
+ * - `NG_REPHRASE_MODE`が`soften`（既定）かつNG文が1件以上あるときだけ、収集した全NG文をまとめて
+ *   1回`softenNgSentences`に送る（翻訳と同様、記事単位のバッチ）。結果（再検査済み）で置換し、
+ *   採用できなかったNG文（API失敗・再検査でNG語残存等）は従来どおり削除にフォールバックする。
+ * - `remove`/`mask`モードは従来どおり（LLM呼び出しなし）。
+ * - 各エントリの最終行（`ArticleBodyReactionBlock["lines"]`、処理後に空になった行は除去）を`key`で
+ *   引けるMapとして返す。soften結果・表示・moderation非保留・フォールバックの挙動自体は不変（呼び出し
+ *   回数のみ削減）。
+ */
+async function buildReactionLinesBatch(
+  entries: { key: number; extractedLines: string[]; translatedText: string | null }[],
+  llmClient: LLMClient,
+): Promise<Map<number, ArticleBodyReactionBlock["lines"]>> {
+  const mode = ngRephraseMode();
+
+  const perEntry = entries.map((entry) => {
+    const displayLines = resolveReactionDisplayLines(entry.extractedLines, entry.translatedText);
+    const emphasis = computeLineEmphasis(displayLines);
+    const perLineSentences = displayLines.map((line) => splitIntoSentences(line));
+    return { key: entry.key, emphasis, perLineSentences };
+  });
+
+  // 全エントリ（=記事内の全レス）横断でNG文を1回だけ収集し、softenNgSentences用の通し番号を振る。
+  const ngEntries: { key: number; lineIndex: number; sentenceIndex: number; index: number; text: string }[] = [];
+  for (const { key, perLineSentences } of perEntry) {
+    perLineSentences.forEach((sentences, lineIndex) => {
+      sentences.forEach((sentence, sentenceIndex) => {
+        if (findNgWord(sentence) !== null) {
+          ngEntries.push({ key, lineIndex, sentenceIndex, index: ngEntries.length, text: sentence });
+        }
       });
     });
-    return lines;
   }
 
-  // 訳が全く無い（5ch・reddit翻訳失敗）: 抽出行そのまま（originalなし、英語原文フォールバック）。
-  const emphasis = computeLineEmphasis(extractedLines);
-  const lines: ArticleBodyReactionBlock["lines"] = [];
-  extractedLines.forEach((rawText, li) => {
-    const cleanedText = removeNgSentences(rawText);
-    if (cleanedText.length === 0) return;
-    lines.push({ text: cleanedText, ...(emphasis[li] ? { emphasis: emphasis[li] } : {}) });
-  });
-  return lines;
+  // NG文が1つも無ければ softenNgSentences を含め一切のNG処理コストをかけずそのまま返す(コスト最小)。
+  const softened =
+    mode === "soften" && ngEntries.length > 0
+      ? await softenNgSentences(
+          llmClient,
+          ngEntries.map((e) => ({ index: e.index, text: e.text })),
+        )
+      : new Map<number, string>();
+
+  const ngByPosition = new Map<string, { index: number; text: string }>();
+  for (const e of ngEntries) {
+    ngByPosition.set(`${e.key}:${e.lineIndex}:${e.sentenceIndex}`, { index: e.index, text: e.text });
+  }
+
+  const result = new Map<number, ArticleBodyReactionBlock["lines"]>();
+  for (const { key, perLineSentences, emphasis } of perEntry) {
+    const cleanedTexts = perLineSentences.map((sentences, lineIndex) =>
+      sentences
+        .map((sentence, sentenceIndex) => {
+          const ng = ngByPosition.get(`${key}:${lineIndex}:${sentenceIndex}`);
+          if (!ng) return sentence; // 非NG文は逐語のまま変更しない
+          if (mode === "mask") return maskNgWords(sentence);
+          if (mode === "soften") return softened.get(ng.index) ?? ""; // 採用不可は削除フォールバック
+          return ""; // remove（既定の削除挙動）
+        })
+        .filter((text) => text.length > 0)
+        .join(""),
+    );
+    const lines: ArticleBodyReactionBlock["lines"] = [];
+    cleanedTexts.forEach((cleanedText, li) => {
+      if (cleanedText.length === 0) return;
+      lines.push({ text: cleanedText, ...(emphasis[li] ? { emphasis: emphasis[li] } : {}) });
+    });
+    result.set(key, lines);
+  }
+  return result;
 }
 
 /**
@@ -614,9 +746,11 @@ function buildReactionDisplayLines(
  * 拡張E32: emphasizeに色(red/blue/purple/orange、拡張E36で緑を廃止し紫を追加)が指定されていれば
  * emphasisColor も付与する（任意・後方互換）。
  * 拡張E36 F-E36-3: 本文行にNGワードが含まれる場合、伏字化（拡張E27）ではなく該当する文（1文単位）
- * だけを removeNgSentences で削除する。削除後に空になった行は落とし、レスの全行が空になった
- * （＝NG文を除くと何も残らない＝意味が通らない）場合は、そのレス自体を反応ブロックに含めない
- * （moderateArticleContent の ng_word 保留を避けて公開する意図は維持しつつ、逐語＋伏字なしにする）。
+ * だけを処理する。resel-S3 F-RS3-2で「削除」から「LLMで婉曲に言い換えて表示」（既定soften、
+ * `NG_REPHRASE_MODE`）に変更（`buildReactionLinesBatch`参照。コスト最適化リファインメントで
+ * 1記事につきng-soften最大1回のバッチ処理に統合）。
+ * 処理後に空になった行は落とし、レスの全行が空になった（＝NG文を除くと何も残らない＝意味が通らない）
+ * 場合は、そのレス自体を反応ブロックに含めない（moderateArticleContent の ng_word 保留を招かない）。
  * 拡張E33: 反応ブロックが2件以上あるのにどのレスにも強調が付かない場合は、決定論フォールバック
  * （applyMinColorFallback）で最低限の色付き強調を補い、全黒字の記事が出ないようにする。
  * 拡張E41 F-E41-1: 選ばれた表示レスが実際に表示する行（keepLines指定があればその行、なければ全行）に
@@ -624,7 +758,7 @@ function buildReactionDisplayLines(
  * （全行・強調なし。追加した文脈レスがさらに参照する先は辿らない＝1階層のみ）。追加後は元スレ順
  * （index昇順）に整列してから組む。
  * 拡張E51 F-E51-1/F-E51-3: reddit翻訳はレス（コメント）全体の全文を渡し、自然な日本語の全文を
- * 改行区切りで行に分割して採用する（行数一致の制約は撤廃、buildReactionDisplayLines参照）。訳が
+ * 改行区切りで行に分割して採用する（行数一致の制約は撤廃、resolveReactionDisplayLines参照）。訳が
  * 全く無いレスのみ英語原文フォールバックにする。
  * リファクタリングS3 F-S3-3: `REACTION_SELECT_MODE`（既定 rules）が"llm"でない限り、AIによる
  * `selectReactionReses` を呼ばず、常に `selectMajorConversationCluster`（数値ルール＝アンカー会話
@@ -718,21 +852,31 @@ async function buildReactionBlocks(
     translations = await translateReactionLines(llmClient, toTranslate);
   }
 
+  // 拡張E51 F-E51-3: 訳（自然な日本語の全文）があればその改行区切りを行として採用する（行数一致は
+  // 問わない）。訳が全く無いレスのみ抽出行そのまま（英語原文フォールバック）。NG処理（既定soften＝
+  // 婉曲言い換え、resel-S3）・強調は表示テキスト（訳があれば日本語）に適用する。resel-S3
+  // コスト最適化リファインメント: 選定済み全レス分をまとめて`buildReactionLinesBatch`に渡し、
+  // ng-soften（LLM）を1記事(=この関数の1回の呼び出し)につき最大1回に抑える（レス単位で個別に
+  // 呼ぶとNGを含むレス数だけLLM呼び出しが増えコスト増・429リスクになるため）。
+  const reactionLinesByIndex = await buildReactionLinesBatch(
+    selectedIndices.map((i) => ({
+      key: i,
+      extractedLines: extractedLinesByIndex.get(i)!,
+      translatedText: translations?.get(i) ?? null,
+    })),
+    llmClient,
+  );
+
   const blocks = selectedIndices
     .map((i): ArticleBodyReactionBlock | null => {
       const res = reses[i];
       // 行indexの指定があれば元 res.lines からその行だけを逐語のまま抽出する（拡張E28 F-E28-2）。
       // 指定なし（null＝全行採用、または選定自体が無いフォールバック）はres.linesをそのまま使う。
       const extractedLines = extractedLinesByIndex.get(i)!;
-      const translatedText = translations?.get(i) ?? null;
       const anchors = extractAnchors(extractedLines).filter((n) => n !== res.number && knownNumbers.has(n));
       const isEmphasized = selection ? selection.emphasize.has(i) : false;
       const emphasisColor = isEmphasized ? (selection!.emphasize.get(i) ?? null) : null;
-
-      // 拡張E51 F-E51-3: 訳（自然な日本語の全文）があればその改行区切りを行として採用する
-      // （行数一致は問わない）。訳が全く無いレスのみ抽出行そのまま（英語原文フォールバック）。
-      // NG削除・強調は表示テキスト（訳があれば日本語）に適用する（buildReactionDisplayLines内）。
-      const cleanedLines = buildReactionDisplayLines(extractedLines, translatedText);
+      const cleanedLines = reactionLinesByIndex.get(i) ?? [];
       if (cleanedLines.length === 0) return null;
 
       return {
@@ -2083,8 +2227,9 @@ function formatCount(n: number): string {
 /**
  * X由来の親ポストへのリプライ/引用（`XReplyItem[]`）を、まとめ速報のレス（reaction）ブロック配列に
  * 変換する（X-reply-S3 F-XR3-2）。5ch/redditの`buildReactionBlocks`は`>>N`掲示板テキスト前提のため
- * 流用しづらく、X用に薄く新設する。翻訳（`translateReactionLines`）・NG削除（`removeNgSentences`、
- * `buildReactionDisplayLines`経由）・reaction型・表示（`ReactionGroupView`）は既存を共有する。
+ * 流用しづらく、X用に薄く新設する。翻訳（`translateReactionLines`）・NG処理（既定soften、
+ * `buildReactionLinesBatch`経由。1記事につきng-soften最大1回）・reaction型・表示（`ReactionGroupView`）は
+ * 既存を共有する。
  * resel-S2 F-RS2-3: 呼び出し側（post-pipeline.ts）が保存した選定用の広いプール（既定15件、
  * `defaultRepliesPoolMax()`）を受け取り、統一選定 `selectScoredAnchorReses`（score=likeCount優先＋
  * アンカー文脈=inReplyToId）で目安 `REACTION_MAX_RESES`（既定12）件＋文脈に絞ってから組み立てる。
@@ -2095,7 +2240,7 @@ function formatCount(n: number): string {
  * - `lines`: リプ/引用本文（逐語）。日本語（`lang`が"ja"、または`containsJapaneseText`判定）は
  *   翻訳不要。それ以外は既存`translateReactionLines`（reddit経路と同じバッチ翻訳）で自然な日本語に
  *   翻訳し、失敗時は原文のままフォールバックする（翻訳は選定後の対象だけに限定し、追加コストを抑える）。
- * - 各行に`removeNgSentences`を適用し、NG文除去後に空になったレスは落とす。
+ * - 各行にNG処理（既定soften＝婉曲言い換え、`NG_REPHRASE_MODE`）を適用し、処理後に空になったレスは落とす。
  * - `anchors`: Xの会話は`>>N`が無いため付けない。
  * - 表示順は`selectScoredAnchorReses`のチェーン整合順（親→子）。`number`は採用分の連番（1,2,3…）。
  */
@@ -2124,11 +2269,21 @@ export async function buildXReactionBlocks(
     .map(({ reply, index }) => ({ index, text: reply.text }));
   const translations = toTranslate.length > 0 ? await translateReactionLines(llmClient, toTranslate) : null;
 
+  // resel-S3 コスト最適化リファインメント: 選定済み全リプライ分をまとめて`buildReactionLinesBatch`に
+  // 渡し、ng-soften（LLM）を1記事(=この関数の1回の呼び出し)につき最大1回に抑える。
+  const reactionLinesByIndex = await buildReactionLinesBatch(
+    selectedIndices.map((index) => ({
+      key: index,
+      extractedLines: [xReplies[index].text],
+      translatedText: translations?.get(index) ?? null,
+    })),
+    llmClient,
+  );
+
   const blocks = selectedIndices
     .map((index): ArticleBodyReactionBlock | null => {
       const reply = xReplies[index];
-      const translatedText = translations?.get(index) ?? null;
-      const cleanedLines = buildReactionDisplayLines([reply.text], translatedText);
+      const cleanedLines = reactionLinesByIndex.get(index) ?? [];
       if (cleanedLines.length === 0) return null;
 
       const label = reply.isQuote ? "引用" : "返信";

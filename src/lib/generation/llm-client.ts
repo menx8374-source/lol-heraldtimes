@@ -39,6 +39,16 @@ export type GenerationTask =
        */
       kind: "reaction-translate";
       reses: { index: number; text: string }[];
+    }
+  | {
+      /**
+       * resel-S3 F-RS3-1: NGワード（暴言・侮蔑・差別語）を含む1文だけを、意味・論点・批判対象・
+       * 強度の向きを保ったまま穏当な日本語に言い換えさせるタスク。`sentences` は表示テキストから
+       * `findNgWord` で検出した1文単位の配列（`index` は呼び出し側が採番する連番）。
+       * 出力は `{ softened: [{ index, text: "言い換え後" }, ...] }` のJSONのみ。
+       */
+      kind: "ng-soften";
+      sentences: { index: number; text: string }[];
     };
 
 function renderIntro(task: Extract<GenerationTask, { kind: "intro" }>): string {
@@ -90,6 +100,15 @@ function renderReactionTranslate(): string {
   return "";
 }
 
+/**
+ * NG言い換え（resel-S3 F-RS3-1）のモック応答。決定論的モックは実際の言い換えを行わないため、
+ * 常に空文字を返す（＝呼び出し側の `softenNgSentences` がparse失敗として空Map扱いにし、
+ * NG文は従来どおり削除フォールバックになる。mockモードでの回帰ゼロ・無課金を担保する）。
+ */
+function renderNgSoften(): string {
+  return "";
+}
+
 function renderTask(task: GenerationTask): string {
   switch (task.kind) {
     case "intro":
@@ -104,6 +123,8 @@ function renderTask(task: GenerationTask): string {
       return renderReactionSelect(task);
     case "reaction-translate":
       return renderReactionTranslate();
+    case "ng-soften":
+      return renderNgSoften();
   }
 }
 
