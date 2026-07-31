@@ -38,7 +38,7 @@ import {
 import { getExemptSourceTypes, getHotnessConfig } from "@/lib/hotness/config";
 import { getPipelineConfig, getPublishScheduleMode } from "@/lib/pipeline/config";
 import { nextPublishSlots } from "@/lib/generation/publish-schedule";
-import { fetchTopReplies, isXRepliesModeOn, type XReplyItem } from "@/lib/collection/adapters/x";
+import { fetchTopReplies, isXRepliesModeOn, defaultRepliesPoolMax, type XReplyItem } from "@/lib/collection/adapters/x";
 
 /** metricsをincludeしたPostの型（Prismaの生成型から導出、DB非依存の純関数にも渡せる）。 */
 type PostWithMetrics = Prisma.PostGetPayload<{ include: { metrics: true } }>;
@@ -138,22 +138,18 @@ function isValidXReplyItem(value: unknown): value is XReplyItem {
 /**
  * Post.media から親Xポストのリプライ/引用（`xReplies`キー、X-reply-S2 F-XR2-2）を安全に取り出す。
  * DB読み出し時の防御的検証: 配列でない・要素が型不一致の場合はその要素（または全体）を捨てる
- * （記事を壊さない）。件数上限は`X_REPLIES_MAX`保存時に既に適用済みだが、直接DBを触られた場合に
- * 備えここでも同じ上限で切り詰める。他ソース・未設定時は空配列（compose.tsは従来どおりS2では未使用）。
+ * （記事を壊さない）。件数上限は保存時（`fetchTopReplies`の`max`）に既に適用済みだが、直接DBを
+ * 触られた場合に備えここでも同じ上限で切り詰める。
+ * resel-S2 F-RS2-3: 保存時の上限が選定用の広いプール`defaultRepliesPoolMax()`（既定15）に変わった
+ * （旧`X_REPLIES_MAX`既定8のままだと、統一選定`selectScoredAnchorReses`に渡る前にプールが8件へ
+ * 切り詰められ選定が機能しなくなるため）。表示件数の絞り込みは`buildXReactionBlocks`側の
+ * `selectScoredAnchorReses`（`REACTION_MAX_RESES`）が担う。他ソース・未設定時は空配列。
  */
 export function extractPostXReplies(media: Prisma.JsonValue | null): XReplyItem[] {
   if (!media || typeof media !== "object" || Array.isArray(media)) return [];
   const raw = (media as Record<string, unknown>).xReplies;
   if (!Array.isArray(raw)) return [];
-  const max = envIntLocal("X_REPLIES_MAX", 8);
-  return raw.filter(isValidXReplyItem).slice(0, max);
-}
-
-function envIntLocal(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+  return raw.filter(isValidXReplyItem).slice(0, defaultRepliesPoolMax());
 }
 
 /** `Post.media` に既に `xReplies` キーが存在するか（保存済み＝re-fetch防止ガード用）。 */
@@ -308,7 +304,10 @@ export async function generateArticlesFromHotPosts(
       // その記事の生成は従来どおり（xReplies無し）継続する。fetchTopReplies自体は内部で
       // 例外を握りつぶすが、prisma.post.updateのDB例外も含めここで最終的に握りつぶす。
       try {
-        const fetched = await fetchTopReplies(post.externalId, apiKey);
+        // resel-S2 F-RS2-3: 統一選定（score優先＋アンカー文脈）が目安12件＋文脈を絞り込めるよう、
+        // 表示件数(X_REPLIES_MAX)より広い選定用プール(既定15、defaultRepliesPoolMax())を取得して
+        // Post.media.xRepliesに保存する（API呼び出し回数は不変、同一ページ内の取得件数増加のみ）。
+        const fetched = await fetchTopReplies(post.externalId, apiKey, { max: defaultRepliesPoolMax() });
         const baseMedia =
           post.media && typeof post.media === "object" && !Array.isArray(post.media)
             ? (post.media as Record<string, unknown>)

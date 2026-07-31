@@ -22,6 +22,7 @@ import type { XReplyItem } from "@/lib/collection/adapters/x";
 import type { LLMClient, GenerationTask } from "@/lib/generation/llm-client";
 import { splitIntoSentences, excerptForQuote } from "@/lib/generation/text-utils";
 import { parseThreadReses, extractAnchors, computeLineEmphasis, type ThreadRes } from "@/lib/generation/thread-format";
+import { selectScoredAnchorReses } from "@/lib/generation/reaction-select";
 import { isAllowedEmbedUrl, embedProviderForUrl, isValidTweetStatusUrl } from "@/lib/embed";
 import { findNgWord } from "@/lib/moderation/ng-words";
 import { PATCH_NOTES_MIN_LENGTH } from "@/lib/collection/adapters/riot-datadragon";
@@ -78,8 +79,23 @@ const REACTION_HANDLE: Record<"5ch" | "reddit", string> = {
   reddit: "海外プレイヤーさん",
 };
 
-/** 1記事あたりの反応レス抜粋の上限件数（拡張E25 F-E25-1、超過分は先頭優先で切る）。 */
-const MAX_EXCERPT_RESES = 12;
+/**
+ * 1記事あたりの反応レス抜粋の目安上限件数（拡張E25 F-E25-1で新設、resel-S2 F-RS2-4でenv
+ * `REACTION_MAX_RESES` に統一。超過分は先頭優先で切る／統一選定ではtarget件数として使う）。
+ * 既定12（未設定・不正値のときのフォールバック）。
+ */
+const DEFAULT_REACTION_MAX_RESES = 12;
+function reactionMaxReses(): number {
+  const raw = Number(process.env.REACTION_MAX_RESES);
+  return Number.isInteger(raw) && raw > 0 ? raw : DEFAULT_REACTION_MAX_RESES;
+}
+
+/** 統一選定（selectScoredAnchorReses）で親を遡る段数（resel-S2 F-RS2-4、env `REACTION_ANCHOR_DEPTH`、既定1）。 */
+const DEFAULT_REACTION_ANCHOR_DEPTH = 1;
+function reactionAnchorDepth(): number {
+  const raw = Number(process.env.REACTION_ANCHOR_DEPTH);
+  return Number.isInteger(raw) && raw >= 0 ? raw : DEFAULT_REACTION_ANCHOR_DEPTH;
+}
 
 /**
  * 反応レス選別の方式（リファクタリング S3 F-S3-3）。要件「AIによる話題性判定・分類・スコアリングは禁止」
@@ -104,7 +120,7 @@ type ReactionSelection = {
 
 /**
  * LLMが返した `{keep, emphasize}` 生JSON値を防御的に検証・正規化する純関数（拡張E25 F-E25-1）。
- * 範囲外・非整数・重複を除去し、上限件数(MAX_EXCERPT_RESES)超過分は先頭優先で切る。
+ * 範囲外・非整数・重複を除去し、上限件数(reactionMaxReses())超過分は先頭優先で切る。
  * emphasize は必ず keep の部分集合に丸める。keep が1件も残らない場合は null（＝呼び出し側で
  * 「全レス・強調なし」にフォールバックさせる）を返す。
  */
@@ -162,7 +178,7 @@ function normalizeReactionSelection(raw: unknown, reses: ThreadRes[]): ReactionS
   for (const rawEntry of obj.keep) {
     const parsed = parseKeepEntry(rawEntry);
     if (!parsed || !isValidIndex(parsed.index) || keepLines.has(parsed.index)) continue;
-    if (keepLines.size >= MAX_EXCERPT_RESES) continue;
+    if (keepLines.size >= reactionMaxReses()) continue;
 
     const lineCount = reses[parsed.index].lines.length;
     const isValidLine = (n: unknown): n is number =>
@@ -426,7 +442,7 @@ async function translateReactionLines(
  * - スレ内に有効な `>>N` アンカーが1つも無い（＝全レスが連結成分サイズ1）場合のみ、最後の保険として
  *   全レスを採用する。
  * - 採用レスは元スレ順（レス番号ではなく元の配列index昇順、＝reses自体が元スレ順）で並べ、
- *   `MAX_EXCERPT_RESES` を超える分は先頭優先で切る。
+ *   `reactionMaxReses()` を超える分は先頭優先で切る。
  */
 export function selectMajorConversationCluster(reses: ThreadRes[]): number[] {
   const n = reses.length;
@@ -462,7 +478,7 @@ export function selectMajorConversationCluster(reses: ThreadRes[]): number[] {
 
   if (!hasAnchoredPair) {
     // アンカーが全く無いスレ（会話クラスタが作れない）は、最後の保険として全レスを採用する。
-    return reses.map((_, i) => i).slice(0, MAX_EXCERPT_RESES);
+    return reses.map((_, i) => i).slice(0, reactionMaxReses());
   }
 
   const clusters = new Map<number, number[]>();
@@ -493,7 +509,7 @@ export function selectMajorConversationCluster(reses: ThreadRes[]): number[] {
   return best
     .slice()
     .sort((a, b) => a - b)
-    .slice(0, MAX_EXCERPT_RESES);
+    .slice(0, reactionMaxReses());
 }
 
 /** 拡張E33 F-E33-1: 色付き強調の最低保証で使う色の割り当て順（red→blue→purple→orange、拡張E36で緑を廃止）。 */
@@ -614,6 +630,16 @@ function buildReactionDisplayLines(
  * `selectReactionReses` を呼ばず、常に `selectMajorConversationCluster`（数値ルール＝アンカー会話
  * クラスタ）でレスを選ぶ（AI選別・スコアリングを行わない）。強調は決定論（`computeLineEmphasis`＋
  * `applyMinColorFallback`）で付与する。
+ * resel-S2 F-RS2-2: **reddit かつ rulesモード**（`REACTION_SELECT_MODE`が"llm"でなく、かつLLM選定を
+ * 呼んでいない場合）だけ、上記の`selectMajorConversationCluster`を`selectScoredAnchorReses`（統一選定
+ * 「scoreの高いレスを選ぶ＋アンカーで連結した親レスも文脈採用」、`reaction-select.ts`）に置き換える。
+ * items = reses を `{index, score: res.score??0, parentIndex: res.parentNumber→numberToIndex or null}`
+ * に変換し、`target=reactionMaxReses()`（既定12）・`anchorDepth=reactionAnchorDepth()`（既定1）・
+ * `hardCap=target+3` で選ぶ。この選定の出力は既にチェーン整合順（親→子）の最終リストのため、
+ * 既存の「文脈1階層追加（>>Nアンカー）」ブロックは通さない（二重に文脈追加しない）。
+ * **5ch は selectMajorConversationCluster 据え置き**（score常時0で選定が無意味なため、回帰なし）。
+ * `REACTION_SELECT_MODE=llm` のとき（reddit含む、LLM選定成功・失敗いずれのフォールバックも）は
+ * 本スプリントで不変（従来どおり`selectMajorConversationCluster`＋アンカー文脈追加ブロックを使う）。
  */
 async function buildReactionBlocks(
   candidate: GenerationCandidateInput,
@@ -625,31 +651,52 @@ async function buildReactionBlocks(
   const knownNumbers = new Set(reses.map((r) => r.number));
   const numberToIndex = new Map(reses.map((r, i) => [r.number, i]));
 
-  const selection =
-    reactionSelectMode() === "llm" ? await selectReactionReses(llmClient, candidate.title, reses) : null;
-  // LLM選定を使わない（既定rulesモード）、またはLLM選定が失敗した場合（null）、拡張E43以前は
-  // 「全レス無制限」にフォールバックしており、話題バラバラの無関係レスが全部出てしまっていた。
-  // 拡張E43 F-E43-2で、代わりに>>Nアンカーで連結した会話クラスタのうち最大のもの（＝そのスレで
-  // 最も会話が集まっている中心的な議論）だけを採用するようにする（selectMajorConversationCluster）。
-  const baseIndices = selection
-    ? reses.map((_, i) => i).filter((i) => selection.keepLines.has(i))
-    : selectMajorConversationCluster(reses);
+  const mode = reactionSelectMode();
+  const selection = mode === "llm" ? await selectReactionReses(llmClient, candidate.title, reses) : null;
 
-  // 表示レスが実際に表示する行から>>Nアンカーを集め、参照先Nが存在し未選択なら文脈として追加する
-  // （1階層のみ＝baseIndicesの行だけを見る。追加した文脈レス自体の参照先は辿らない）。
-  const baseIndexSet = new Set(baseIndices);
-  const contextIndices = new Set<number>();
-  for (const i of baseIndices) {
-    const res = reses[i];
-    const lineIndices = selection?.keepLines.get(i) ?? null;
-    const displayedLines = lineIndices ? lineIndices.map((li) => res.lines[li]) : res.lines;
-    for (const anchorNumber of extractAnchors(displayedLines)) {
-      const anchorIndex = numberToIndex.get(anchorNumber);
-      if (anchorIndex === undefined || baseIndexSet.has(anchorIndex)) continue;
-      contextIndices.add(anchorIndex);
+  // resel-S2 F-RS2-2: reddit かつ rulesモード（selectReactionResesを呼んでいない="llm"でない）の
+  // ときだけ、統一選定（score優先＋アンカー文脈）に置き換える。5ch・llmモード（reddit含む、LLM選定
+  // 成功・失敗いずれも）は従来どおり（本スプリントで不変）。
+  const useUnifiedRedditSelection = sourceType === "reddit" && mode !== "llm";
+
+  let selectedIndices: number[];
+  if (useUnifiedRedditSelection) {
+    const items = reses.map((res, i) => ({
+      index: i,
+      score: res.score ?? 0,
+      parentIndex: res.parentNumber !== undefined ? (numberToIndex.get(res.parentNumber) ?? null) : null,
+    }));
+    const target = reactionMaxReses();
+    selectedIndices = selectScoredAnchorReses(items, {
+      target,
+      anchorDepth: reactionAnchorDepth(),
+      hardCap: target + 3,
+    });
+  } else {
+    // LLM選定を使わない（既定rulesモード、5ch）、またはLLM選定が失敗した場合（null）、拡張E43以前は
+    // 「全レス無制限」にフォールバックしており、話題バラバラの無関係レスが全部出てしまっていた。
+    // 拡張E43 F-E43-2で、代わりに>>Nアンカーで連結した会話クラスタのうち最大のもの（＝そのスレで
+    // 最も会話が集まっている中心的な議論）だけを採用するようにする（selectMajorConversationCluster）。
+    const baseIndices = selection
+      ? reses.map((_, i) => i).filter((i) => selection.keepLines.has(i))
+      : selectMajorConversationCluster(reses);
+
+    // 表示レスが実際に表示する行から>>Nアンカーを集め、参照先Nが存在し未選択なら文脈として追加する
+    // （1階層のみ＝baseIndicesの行だけを見る。追加した文脈レス自体の参照先は辿らない）。
+    const baseIndexSet = new Set(baseIndices);
+    const contextIndices = new Set<number>();
+    for (const i of baseIndices) {
+      const res = reses[i];
+      const lineIndices = selection?.keepLines.get(i) ?? null;
+      const displayedLines = lineIndices ? lineIndices.map((li) => res.lines[li]) : res.lines;
+      for (const anchorNumber of extractAnchors(displayedLines)) {
+        const anchorIndex = numberToIndex.get(anchorNumber);
+        if (anchorIndex === undefined || baseIndexSet.has(anchorIndex)) continue;
+        contextIndices.add(anchorIndex);
+      }
     }
+    selectedIndices = [...baseIndices, ...contextIndices].sort((a, b) => a - b);
   }
-  const selectedIndices = [...baseIndices, ...contextIndices].sort((a, b) => a - b);
 
   // 表示対象レスの実表示行（keepLines適用後、英語のまま）を先に確定しておく（翻訳バッチ・強調判定・
   // NG削除のいずれもこの行配列を起点にする）。
@@ -2038,14 +2085,19 @@ function formatCount(n: number): string {
  * 変換する（X-reply-S3 F-XR3-2）。5ch/redditの`buildReactionBlocks`は`>>N`掲示板テキスト前提のため
  * 流用しづらく、X用に薄く新設する。翻訳（`translateReactionLines`）・NG削除（`removeNgSentences`、
  * `buildReactionDisplayLines`経由）・reaction型・表示（`ReactionGroupView`）は既存を共有する。
+ * resel-S2 F-RS2-3: 呼び出し側（post-pipeline.ts）が保存した選定用の広いプール（既定15件、
+ * `defaultRepliesPoolMax()`）を受け取り、統一選定 `selectScoredAnchorReses`（score=likeCount優先＋
+ * アンカー文脈=inReplyToId）で目安 `REACTION_MAX_RESES`（既定12）件＋文脈に絞ってから組み立てる。
+ * - items = xReplies を `{index, score: likeCount, parentIndex: inReplyToId→同プール内でidが一致する
+ *   replyのindex（無ければnull＝親ポスト自身への返信や、プール外への参照）}` に変換する。
  * - `name`: `@handle`＋評価（👍いいね数 💬リプ数）＋`[引用]`/`[返信]`ラベル。数値はAPI値のまま
  *   カンマ区切り整形のみ（捏造禁止）。
  * - `lines`: リプ/引用本文（逐語）。日本語（`lang`が"ja"、または`containsJapaneseText`判定）は
  *   翻訳不要。それ以外は既存`translateReactionLines`（reddit経路と同じバッチ翻訳）で自然な日本語に
- *   翻訳し、失敗時は原文のままフォールバックする。
+ *   翻訳し、失敗時は原文のままフォールバックする（翻訳は選定後の対象だけに限定し、追加コストを抑える）。
  * - 各行に`removeNgSentences`を適用し、NG文除去後に空になったレスは落とす。
  * - `anchors`: Xの会話は`>>N`が無いため付けない。
- * - 表示順は`xReplies`の順（S2で評価降順ソート・件数上限適用済み）。`number`は採用分の連番（1,2,3…）。
+ * - 表示順は`selectScoredAnchorReses`のチェーン整合順（親→子）。`number`は採用分の連番（1,2,3…）。
  */
 export async function buildXReactionBlocks(
   xReplies: XReplyItem[],
@@ -2053,14 +2105,28 @@ export async function buildXReactionBlocks(
 ): Promise<ArticleBodyReactionBlock[]> {
   if (xReplies.length === 0) return [];
 
-  const toTranslate = xReplies
-    .map((reply, index) => ({ reply, index }))
+  const idToIndex = new Map(xReplies.map((r, i) => [r.id, i]));
+  const items = xReplies.map((reply, index) => ({
+    index,
+    score: reply.likeCount,
+    parentIndex: reply.inReplyToId !== undefined ? (idToIndex.get(reply.inReplyToId) ?? null) : null,
+  }));
+  const target = reactionMaxReses();
+  const selectedIndices = selectScoredAnchorReses(items, {
+    target,
+    anchorDepth: reactionAnchorDepth(),
+    hardCap: target + 3,
+  });
+
+  const toTranslate = selectedIndices
+    .map((index) => ({ reply: xReplies[index], index }))
     .filter(({ reply }) => reply.lang !== "ja" && !containsJapaneseText(reply.text))
     .map(({ reply, index }) => ({ index, text: reply.text }));
   const translations = toTranslate.length > 0 ? await translateReactionLines(llmClient, toTranslate) : null;
 
-  const blocks = xReplies
-    .map((reply, index): ArticleBodyReactionBlock | null => {
+  const blocks = selectedIndices
+    .map((index): ArticleBodyReactionBlock | null => {
+      const reply = xReplies[index];
       const translatedText = translations?.get(index) ?? null;
       const cleanedLines = buildReactionDisplayLines([reply.text], translatedText);
       if (cleanedLines.length === 0) return null;

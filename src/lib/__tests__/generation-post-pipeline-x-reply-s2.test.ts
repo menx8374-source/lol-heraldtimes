@@ -115,10 +115,13 @@ describe("extractPostXReplies（純関数、DB読み出し時の防御的検証�
     expect(result).toEqual([validItem]);
   });
 
-  it("件数上限(X_REPLIES_MAX既定8)で切り詰める", () => {
-    const items = Array.from({ length: 12 }, (_, i) => ({ ...validItem, id: `${i}` }));
+  it("件数上限(resel-S2: 選定用プールのdefaultRepliesPoolMax既定15)で切り詰める", () => {
+    // resel-S2 F-RS2-3: Post.media.xRepliesは選定用の広いプール(既定15)を保存するため、
+    // 読み出し側の防御的上限も同じ15に揃える(旧X_REPLIES_MAX=8のままだと統一選定に渡る前に
+    // プールが8件へ切り詰められ選定が機能しなくなる)。
+    const items = Array.from({ length: 20 }, (_, i) => ({ ...validItem, id: `${i}` }));
     const result = extractPostXReplies({ xReplies: items });
-    expect(result).toHaveLength(8);
+    expect(result).toHaveLength(15);
   });
 });
 
@@ -163,6 +166,35 @@ describe("generateArticlesFromHotPosts のX-reply-S2配線（F-XR2-2/F-XR2-3、o
     const candidateArg = mockedGenerate.mock.calls[0][0];
     expect(candidateArg.xReplies).toHaveLength(1);
     expect(candidateArg.xReplies![0].id).toBe("reply-1");
+  });
+
+  it("resel-S2 F-RS2-3: fetchTopRepliesにmax=defaultRepliesPoolMax()(既定15)が渡り、8件超のリプライもPost.media.xRepliesに広いプールとして保存される", async () => {
+    process.env.X_REPLIES_MODE = "on";
+    process.env.X_QUOTES_MODE = "off"; // リプライのみ(1コール)
+    process.env.X_API_KEY = "test-key";
+
+    // 12件返す(旧X_REPLIES_MAX=8を超える件数)。API呼び出し回数は変わらない(1コール)ことも確認する。
+    const manyTweets = Array.from({ length: 12 }, (_, i) => ({
+      id: `pool-${i}`,
+      text: `リプライ本文${i}`,
+      url: `https://x.com/reply_user/status/pool-${i}`,
+      createdAt: "2026-07-30T11:00:00.000Z",
+      likeCount: 100 - i,
+      replyCount: 0,
+      quoteCount: 0,
+      author: { userName: "reply_user" },
+    }));
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ tweets: manyTweets }) }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const post = await createXPost({ metrics: [{ score: 320, commentCount: 48, capturedAt: T0 }] });
+    await generateArticlesFromHotPosts(llm, { now: T0, championMap: null });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1); // API呼び出し回数は不変(同一ページ内の取得件数増加のみ)
+    const updatedPost = await prisma.post.findUniqueOrThrow({ where: { id: post.id } });
+    const media = updatedPost.media as { xReplies?: unknown[] };
+    // 12件全てが保存される(旧既定8のまま打ち切られていない=広いプールが実配線されている)。
+    expect(media.xReplies).toHaveLength(12);
   });
 
   it("X_REPLIES_MODE off ではfetchせずxReplies空(従来どおり・回帰ゼロ)", async () => {
