@@ -36,12 +36,17 @@ export function matchesKeyword(title: string, keywords: string[]): boolean {
  * リファクタリングS7b: `riot-news`（Riot公式ニュース）は出典自体が公式ニュースドメインで
  * URLルール分類済み（RiotNewsAdapter）のため、キーワード一致判定はバイパスし常に関連ありとする
  * （og:titleが日本語の商品的な見出しでDEFAULT_LOL_KEYWORDSに一致しないケースを誤って除外しないため）。
+ * X-reply-S1 F-XR1-1: `x`（X/旧Twitter）も同様にバイパスする。X検索クエリ（`x.ts`の
+ * DOMESTIC_QUERY/OVERSEAS_QUERY等）は既に `LoL OR LJL …` ＋ `min_faves:` ＋ `lang:` operatorで
+ * 発見段階でLoL関連＋人気度に絞り込み済みのため、title（＝ツイート先頭一文）の再判定は冗長かつ、
+ * ハッシュタグ等で一致した投稿を誤って除外する原因になっていた（実データでX saved=0を確認）。
  */
 export function isRelevantItem(
   item: { sourceType: SourceType; sourceUrl: string; title: string },
   config: RelevanceFilterConfig,
 ): boolean {
   if (item.sourceType === "riot-news") return true;
+  if (item.sourceType === "x") return true;
   if (item.sourceType === "reddit" && config.allowedSubreddits && config.allowedSubreddits.length > 0) {
     if (!isFromAllowedSubreddit(item.sourceUrl, config.allowedSubreddits)) return false;
   }

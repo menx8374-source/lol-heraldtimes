@@ -76,4 +76,13 @@ describe("isRelevantItem", () => {
     };
     expect(isRelevantItem(item, config)).toBe(true);
   });
+
+  it("x(X/旧Twitter)はキーワード一致有無に関わらず常に関連ありと判定する(X-reply-S1 F-XR1-1、検索クエリのoperatorで既に絞り込み済みのため)", () => {
+    const item = {
+      sourceType: "x" as const,
+      sourceUrl: "https://x.com/lol_jp_fan/status/1810000000000000099",
+      title: "#LJL 今日の試合、本当に熱かった", // DEFAULT_LOL_KEYWORDSに一致しない見出し想定
+    };
+    expect(isRelevantItem(item, config)).toBe(true);
+  });
 });

@@ -32,8 +32,13 @@ const DOMESTIC_QUERY =
   '(LoL OR LJL OR "リーグ・オブ・レジェンド" OR リグオブ) min_faves:100 lang:ja -filter:retweets -filter:replies';
 /** 海外パッチ反応向け既定クエリ（min_faves:1000でより厳選）。 */
 const OVERSEAS_QUERY = '("League of Legends" OR #LeagueOfLegends OR LoL) min_faves:1000 lang:en -filter:retweets';
+/**
+ * 議論特化クエリ（X-reply-S1 F-XR1-3）。いいねだけでなくリプライ多数＝賛否が割れた投稿を
+ * 発見段階で拾う。`min_replies:` はGetXAPIの確証あるoperator。
+ */
+const DISCUSSION_QUERY = '(LoL OR LJL OR "リーグ・オブ・レジェンド") min_replies:30 min_faves:30 lang:ja -filter:retweets';
 
-const DEFAULT_SEARCH_QUERIES = [DOMESTIC_QUERY, OVERSEAS_QUERY];
+const DEFAULT_SEARCH_QUERIES = [DOMESTIC_QUERY, OVERSEAS_QUERY, DISCUSSION_QUERY];
 
 /** tweetタイトルの最大長（本文の一部をそのまま短縮するのみ・捏造しない）。 */
 const TITLE_MAX_LENGTH = 40;
@@ -150,7 +155,9 @@ export function buildXItem(tweet: GetXApiTweet): RawCollectionItem | null {
     fetchedAt,
     externalId: tweet.id,
     score: tweet.likeCount ?? 0,
-    commentCount: tweet.replyCount ?? 0,
+    // X-reply-S1 F-XR1-2: 議論量（isControversialの入力）にリプライ＋引用を反映する。
+    // quoteCountはGetXApiTweet型に実在するフィールド（GetXAPIレスポンス仕様）のため合算する。
+    commentCount: (tweet.replyCount ?? 0) + (tweet.quoteCount ?? 0),
     author: tweet.author.userName,
     media: Array.isArray(tweet.media) && tweet.media.length > 0 ? tweet.media : undefined,
     category: "Xの反応",
@@ -185,7 +192,7 @@ export async function fetchTweetsForQuery(
 export type XAdapterOptions = {
   /** テスト・注入用。既定は env `X_API_KEY`。 */
   apiKey?: string;
-  /** 検索クエリ配列。既定は env `X_SEARCH_QUERIES`（`|||`区切り）、未設定時は既定クエリ2件。 */
+  /** 検索クエリ配列。既定は env `X_SEARCH_QUERIES`（`|||`区切り）、未設定時は既定クエリ3件（国内/海外/議論特化）。 */
   queries?: string[];
   product?: "Latest" | "Top";
   /** 現在時刻の注入点（テスト用、since:窓の計算に使う）。既定は実時刻。 */
@@ -199,9 +206,10 @@ export type XAdapterOptions = {
 };
 
 /**
- * X（旧Twitter、GetXAPI）から収集する live アダプタ（成長G7）。複数の検索クエリ（既定: 国内/海外の
- * 2クエリ）を直列で呼び、結果をマージ・重複排除して返す。`X_API_KEY` はこのクラス自体でも未設定なら
- * 空配列を返す（呼び出し側 adapters/index.ts の mock フォールバックと二重に安全側へ倒す）。
+ * X（旧Twitter、GetXAPI）から収集する live アダプタ（成長G7）。複数の検索クエリ（既定: 国内/海外/
+ * 議論特化の3クエリ、X-reply-S1 F-XR1-3）を直列で呼び、結果をマージ・重複排除して返す。`X_API_KEY`
+ * はこのクラス自体でも未設定なら空配列を返す（呼び出し側 adapters/index.ts の mock フォールバックと
+ * 二重に安全側へ倒す）。
  */
 export class XAdapter implements SourceAdapter {
   readonly sourceType = "x" as const;

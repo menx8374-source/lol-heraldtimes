@@ -33,19 +33,25 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe("純関数: buildXItem（GetXAPIレスポンス→RawCollectionItemマッピング、ブリーフ テスト1）", () => {
-  it("id/url/text/likeCount→score/replyCount→commentCount/author/createdAt/category を正しく転記する", () => {
+  it("id/url/text/likeCount→score/replyCount(+quoteCount)→commentCount/author/createdAt/category を正しく転記する", () => {
     const item = buildXItem(tweet());
     expect(item).toMatchObject({
       sourceUrl: "https://x.com/lol_jp_fan/status/1810000000000000099",
       content: "今日のLJL、レッドブルの動きが本当にヤバい。序盤から圧倒的だった。",
       externalId: "1810000000000000099",
       score: 320,
-      commentCount: 48,
+      commentCount: 48, // replyCount=48, quoteCount未指定(0)
       author: "lol_jp_fan",
       category: "Xの反応",
     });
     expect(item!.fetchedAt).toEqual(new Date("2026-07-27T10:00:00.000Z"));
     expect(item!.title.length).toBeGreaterThan(0);
+  });
+
+  it("X-reply-S1 F-XR1-2: commentCountはreplyCountとquoteCountの合算(議論量シグナル)", () => {
+    const item = buildXItem(tweet({ replyCount: 48, quoteCount: 12 }));
+    expect(item!.commentCount).toBe(60);
+    expect(item!.score).toBe(320); // score=likeCountの既存マッピングは不変
   });
 
   it("media（画像/動画）があれば転記し、無ければundefinedのまま", () => {
@@ -89,10 +95,21 @@ describe("純関数: buildTweetTitle（tweet本文からの短いタイトル生
 });
 
 describe("純関数: parseSearchQueries / appendSinceIfMissing", () => {
-  it("未設定・空文字列は既定クエリ2件(国内/海外)を返す", () => {
-    expect(parseSearchQueries(undefined)).toHaveLength(2);
-    expect(parseSearchQueries("")).toHaveLength(2);
-    expect(parseSearchQueries("   ")).toHaveLength(2);
+  it("未設定・空文字列は既定クエリ3件(国内/海外/議論特化、X-reply-S1 F-XR1-3)を返す", () => {
+    expect(parseSearchQueries(undefined)).toHaveLength(3);
+    expect(parseSearchQueries("")).toHaveLength(3);
+    expect(parseSearchQueries("   ")).toHaveLength(3);
+  });
+
+  it("X-reply-S1 F-XR1-3: 既定クエリ集合に議論特化クエリ(min_replies:を含む)が含まれる", () => {
+    const queries = parseSearchQueries(undefined);
+    expect(queries.some((q) => /min_replies:/.test(q))).toBe(true);
+  });
+
+  it("X_SEARCH_QUERIES(カスタムクエリ)指定時はそちらが優先される(既存挙動不変)", () => {
+    const parsed = parseSearchQueries("custom query only min_faves:5");
+    expect(parsed).toEqual(["custom query only min_faves:5"]);
+    expect(parsed.some((q) => /min_replies:/.test(q))).toBe(false);
   });
 
   it("|||区切りでカスタムクエリをパースできる", () => {
