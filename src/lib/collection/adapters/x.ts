@@ -118,6 +118,7 @@ export type GetXApiTweet = {
   conversationId?: string;
   media?: unknown[];
   author?: GetXApiTweetAuthor;
+  lang?: string;
 };
 
 export type GetXApiSearchResponse = {
@@ -187,6 +188,138 @@ export async function fetchTweetsForQuery(
     { logLabel: "x", context: `query="${query.slice(0, 60)}"`, timeoutMs },
   );
   return json?.tweets ?? [];
+}
+
+/**
+ * 親Xポストのリプライ/引用ツイート1件分（X-reply-S2 F-XR2-1）。`Post.media.xReplies`
+ * （既存JSON列、スキーマ変更なし）に保存し、`GenerationCandidate.xReplies` へ配線する
+ * （表示自体はS3、逐語のままAPI値を保持し捏造・OCR等は行わない）。
+ */
+export type XReplyItem = {
+  id: string;
+  text: string;
+  author: string;
+  likeCount: number;
+  replyCount: number;
+  quoteCount: number;
+  url: string;
+  lang?: string;
+  /** conversation_id由来(リプライ)=false / quoted_tweet_id由来(引用)=true。 */
+  isQuote: boolean;
+};
+
+/** `X_REPLIES_MODE`（既定on）。offのときpost-pipeline.tsは一切fetchしない（$0・回帰ゼロ）。 */
+export function isXRepliesModeOn(): boolean {
+  return process.env.X_REPLIES_MODE !== "off";
+}
+
+/** `X_QUOTES_MODE`（既定on）。offのとき `fetchTopReplies` は引用(quoted_tweet_id:)を取得しない。 */
+export function isXQuotesModeOn(): boolean {
+  return process.env.X_QUOTES_MODE !== "off";
+}
+
+/** リプライ/引用の合算取得件数上限（`X_REPLIES_MAX`、既定8）。 */
+function defaultRepliesMax(): number {
+  return envIntLocal("X_REPLIES_MAX", 8);
+}
+
+/** `conversation_id:` operatorでそのスレの返信を取得するクエリを組み立てる純関数。 */
+export function buildRepliesQuery(parentTweetId: string): string {
+  return `conversation_id:${parentTweetId} -filter:retweets`;
+}
+
+/** `quoted_tweet_id:` operatorで親を引用したツイートを取得するクエリを組み立てる純関数。 */
+export function buildQuotesQuery(parentTweetId: string): string {
+  return `quoted_tweet_id:${parentTweetId}`;
+}
+
+/**
+ * GetXAPIのtweet1件をXReplyItemに変換する純関数。id/text/url/author欠落、または
+ * 親ツイート自身（id===parentTweetId、親が自身の会話に含まれ得るため）はnull（呼び出し側でスキップ）。
+ */
+export function toXReplyItem(tweet: GetXApiTweet, parentTweetId: string, isQuote: boolean): XReplyItem | null {
+  if (!tweet.id || !tweet.text || !tweet.url || !tweet.author?.userName) return null;
+  if (tweet.id === parentTweetId) return null;
+  return {
+    id: tweet.id,
+    text: tweet.text,
+    author: tweet.author.userName,
+    likeCount: tweet.likeCount ?? 0,
+    replyCount: tweet.replyCount ?? 0,
+    quoteCount: tweet.quoteCount ?? 0,
+    url: tweet.url,
+    ...(tweet.lang ? { lang: tweet.lang } : {}),
+    isQuote,
+  };
+}
+
+export type FetchTopRepliesOptions = {
+  /** 既定: `isXQuotesModeOn()`（env `X_QUOTES_MODE`、既定on）。 */
+  quotesMode?: boolean;
+  /** 合算の取得件数上限。既定: `X_REPLIES_MAX`（既定8）。 */
+  max?: number;
+  product?: "Latest" | "Top";
+  timeoutMs?: number;
+};
+
+/**
+ * 親Xポスト（tweetId）のリプライ（＋X_QUOTES_MODE on時は引用も）を取得する
+ * （X-reply-S2 F-XR2-1）。呼び出し側（post-pipeline.ts）が「hot確定してAI記事化する親Xポスト」
+ * だけに限定して呼ぶことでコストを抑える（本関数自体はガードを持たない純粋な取得関数）。
+ * 失敗・タイムアウト・キー無し・0件はいずれも空配列（`fetchTweetsForQuery`が内部で
+ * 例外を投げず空配列にフォールバックする既存方針をそのまま踏襲）。
+ */
+export async function fetchTopReplies(
+  parentTweetId: string,
+  apiKey: string | undefined,
+  opts: FetchTopRepliesOptions = {},
+): Promise<XReplyItem[]> {
+  if (!apiKey || !parentTweetId) return [];
+
+  const {
+    quotesMode = isXQuotesModeOn(),
+    max = defaultRepliesMax(),
+    product = "Top",
+    timeoutMs = X_FETCH_TIMEOUT_MS,
+  } = opts;
+
+  try {
+    const items: XReplyItem[] = [];
+
+    const replyTweets = await fetchTweetsForQuery(buildRepliesQuery(parentTweetId), apiKey, { product, timeoutMs });
+    for (const tweet of replyTweets) {
+      const item = toXReplyItem(tweet, parentTweetId, false);
+      if (item) items.push(item);
+    }
+
+    if (quotesMode) {
+      const quoteTweets = await fetchTweetsForQuery(buildQuotesQuery(parentTweetId), apiKey, { product, timeoutMs });
+      for (const tweet of quoteTweets) {
+        const item = toXReplyItem(tweet, parentTweetId, true);
+        if (item) items.push(item);
+      }
+    }
+
+    // 同一tweetがリプライ集合と引用集合の両方に現れた場合の重複を排除する（先に入れた側＝
+    // リプライを優先。id重複で二重表示になるのを防ぐ）。
+    const seen = new Set<string>();
+    const deduped = items.filter((item) => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
+
+    deduped.sort((a, b) => {
+      const diff = b.likeCount - a.likeCount;
+      if (diff !== 0) return diff;
+      return b.replyCount - a.replyCount;
+    });
+
+    return deduped.slice(0, max);
+  } catch (err) {
+    console.error(`[x] リプライ/引用の取得に失敗しました (parentTweetId=${parentTweetId})`, err instanceof Error ? err.message : err);
+    return [];
+  }
 }
 
 export type XAdapterOptions = {

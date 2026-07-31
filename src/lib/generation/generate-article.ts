@@ -28,6 +28,7 @@ import {
   pickDeterministicChampionSplashUrl,
   type ChampionNameToIdMap,
 } from "@/lib/generation/champion-thumbnail";
+import type { XReplyItem } from "@/lib/collection/adapters/x";
 
 /** 1記事あたりの本文最低文字数（見出し・段落・引用の合計、F7受け入れ基準）。riot(fact形式)のみに適用。 */
 export const MIN_BODY_LENGTH = 300;
@@ -74,6 +75,12 @@ export type GenerationCandidate = {
    * 未設定/false（既定）では従来と完全同一（回帰ゼロ）。
    */
   isPatchPreview?: boolean;
+  /**
+   * X-reply-S2（F-XR2-3）: hot確定してAI記事化するx由来Postの親ポストに紐づくリプライ/引用
+   * （Post.media.xReplies由来）。**S2ではcomposeXBody等の本文組み立ては本フィールドを使わない**
+   * （表示刷新はS3。candidateに載るだけで記事の見た目は不変＝回帰ゼロ）。
+   */
+  xReplies?: XReplyItem[];
 };
 
 export type GeneratedArticle = {

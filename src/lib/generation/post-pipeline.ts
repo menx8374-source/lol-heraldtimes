@@ -38,6 +38,7 @@ import {
 import { getExemptSourceTypes, getHotnessConfig } from "@/lib/hotness/config";
 import { getPipelineConfig, getPublishScheduleMode } from "@/lib/pipeline/config";
 import { nextPublishSlots } from "@/lib/generation/publish-schedule";
+import { fetchTopReplies, isXRepliesModeOn, type XReplyItem } from "@/lib/collection/adapters/x";
 
 /** metricsをincludeしたPostの型（Prismaの生成型から導出、DB非依存の純関数にも渡せる）。 */
 type PostWithMetrics = Prisma.PostGetPayload<{ include: { metrics: true } }>;
@@ -115,6 +116,49 @@ export function extractPostPatchPreview(media: Prisma.JsonValue | null): boolean
     return (media as Record<string, unknown>).patchPreview === true;
   }
   return false;
+}
+
+/** `XReplyItem` 1件分の必須フィールド型を防御的に検証する（不正要素は捨てて記事を壊さない）。 */
+function isValidXReplyItem(value: unknown): value is XReplyItem {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === "string" &&
+    typeof v.text === "string" &&
+    typeof v.author === "string" &&
+    typeof v.likeCount === "number" &&
+    typeof v.replyCount === "number" &&
+    typeof v.quoteCount === "number" &&
+    typeof v.url === "string" &&
+    typeof v.isQuote === "boolean" &&
+    (v.lang === undefined || typeof v.lang === "string")
+  );
+}
+
+/**
+ * Post.media から親Xポストのリプライ/引用（`xReplies`キー、X-reply-S2 F-XR2-2）を安全に取り出す。
+ * DB読み出し時の防御的検証: 配列でない・要素が型不一致の場合はその要素（または全体）を捨てる
+ * （記事を壊さない）。件数上限は`X_REPLIES_MAX`保存時に既に適用済みだが、直接DBを触られた場合に
+ * 備えここでも同じ上限で切り詰める。他ソース・未設定時は空配列（compose.tsは従来どおりS2では未使用）。
+ */
+export function extractPostXReplies(media: Prisma.JsonValue | null): XReplyItem[] {
+  if (!media || typeof media !== "object" || Array.isArray(media)) return [];
+  const raw = (media as Record<string, unknown>).xReplies;
+  if (!Array.isArray(raw)) return [];
+  const max = envIntLocal("X_REPLIES_MAX", 8);
+  return raw.filter(isValidXReplyItem).slice(0, max);
+}
+
+function envIntLocal(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+/** `Post.media` に既に `xReplies` キーが存在するか（保存済み＝re-fetch防止ガード用）。 */
+function mediaHasXRepliesKey(media: Prisma.JsonValue | null): boolean {
+  return !!media && typeof media === "object" && !Array.isArray(media) && "xReplies" in (media as Record<string, unknown>);
 }
 
 /**
@@ -255,6 +299,33 @@ export async function generateArticlesFromHotPosts(
   let scheduledSlotCount = 0;
 
   for (const { post, hotness } of targetPosts) {
+    // X-reply-S2（F-XR2-2）: hot確定してAI記事化するx由来Postだけ、遅延でリプライ/引用を取得する。
+    // X_REPLIES_MODE off・X_API_KEY未設定・保存済み(re-fetch防止)のいずれかならfetchせず、
+    // 従来どおりPost.mediaから読み出すだけ（既存記事更新時等）にする（コスト安全・回帰ゼロ）。
+    const apiKey = process.env.X_API_KEY;
+    if (post.sourceType === "x" && isXRepliesModeOn() && apiKey && !mediaHasXRepliesKey(post.media)) {
+      // 補助処理は本体（記事生成）を絶対に止めない: リプライ取得やDB保存が失敗しても、
+      // その記事の生成は従来どおり（xReplies無し）継続する。fetchTopReplies自体は内部で
+      // 例外を握りつぶすが、prisma.post.updateのDB例外も含めここで最終的に握りつぶす。
+      try {
+        const fetched = await fetchTopReplies(post.externalId, apiKey);
+        const baseMedia =
+          post.media && typeof post.media === "object" && !Array.isArray(post.media)
+            ? (post.media as Record<string, unknown>)
+            : {};
+        await prisma.post.update({
+          where: { id: post.id },
+          data: { media: { ...baseMedia, xReplies: fetched } as Prisma.InputJsonValue },
+        });
+        post.media = { ...baseMedia, xReplies: fetched } as Prisma.JsonValue;
+      } catch (err) {
+        console.error(
+          `[x-reply] リプライ/引用の取得・保存に失敗しました (postId=${post.id})。記事生成は継続します。`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+    }
+
     const candidate: GenerationCandidate = {
       id: post.id,
       sourceType: post.sourceType as SourceType,
@@ -275,6 +346,9 @@ export async function generateArticlesFromHotPosts(
       // 未適用パッチの先行速報記事として速報バッジを本文に付与する（compose.ts側）。
       // 通常（フラグ無し）はfalseで従来と完全同一。
       isPatchPreview: extractPostPatchPreview(post.media),
+      // X-reply-S2（F-XR2-3）: 直上でfetchした結果、または既存記事更新時等はPost.mediaから配線する。
+      // S2ではcomposeXBodyが未使用のため記事の見た目には影響しない（表示刷新はS3）。
+      xReplies: extractPostXReplies(post.media),
     };
 
     try {
