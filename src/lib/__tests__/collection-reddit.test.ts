@@ -276,6 +276,111 @@ describe("純関数: スレッドダンプ構築（拡張E46 テスト3）", () 
   });
 });
 
+describe("純関数: スレッドダンプ構築（resel-S1 F-RS1-2: score注釈と親情報。FAIL修正で本文への>>N埋め込みを廃止し行頭parent注釈に変更）", () => {
+  it("scoreが取得済みのコメントは(score:M)付きでダンプされ、parseThreadResesがscoreとして読み戻す", () => {
+    const p = post({ title: "Patch thread" });
+    const comments = [comment({ id: "c1", body: "top comment", score: 42 })];
+    const dump = buildRedditThreadDump(p, comments);
+    expect(dump).toContain("2 (score:42): top comment");
+    const reses = parseThreadReses(dump);
+    expect(reses[1]).toEqual({ number: 2, lines: ["top comment"], score: 42 });
+  });
+
+  it("OP行(レス1)にはscore注釈を付けない", () => {
+    const p = post({ title: "Patch thread", selftext: "" });
+    const dump = buildRedditThreadDump(p, [comment({ score: 10 })]);
+    expect(dump.split("\n\n")[0]).toBe("1: Patch thread");
+  });
+
+  it("親が別コメント(t1_<id>)を指し、そのコメントが選抜済みなら行頭に(parent:N)注釈が付く（本文には>>Nを一切埋め込まない）", () => {
+    const p = post({ title: "Patch thread" });
+    const comments = [
+      comment({ id: "parent-c", body: "親コメント", score: 30 }), // res番号2になる
+      comment({ id: "child-c", body: "返信コメント", score: 5, parent_id: "t1_parent-c" }), // res番号3
+    ];
+    const dump = buildRedditThreadDump(p, comments);
+    expect(dump).toContain("3 (score:5 parent:2): 返信コメント");
+    expect(dump).not.toContain(">>2"); // 本文にアンカーを埋め込まない（回帰防止）
+    const reses = parseThreadReses(dump);
+    expect(reses[2]).toEqual({ number: 3, lines: ["返信コメント"], score: 5, parentNumber: 2 });
+  });
+
+  it("親が投稿本体(t3_<id>=OP)を指す場合はparent注釈を付けない", () => {
+    const p = post({ id: "post1", title: "Patch thread" });
+    const comments = [comment({ id: "c1", body: "OPへの直接返信", score: 5, parent_id: "t3_post1" })];
+    const dump = buildRedditThreadDump(p, comments);
+    const reses = parseThreadReses(dump);
+    expect(reses[1]).toEqual({ number: 2, lines: ["OPへの直接返信"], score: 5 });
+    expect(reses[1].parentNumber).toBeUndefined();
+  });
+
+  it("parent_idが無い/選抜対象外を指す場合はparent注釈を付けず落ちない", () => {
+    const p = post({ title: "Patch thread" });
+    const commentsNoParentId = [comment({ id: "c1", body: "普通のコメント", score: 5 })];
+    expect(() => buildRedditThreadDump(p, commentsNoParentId)).not.toThrow();
+    const reses1 = parseThreadReses(buildRedditThreadDump(p, commentsNoParentId));
+    expect(reses1[1].lines).toEqual(["普通のコメント"]);
+    expect(reses1[1].parentNumber).toBeUndefined();
+
+    const commentsDanglingParent = [
+      comment({ id: "c2", body: "親が選抜されなかったコメント", score: 5, parent_id: "t1_not-selected" }),
+    ];
+    const reses2 = parseThreadReses(buildRedditThreadDump(p, commentsDanglingParent));
+    expect(reses2[1].lines).toEqual(["親が選抜されなかったコメント"]); // ダングリング参照を付けない
+    expect(reses2[1].parentNumber).toBeUndefined();
+  });
+
+  it("5ch経路のダンプ（fixture文字列を直接パース）は不変（score/parent注釈も関与しない）", () => {
+    const fivechDump = "1: OP本文\n\n2: >>1\n5chの返信本文";
+    const reses = parseThreadReses(fivechDump);
+    expect(reses).toEqual([
+      { number: 1, lines: ["OP本文"] },
+      { number: 2, lines: [">>1", "5chの返信本文"] },
+    ]);
+  });
+});
+
+describe("回帰不変テスト（resel-S1 FAIL修正の最重要検証）: 本文に>>Nが混入しないため選定(selectMajorConversationCluster)が完全不変", () => {
+  it("parent_id付き実データ相当（Arctic Shift応答同様、全コメントにparent_idがあり一部t1_)でも、選定index集合・件数がparent注釈なしの場合と完全一致する", async () => {
+    const { parseThreadReses: parse } = await import("@/lib/generation/thread-format");
+    const { selectMajorConversationCluster } = await import("@/lib/generation/compose");
+
+    const p = post({ title: "Patch thread", selftext: "OP body" });
+    // 実データ同様、全コメントにparent_idがある（一部は別コメント=t1_、一部はOP=t3_）。
+    const commentsWithParent = [
+      comment({ id: "c1", body: "コメント1", score: 90, parent_id: "t3_abc123" }), // OP宛→アンカーなし res2
+      comment({ id: "c2", body: "コメント2", score: 80, parent_id: "t1_c1" }), // c1宛→res3
+      comment({ id: "c3", body: "コメント3", score: 70, parent_id: "t3_abc123" }), // OP宛 res4
+      comment({ id: "c4", body: "コメント4", score: 60, parent_id: "t1_c3" }), // c3宛 res5
+      comment({ id: "c5", body: "コメント5", score: 50, parent_id: "t3_abc123" }), // res6
+      comment({ id: "c6", body: "コメント6", score: 40, parent_id: "t3_abc123" }), // res7
+      comment({ id: "c7", body: "コメント7", score: 30, parent_id: "t3_abc123" }), // res8
+      comment({ id: "c8", body: "コメント8", score: 20, parent_id: "t3_abc123" }), // res9
+      comment({ id: "c9", body: "コメント9", score: 10, parent_id: "t3_abc123" }), // res10
+      comment({ id: "c10", body: "コメント10", score: 5, parent_id: "t3_abc123" }), // res11
+      comment({ id: "c11", body: "コメント11", score: 1, parent_id: "t3_abc123" }), // res12
+    ];
+    const commentsNoParent = commentsWithParent.map(({ parent_id: _parent_id, ...rest }) => rest);
+
+    const dumpWithParent = buildRedditThreadDump(p, commentsWithParent);
+    const dumpNoParent = buildRedditThreadDump(p, commentsNoParent);
+
+    // 本文にアンカーが一切混入していないことを直接確認（今回のFAILの原因箇所）。
+    expect(dumpWithParent).not.toMatch(/^>>\d+$/m);
+
+    const resesWithParent = parse(dumpWithParent);
+    const resesNoParent = parse(dumpNoParent);
+
+    const selectionWithParent = selectMajorConversationCluster(resesWithParent);
+    const selectionNoParent = selectMajorConversationCluster(resesNoParent);
+
+    // parent_id有無に関わらず選定(index集合・件数)が完全一致する＝回帰ゼロ。
+    expect(selectionWithParent).toEqual(selectionNoParent);
+    // 全レス(OP含む12件)が採用される（>>Nアンカーが本文に無いため「アンカー皆無→全レス採用」分岐になる）。
+    expect(selectionWithParent).toHaveLength(12);
+  });
+});
+
 describe("純関数: RawCollectionItem生成（拡張E46 テスト4）", () => {
   it("sourceUrl(絶対URL)/title/content(ダンプ)/fetchedAtを正しく生成する", () => {
     const p = post({ created_utc: 1000 });

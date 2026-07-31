@@ -206,6 +206,12 @@ export type XReplyItem = {
   lang?: string;
   /** conversation_id由来(リプライ)=false / quoted_tweet_id由来(引用)=true。 */
   isQuote: boolean;
+  /**
+   * 返信元ツイートID（resel-S1 F-RS1-3）。`GetXApiTweet.inReplyToId` を逐語保持（null/未設定は
+   * undefinedに正規化）。会話チェーン解決（アンカー文脈）はS2で使う想定。現時点では選定・表示に
+   * 使わない（`buildXReactionBlocks`の表示挙動は不変・回帰なし）。
+   */
+  inReplyToId?: string;
 };
 
 /** `X_REPLIES_MODE`（既定on）。offのときpost-pipeline.tsは一切fetchしない（$0・回帰ゼロ）。 */
@@ -218,9 +224,24 @@ export function isXQuotesModeOn(): boolean {
   return process.env.X_QUOTES_MODE !== "off";
 }
 
-/** リプライ/引用の合算取得件数上限（`X_REPLIES_MAX`、既定8）。 */
+/**
+ * リプライ/引用の合算取得件数上限（`X_REPLIES_MAX`、既定8）。`fetchTopReplies` を `max` 省略で呼ぶ
+ * 既存の呼び出し（post-pipeline.ts）はこの既定のまま＝回帰なし。
+ */
 function defaultRepliesMax(): number {
   return envIntLocal("X_REPLIES_MAX", 8);
+}
+
+/**
+ * 選定用プールの取得件数上限（resel-S1 F-RS1-3、既定15。env `X_REPLIES_POOL_MAX` で上書き可）。
+ * S2の「score優先＋アンカー文脈」統一選定（目安~12＋文脈余白）に足りるよう、`X_REPLIES_MAX`
+ * （下位互換のため既定8のまま変更しない）より広いプールを明示的に要求したい呼び出し側が
+ * `fetchTopReplies(id, key, { max: defaultRepliesPoolMax() })` のように opt-in で使う想定。
+ * `fetchTopReplies` の既定（`max` 省略時）は変えない（`X_REPLIES_MAX` のまま＝表示件数は回帰ゼロ）。
+ * 追加コストは同一ページ内の取得件数増加のみで、APIコール回数（クエリ数）は変わらない。
+ */
+export function defaultRepliesPoolMax(): number {
+  return envIntLocal("X_REPLIES_POOL_MAX", 15);
 }
 
 /** `conversation_id:` operatorでそのスレの返信を取得するクエリを組み立てる純関数。 */
@@ -250,13 +271,17 @@ export function toXReplyItem(tweet: GetXApiTweet, parentTweetId: string, isQuote
     url: tweet.url,
     ...(tweet.lang ? { lang: tweet.lang } : {}),
     isQuote,
+    ...(tweet.inReplyToId ? { inReplyToId: tweet.inReplyToId } : {}),
   };
 }
 
 export type FetchTopRepliesOptions = {
   /** 既定: `isXQuotesModeOn()`（env `X_QUOTES_MODE`、既定on）。 */
   quotesMode?: boolean;
-  /** 合算の取得件数上限。既定: `X_REPLIES_MAX`（既定8）。 */
+  /**
+   * 合算の取得件数上限。既定: `X_REPLIES_MAX`（既定8、下位互換）。より広い選定用プールが必要な
+   * 呼び出し側（resel-S2想定）は `defaultRepliesPoolMax()`（既定15）を明示的に渡す。
+   */
   max?: number;
   product?: "Latest" | "Top";
   timeoutMs?: number;

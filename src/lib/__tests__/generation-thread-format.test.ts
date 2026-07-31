@@ -28,6 +28,70 @@ describe("parseThreadReses", () => {
   });
 });
 
+describe("parseThreadReses（resel-S1 F-RS1-1: score注釈）", () => {
+  it("「N (score:M): 」形式はscore付きでパースされる", () => {
+    const reses = parseThreadReses("2 (score:15): 良いコメント\n2行目");
+    expect(reses).toEqual([{ number: 2, lines: ["良いコメント", "2行目"], score: 15 }]);
+  });
+
+  it("負のscoreも読み取る", () => {
+    const reses = parseThreadReses("3 (score:-7): 賛否両論のコメント");
+    expect(reses).toEqual([{ number: 3, lines: ["賛否両論のコメント"], score: -7 }]);
+  });
+
+  it("score注釈の無い既存「N: 」形式はscore=undefinedのまま（回帰なし）", () => {
+    const reses = parseThreadReses("1: 通常のレス");
+    expect(reses).toHaveLength(1);
+    expect(reses[0].score).toBeUndefined();
+    expect(reses[0]).toEqual({ number: 1, lines: ["通常のレス"] });
+  });
+
+  it("score注釈は本文(lines)に混入しない", () => {
+    const reses = parseThreadReses("5 (score:3): 本文だけが入る");
+    expect(reses[0].lines).toEqual(["本文だけが入る"]);
+    expect(reses[0].lines.join(" ")).not.toContain("score");
+  });
+
+  it("score付き複数レス・>>Nアンカー・OPパースが従来どおり回帰しない", () => {
+    const reses = parseThreadReses("1: OP本文\n\n2 (score:20): >>1\n返信本文\n\n3: 注釈なしレス");
+    expect(reses).toEqual([
+      { number: 1, lines: ["OP本文"] },
+      { number: 2, lines: [">>1", "返信本文"], score: 20 },
+      { number: 3, lines: ["注釈なしレス"] },
+    ]);
+  });
+});
+
+describe("parseThreadReses（resel-S1 FAIL修正: parent注釈のパース）", () => {
+  it("「N (score:M parent:P): 」形式はscoreとparentNumberの両方をパースする", () => {
+    const reses = parseThreadReses("3 (score:5 parent:2): 返信本文");
+    expect(reses).toEqual([{ number: 3, lines: ["返信本文"], score: 5, parentNumber: 2 }]);
+  });
+
+  it("「N (parent:P): 」形式（scoreなし）はparentNumberのみパースする", () => {
+    const reses = parseThreadReses("4 (parent:1): 親のみの注釈");
+    expect(reses).toEqual([{ number: 4, lines: ["親のみの注釈"], parentNumber: 1 }]);
+  });
+
+  it("「N (score:M): 」形式（parentなし）はscoreのみでparentNumberはundefined", () => {
+    const reses = parseThreadReses("5 (score:9): scoreのみ");
+    expect(reses[0].score).toBe(9);
+    expect(reses[0].parentNumber).toBeUndefined();
+  });
+
+  it("注釈なし「N: 」形式はscore・parentNumberともにundefined", () => {
+    const reses = parseThreadReses("6: 注釈なし");
+    expect(reses[0].score).toBeUndefined();
+    expect(reses[0].parentNumber).toBeUndefined();
+    expect(reses[0]).toEqual({ number: 6, lines: ["注釈なし"] });
+  });
+
+  it("score/parent注釈はいずれもlines(本文)に混入しない", () => {
+    const reses = parseThreadReses("7 (score:3 parent:1): 本文だけが入る");
+    expect(reses[0].lines).toEqual(["本文だけが入る"]);
+  });
+});
+
 describe("extractAnchors", () => {
   it("「>>N」形式のアンカーを出現順・重複排除で抽出する", () => {
     expect(extractAnchors([">>1", "同意 >>1", ">>3"])).toEqual([1, 3]);

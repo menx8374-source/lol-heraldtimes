@@ -118,6 +118,13 @@ export type RedditCommentData = {
    * 議論コメント枠は使わず、現状どおりscore降順のみで選抜する）。
    */
   num_replies?: number;
+  /**
+   * 親要素ID（resel-S1 F-RS1-2）。Arctic Shift `comments/search` の実応答で確認済み
+   * （`t1_<コメントid>`=親が別コメント／`t3_<投稿id>`=親が投稿本体＝OP）。
+   * `buildRedditThreadDump` が「親が選抜済みの別コメントのときだけ」`(parent:P)`を行頭注釈として付与する
+   * のに使う（本文には混入しない）。未設定・不明形式・親が選抜対象外なら付与しない（回帰なし）。
+   */
+  parent_id?: string;
 };
 
 type ArcticShiftPostsResponse = { data?: RedditPostData[] };
@@ -321,14 +328,44 @@ function buildOpBodyLine(post: RedditPostData): string {
 }
 
 /**
+ * コメントの `parent_id`（`t1_<id>`=親が別コメント／`t3_<id>`=親が投稿本体）から、選抜済みコメント内の
+ * 親のレス番号を解決する純関数（resel-S1 F-RS1-2）。親が投稿本体（OP）の場合・parent_idが無い/不明形式
+ * の場合・親が選抜対象外（`numberById` に無い）の場合は null（アンカーを付けない＝ダングリング参照防止）。
+ */
+function resolveParentAnchorNumber(parentId: string | undefined, numberById: Map<string, number>): number | null {
+  if (!parentId) return null;
+  const match = parentId.match(/^t1_(.+)$/);
+  if (!match) return null; // t3_（投稿本体=OP）または不明形式はアンカーを付けない
+  return numberById.get(match[1]) ?? null;
+}
+
+/**
  * OP＋上位コメントを `parseThreadReses` が解釈するスレッドダンプ（`"N: 本文\n\n…"`）に組み立てる純関数
- * （拡張E46 F-E46-1）。レス1=OP、レス2..=上位コメント本文（逐語・改行保持）。
- * redditは5chの`>>N`アンカーが無いためフラット一覧でよい。
+ * （拡張E46 F-E46-1、resel-S1 F-RS1-2でscore注釈と親情報を追加）。レス1=OP、レス2..=上位コメント本文
+ * （逐語・改行保持）。scoreが取得済みのコメントは `"N (score:M): 本文"`、親（`parent_id`）が選抜済みの
+ * 別コメント（OPではない）を指す場合は `"N (score:M parent:P): 本文"` の**行頭注釈**として付与する
+ * （両方無ければ注釈なしの `"N: 本文"`）。
+ *
+ * **重要（resel-S1 FAIL修正）**: 本文（body）には一切 `>>N` を埋め込まない。`extractAnchors` は本文中の
+ * `>>N` のみを見るため、本文に埋め込むと選定ロジック（`selectMajorConversationCluster`）の挙動が
+ * S1で変化してしまう（回帰）。親情報は本文から独立した行頭の`(parent:P)`注釈として持ち回り、
+ * `parseThreadReses` がパース時に`parentNumber`へ剥がす（S2で選定に使う想定）。parent_idが無い/
+ * 不明形式/親が選抜対象外の場合はparent注釈を付けない（回帰なし）。
  */
 export function buildRedditThreadDump(post: RedditPostData, comments: RedditCommentData[]): string {
   const parts = [`1: ${buildOpBodyLine(post)}`];
+  const numberById = new Map<string, number>();
+  comments.forEach((c, idx) => numberById.set(c.id, idx + 2));
+
   comments.forEach((c, idx) => {
-    parts.push(`${idx + 2}: ${(c.body ?? "").trim()}`);
+    const number = idx + 2;
+    const body = (c.body ?? "").trim();
+    const parentAnchor = resolveParentAnchorNumber(c.parent_id, numberById);
+    const annotationParts: string[] = [];
+    if (typeof c.score === "number") annotationParts.push(`score:${c.score}`);
+    if (parentAnchor !== null) annotationParts.push(`parent:${parentAnchor}`);
+    const annotation = annotationParts.length > 0 ? ` (${annotationParts.join(" ")})` : "";
+    parts.push(`${number}${annotation}: ${body}`);
   });
   return parts.join("\n\n");
 }

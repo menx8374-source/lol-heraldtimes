@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildQuotesQuery,
   buildRepliesQuery,
+  defaultRepliesPoolMax,
   fetchTopReplies,
   isXQuotesModeOn,
   isXRepliesModeOn,
@@ -71,6 +72,16 @@ describe("純関数: toXReplyItem", () => {
     expect(toXReplyItem(tweet({ text: "" }), "parent-1", false)).toBeNull();
     expect(toXReplyItem(tweet({ url: "" }), "parent-1", false)).toBeNull();
     expect(toXReplyItem(tweet({ author: undefined }), "parent-1", false)).toBeNull();
+  });
+
+  it("inReplyToIdを逐語保持する（resel-S1 F-RS1-3）", () => {
+    const item = toXReplyItem(tweet({ inReplyToId: "9990000000000000000" }), "parent-1", false);
+    expect(item!.inReplyToId).toBe("9990000000000000000");
+  });
+
+  it("inReplyToIdが無い/nullならundefinedのまま(回帰なし)", () => {
+    expect(toXReplyItem(tweet({ inReplyToId: null }), "parent-1", false)!.inReplyToId).toBeUndefined();
+    expect(toXReplyItem(tweet(), "parent-1", false)!.inReplyToId).toBeUndefined();
   });
 });
 
@@ -240,5 +251,71 @@ describe("fetchTopReplies（ブリーフ テスト1、実HTTPは叩かない）"
   it("0件応答は空配列", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ tweets: [] } as GetXApiSearchResponse)));
     await expect(fetchTopReplies("parent-1", "test-key", { quotesMode: false })).resolves.toEqual([]);
+  });
+});
+
+describe("fetchTopReplies プール上限拡大（resel-S1 F-RS1-3）", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("defaultRepliesPoolMax()は既定15を返す（S2opt-in用、X_REPLIES_MAXとは独立）", () => {
+    expect(defaultRepliesPoolMax()).toBe(15);
+  });
+
+  it("maxオプション省略時は従来どおりX_REPLIES_MAX(既定8)に打ち切る(回帰なし)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        const tweets: GetXApiTweet[] = Array.from({ length: 20 }, (_, i) =>
+          tweet({ id: `t-${i}`, url: `https://x.com/u/status/t-${i}`, likeCount: i }),
+        );
+        return jsonResponse({ tweets } as GetXApiSearchResponse);
+      }),
+    );
+    const items = await fetchTopReplies("parent-1", "test-key", { quotesMode: false });
+    expect(items).toHaveLength(8);
+  });
+
+  it("max: defaultRepliesPoolMax()を明示指定すると15件まで取れる(like降順・dedup・フォールバックは不変)", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        calls.push(url);
+        const tweets: GetXApiTweet[] = Array.from({ length: 20 }, (_, i) =>
+          tweet({ id: `t-${i}`, url: `https://x.com/u/status/t-${i}`, likeCount: i }),
+        );
+        return jsonResponse({ tweets } as GetXApiSearchResponse);
+      }),
+    );
+    const items = await fetchTopReplies("parent-1", "test-key", { quotesMode: false, max: defaultRepliesPoolMax() });
+    expect(items).toHaveLength(15);
+    expect(items[0].likeCount).toBe(19);
+    for (let i = 0; i < items.length - 1; i++) {
+      expect(items[i].likeCount).toBeGreaterThanOrEqual(items[i + 1].likeCount);
+    }
+    // クエリ数(API呼び出し回数)はプール拡大の影響を受けない(quotesMode:falseなので1コールのまま)。
+    expect(calls).toHaveLength(1);
+  });
+
+  it("プール拡大時もquotesMode onなら従来どおり2コール(クエリ数は増えない)", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        calls.push(url);
+        return jsonResponse({ tweets: [tweet({ id: `t-${calls.length}`, url: `https://x.com/u/status/t-${calls.length}` })] } as GetXApiSearchResponse);
+      }),
+    );
+    await fetchTopReplies("parent-1", "test-key", { quotesMode: true, max: defaultRepliesPoolMax() });
+    expect(calls).toHaveLength(2);
+  });
+
+  it("失敗時は空配列にフォールバックする(プール拡大後も既存方針不変)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({}, 500)));
+    await expect(
+      fetchTopReplies("parent-1", "test-key", { quotesMode: false, max: defaultRepliesPoolMax() }),
+    ).resolves.toEqual([]);
   });
 });
