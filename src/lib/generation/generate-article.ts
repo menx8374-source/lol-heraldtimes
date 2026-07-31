@@ -76,9 +76,10 @@ export type GenerationCandidate = {
    */
   isPatchPreview?: boolean;
   /**
-   * X-reply-S2（F-XR2-3）: hot確定してAI記事化するx由来Postの親ポストに紐づくリプライ/引用
-   * （Post.media.xReplies由来）。**S2ではcomposeXBody等の本文組み立ては本フィールドを使わない**
-   * （表示刷新はS3。candidateに載るだけで記事の見た目は不変＝回帰ゼロ）。
+   * X-reply-S2（F-XR2-3）で配線、X-reply-S3（F-XR3-1）でcomposeXBodyが使用: hot確定してAI記事化する
+   * x由来Postの親ポストに紐づくリプライ/引用（Post.media.xReplies由来）。1件以上あるとき
+   * composeXBodyが「元ポストembed→反応まとめ見出し→reactionブロック」の構成に使う。未設定/空配列は
+   * 従来構成のまま（回帰ゼロ）。
    */
   xReplies?: XReplyItem[];
 };

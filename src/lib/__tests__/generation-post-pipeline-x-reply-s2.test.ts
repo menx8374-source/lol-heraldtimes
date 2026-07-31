@@ -2,7 +2,8 @@
  * X-reply-S2: extractPostXReplies（F-XR2-2、純関数の防御的検証）と、
  * generateArticlesFromHotPosts経由の遅延fetch＆Post.media保存＆candidate配線（F-XR2-2/F-XR2-3）の
  * 結合テスト（専用テストDB、実際にPrisma経由で書き込む。GetXAPI呼び出しは`fetch`をstubして検証、
- * 実HTTPは叩かない）。**S2では表示（composeXBody）は不変**であることも併せて確認する（回帰ゼロ）。
+ * 実HTTPは叩かない）。表示（composeXBody）はX-reply-S3でxRepliesを使う構成に刷新されたため、
+ * xReplies有りの結合テストはS3仕様（反応まとめブロックを含む）に合わせて更新している。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/prisma";
@@ -254,7 +255,7 @@ describe("generateArticlesFromHotPosts のX-reply-S2配線（F-XR2-2/F-XR2-3、o
     expect(media.xReplies).toEqual([]);
   });
 
-  it("表示回帰なし: composeXBody由来の記事本文はxReplies有無に関わらず同一(S2では未使用)", async () => {
+  it("表示連携: candidateに配線されたxRepliesがcomposeXBody(X-reply-S3)の反応まとめに使われる", async () => {
     process.env.X_REPLIES_MODE = "on";
     process.env.X_QUOTES_MODE = "off";
     process.env.X_API_KEY = "test-key";
@@ -269,9 +270,9 @@ describe("generateArticlesFromHotPosts のX-reply-S2配線（F-XR2-2/F-XR2-3、o
 
     const article = await prisma.article.findUniqueOrThrow({ where: { postId: post.id } });
     const body = article.body as { type: string }[];
-    // 既存のx記事本文の構成(heading/embed or quote等)のみで、xReplies由来の新種別ブロックは無い。
-    expect(body.some((b) => b.type === "reaction")).toBe(false);
-    const knownTypes = new Set(["heading", "paragraph", "quote", "embed"]);
+    // X-reply-S3: xRepliesが載っているので、composeXBodyがreactionブロック(反応まとめ)を含む構成になる。
+    expect(body.some((b) => b.type === "reaction")).toBe(true);
+    const knownTypes = new Set(["heading", "paragraph", "quote", "embed", "reaction"]);
     for (const block of body) {
       expect(knownTypes.has(block.type)).toBe(true);
     }

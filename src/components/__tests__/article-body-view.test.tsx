@@ -874,3 +874,58 @@ describe("ArticleBodyView（redditSourceブロック、Reddit-source F-RS-3）",
     expect(html).not.toContain("<img");
   });
 });
+
+describe("ArticleBodyView（X反応記事の元ポストembed→反応まとめ, X-reply-S3 F-XR3-3）", () => {
+  const blocks: ArticleBodyBlock[] = [
+    { type: "heading", text: "Xでの反応" },
+    { type: "paragraph", text: "導入段落。" },
+    { type: "embed", provider: "twitter", url: "https://x.com/lol_jp_fan/status/1234567890" },
+    { type: "heading", text: "反応まとめ" },
+    {
+      type: "reaction",
+      number: 1,
+      name: "@na_fan1 ・ 👍1,234 💬56 [返信]",
+      lines: [{ text: "序盤の集団戦が全てだった" }],
+    },
+    {
+      type: "reaction",
+      number: 2,
+      name: "@jp_fan2 ・ 👍10 💬2 [引用]",
+      lines: [{ text: "このピック強い" }],
+    },
+    { type: "paragraph", text: "結び段落。" },
+  ];
+  const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+
+  it("元ポストのtwitter embed(iframe)が描画される", () => {
+    expect(html).toContain("<iframe");
+    expect(html).toContain("https://platform.twitter.com/embed/Tweet.html?id=1234567890");
+  });
+
+  it("反応まとめ見出しの後にreaction群が1枠(divide-y)にまとまる", () => {
+    const headingIndex = html.indexOf("反応まとめ");
+    const groupIndex = html.indexOf("divide-y");
+    expect(headingIndex).toBeGreaterThan(-1);
+    expect(groupIndex).toBeGreaterThan(headingIndex);
+    expect(html.match(/divide-y/g)?.length).toBe(1);
+  });
+
+  it("@handle・評価(👍/💬)・引用/返信ラベルが読める(name表示に含まれる)", () => {
+    expect(html).toContain("@na_fan1");
+    expect(html).toContain("👍1,234");
+    expect(html).toContain("💬56");
+    expect(html).toContain("[返信]");
+    expect(html).toContain("@jp_fan2");
+    expect(html).toContain("[引用]");
+  });
+
+  it("dangerouslySetInnerHTMLは使わない(コンポーネントソースに不在、既存確認の再掲)", async () => {
+    const fs = await import("node:fs/promises");
+    const src = await fs.readFile(new URL("../article-body-view.tsx", import.meta.url), "utf-8");
+    expect(src).not.toContain("dangerouslySetInnerHTML=");
+  });
+
+  it("崩れずレンダリングされる(例外を投げない)", () => {
+    expect(() => renderToStaticMarkup(<ArticleBodyView blocks={blocks} />)).not.toThrow();
+  });
+});

@@ -18,6 +18,7 @@ import {
   type ArticleBodyReactionBlock,
 } from "@/lib/article-body";
 import type { SourceType } from "@/lib/collection/types";
+import type { XReplyItem } from "@/lib/collection/adapters/x";
 import type { LLMClient, GenerationTask } from "@/lib/generation/llm-client";
 import { splitIntoSentences, excerptForQuote } from "@/lib/generation/text-utils";
 import { parseThreadReses, extractAnchors, computeLineEmphasis, type ThreadRes } from "@/lib/generation/thread-format";
@@ -62,6 +63,13 @@ export type GenerationCandidateInput = {
    * trueのとき本文先頭に速報バッジ段落を追加する。未設定/false（既定）では従来と完全同一。
    */
   isPatchPreview?: boolean;
+  /**
+   * X-reply-S3（F-XR3-1）: hot確定してAI記事化するx由来Postの親ポストに紐づくリプライ/引用
+   * （S2でcandidateに配線済み・評価降順ソート＋件数上限適用済み）。composeXBodyが1件以上あるとき
+   * だけ「元ポストembed→反応まとめ見出し→reactionブロック列挙」の構成に使う。未設定/空配列は
+   * 従来構成のまま（回帰ゼロ）。
+   */
+  xReplies?: XReplyItem[];
 };
 
 /** レス投稿者の匿名化ハンドル（実名・個人特定情報は出さない）。ソース種別ごとに固定。 */
@@ -2020,16 +2028,70 @@ async function translateXContentIfNeeded(llmClient: LLMClient, text: string): Pr
   return result && result.trim().length > 0 ? result.trim() : trimmed;
 }
 
+/** 数値を桁区切り(カンマ)に整形するだけの純関数（捏造せずAPI値の見た目だけ整える）。 */
+function formatCount(n: number): string {
+  return Number.isFinite(n) ? n.toLocaleString("en-US") : "0";
+}
+
+/**
+ * X由来の親ポストへのリプライ/引用（`XReplyItem[]`）を、まとめ速報のレス（reaction）ブロック配列に
+ * 変換する（X-reply-S3 F-XR3-2）。5ch/redditの`buildReactionBlocks`は`>>N`掲示板テキスト前提のため
+ * 流用しづらく、X用に薄く新設する。翻訳（`translateReactionLines`）・NG削除（`removeNgSentences`、
+ * `buildReactionDisplayLines`経由）・reaction型・表示（`ReactionGroupView`）は既存を共有する。
+ * - `name`: `@handle`＋評価（👍いいね数 💬リプ数）＋`[引用]`/`[返信]`ラベル。数値はAPI値のまま
+ *   カンマ区切り整形のみ（捏造禁止）。
+ * - `lines`: リプ/引用本文（逐語）。日本語（`lang`が"ja"、または`containsJapaneseText`判定）は
+ *   翻訳不要。それ以外は既存`translateReactionLines`（reddit経路と同じバッチ翻訳）で自然な日本語に
+ *   翻訳し、失敗時は原文のままフォールバックする。
+ * - 各行に`removeNgSentences`を適用し、NG文除去後に空になったレスは落とす。
+ * - `anchors`: Xの会話は`>>N`が無いため付けない。
+ * - 表示順は`xReplies`の順（S2で評価降順ソート・件数上限適用済み）。`number`は採用分の連番（1,2,3…）。
+ */
+export async function buildXReactionBlocks(
+  xReplies: XReplyItem[],
+  llmClient: LLMClient,
+): Promise<ArticleBodyReactionBlock[]> {
+  if (xReplies.length === 0) return [];
+
+  const toTranslate = xReplies
+    .map((reply, index) => ({ reply, index }))
+    .filter(({ reply }) => reply.lang !== "ja" && !containsJapaneseText(reply.text))
+    .map(({ reply, index }) => ({ index, text: reply.text }));
+  const translations = toTranslate.length > 0 ? await translateReactionLines(llmClient, toTranslate) : null;
+
+  const blocks = xReplies
+    .map((reply, index): ArticleBodyReactionBlock | null => {
+      const translatedText = translations?.get(index) ?? null;
+      const cleanedLines = buildReactionDisplayLines([reply.text], translatedText);
+      if (cleanedLines.length === 0) return null;
+
+      const label = reply.isQuote ? "引用" : "返信";
+      const name = `@${reply.author} ・ 👍${formatCount(reply.likeCount)} 💬${formatCount(reply.replyCount)} [${label}]`;
+
+      return { type: "reaction", number: 0, name, lines: cleanedLines };
+    })
+    .filter((b): b is ArticleBodyReactionBlock => b !== null)
+    .map((b, i) => ({ ...b, number: i + 1 }));
+
+  return blocks;
+}
+
 /**
  * X（旧Twitter）投稿を「独自の見出し・導入・要約が主、tweet埋め込み/短い引用＋出典が従」の構成で
  * 組み立てる（成長G7 F-G7-4）。著作権法32条の適法引用（明瞭区別・主従関係・出典明記）に配慮し、
  * tweet全文コピペ・スクショ多用はしない。
  * 1. 見出し「Xでの反応」。
  * 2. 独自の導入段落（LLM、既存の`intro`タスクに合流。riot以外の汎用テンプレをそのまま使う）。
- * 3. tweet URLが有効なステータスURL（`isValidTweetStatusUrl`）なら twitter provider の embedブロック
+ * 3. `candidate.xReplies`が1件以上あるとき（X-reply-S3 F-XR3-1）:
+ *    a. 元ポストのembedブロック（`{type:"embed",provider:"twitter",url:candidate.sourceUrl}`。
+ *       生成できない場合＝ID抽出失敗時は、表示側`EmbedBlockView`が自動でリンクカードに
+ *       フォールバックする既存の仕組みに委ねる。X-embedスプリントで確立済み）。
+ *    b. `buildXReactionBlocks`の結果が1件以上あれば見出し「反応まとめ」＋reactionブロックを追加。
+ *    xReplies が0件（キー無し・取得失敗・古い記事）のときは従来どおり:
+ *    tweet URLが有効なステータスURL（`isValidTweetStatusUrl`）なら twitter provider の embedブロック
  *    （公式の埋め込み表示。原文そのまま・翻訳不要）。無効/取得できない場合のみ、短い引用
  *    （`excerptForQuote`でtweet全文コピペを避ける。日本語を含まない本文はreddit経路の翻訳に合流してから
- *    抜粋する）＋出典（カテゴリラベル＋作者名）。
+ *    抜粋する）＋出典（カテゴリラベル＋作者名）。＝回帰ゼロ。
  * 4. 独自の結び段落（LLM、既存の`context`タスクに合流）。
  */
 async function composeXBody(
@@ -2044,7 +2106,17 @@ async function composeXBody(
   });
 
   const sourceUrl = candidate.sourceUrl?.trim();
-  if (sourceUrl && isValidTweetStatusUrl(sourceUrl)) {
+  const xReplies = candidate.xReplies ?? [];
+
+  if (xReplies.length > 0 && sourceUrl) {
+    blocks.push({ type: "embed", provider: "twitter", url: sourceUrl });
+
+    const reactionBlocks = await buildXReactionBlocks(xReplies, llmClient);
+    if (reactionBlocks.length > 0) {
+      blocks.push({ type: "heading", text: "反応まとめ" });
+      blocks.push(...reactionBlocks);
+    }
+  } else if (sourceUrl && isValidTweetStatusUrl(sourceUrl)) {
     blocks.push({ type: "embed", provider: "twitter", url: sourceUrl });
   } else {
     const displayText = await translateXContentIfNeeded(llmClient, candidate.content);
