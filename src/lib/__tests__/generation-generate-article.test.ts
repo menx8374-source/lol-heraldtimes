@@ -576,8 +576,7 @@ describe("generateArticleForCandidate（失敗パス）", () => {
 describe("generateArticleForCandidate（まとめ速報レス形式=5ch/reddit、逐語チェック対象外）", () => {
   it("5ch由来はレス本文が元ソースと完全一致(逐語)でもGenerationErrorにならない(意図的な転載のため)", async () => {
     // アンカー(>>N)を含まない3レス構成(reactqual-S4: 5chはレス番号を疑似score(新しい=高score)とする
-    // 統一選定になるため、アンカーが無い独立レス同士はscore降順=番号の大きい順に並ぶ。3件とも採用される
-    // 点は不変)。
+    // 統一選定になり3件とも採用される。polish-S1: 表示順はレス番号昇順(時系列)になる)。
     const content =
       "1: このジャングルナーフはマジでキツい。\nパワースパイクが遅れるとか勘弁してくれ。\n\n2: 同意、ジャングルメインは今回のパッチ悲惨すぎる。\n\n3: 一方でトップレーンからは歓迎の声も多いんだよな。";
     const result = await generateArticleForCandidate(
@@ -591,7 +590,7 @@ describe("generateArticleForCandidate（まとめ速報レス形式=5ch/reddit�
     // レス本文ブロックが逐語のまま含まれている(要約・言い換えされていない)
     const reactionBlocks = result.body.filter((b) => b.type === "reaction");
     expect(reactionBlocks.length).toBe(3);
-    expect(reactionBlocks.map((b) => b.type === "reaction" && b.number)).toEqual([3, 2, 1]);
+    expect(reactionBlocks.map((b) => b.type === "reaction" && b.number)).toEqual([1, 2, 3]);
     const res1 = reactionBlocks.find((b) => b.type === "reaction" && b.number === 1);
     expect(res1?.type === "reaction" && res1.lines.map((l) => l.text)).toEqual([
       "このジャングルナーフはマジでキツい。",

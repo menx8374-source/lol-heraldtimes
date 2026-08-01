@@ -41,7 +41,8 @@ async function withReactionSelectMode<T>(mode: "rules" | "llm" | undefined, fn: 
 
 // 58-59-61が>>Nアンカーで連結した会話チェーン(サイズ3)、413は無関係な独立レス(アンカー無し)。
 // reactqual-S4: 5chはレス番号を疑似score(新しい=高score)とする統一選定になるため、413(最新・独立)も
-// primaryとして採用され、58-59-61のチェーンが親→子の順で続く(全4件)。
+// primaryとして採用され、58-59-61のチェーンも選ばれる(全4件、選定集合は不変)。
+// polish-S1 F-P1-2: 表示順は選定のチェーン整合順ではなくレス番号昇順(時系列)になる。
 const anchoredContent =
   "58: 拮抗してるゲームだった。\n59: >>58 それについてもう少し話そう。\n61: >>59 拮抗してるゲームが面白かった。\n413: 無関係な独立レス。";
 
@@ -57,8 +58,8 @@ describe("buildReactionBlocks（REACTION_SELECT_MODEによる反応レス選別�
       expect(spy.kinds).not.toContain("reaction-select");
       const reactions = body.filter((b) => b.type === "reaction");
       const numbers = reactions.map((b) => (b.type === "reaction" ? b.number : -1));
-      // 413(最新・独立、primary)が先頭、続けて58-59-61のチェーンが親→子の順で出る(AIには従わない)。
-      expect(numbers).toEqual([413, 58, 59, 61]);
+      // 選定集合(413,58,59,61)はAIに従わずrulesのまま。表示順はレス番号昇順(polish-S1、時系列)。
+      expect(numbers).toEqual([58, 59, 61, 413]);
     });
   });
 
@@ -71,7 +72,7 @@ describe("buildReactionBlocks（REACTION_SELECT_MODEによる反応レス選別�
       );
       expect(spy.kinds).not.toContain("reaction-select");
       const reactions = body.filter((b) => b.type === "reaction");
-      expect(reactions.map((b) => (b.type === "reaction" ? b.number : -1))).toEqual([413, 58, 59, 61]);
+      expect(reactions.map((b) => (b.type === "reaction" ? b.number : -1))).toEqual([58, 59, 61, 413]);
     });
   });
 

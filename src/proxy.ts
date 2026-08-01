@@ -24,6 +24,15 @@ function isSitePrivate(): boolean {
 
 export function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
+
+  // polish-S1 F-P1-1: /api/revalidate は独自の REVALIDATE_SECRET（Route Handler側）で保護済み
+  // （未設定/誤りは401・固定パスのみ・POST限定）なので、Basic認証は課さず素通しする。
+  // これにより SITE_PRIVATE=true 下でも B（公開後のオンデマンド再検証）が200を返せる。
+  // 除外は完全一致のみ（/api/ 全体は除外しない＝他のAPIルートは従来どおり保護対象）。
+  if (path === "/api/revalidate") {
+    return NextResponse.next();
+  }
+
   const isAdminPath = path === "/admin" || path.startsWith("/admin/");
 
   // 保護対象: 常に /admin、加えて SITE_PRIVATE 有効時はサイト全体。それ以外（公開ページ）は素通し。

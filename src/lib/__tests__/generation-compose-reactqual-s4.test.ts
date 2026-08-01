@@ -58,8 +58,8 @@ describe("5ch統一選定（reactqual-S4 F-RQ4-1）: 新しめ/活発な会話�
       // target=2: primaryは50(score50)・40(score40)。40の親30(score30、低score)が文脈として追加される。
       const content = "30: 古い発言。\n" + "40: >>30 それに反応。\n" + "50: 独立した新しい発言。";
       const body = await composeArticleBody({ sourceType: "5ch", title: "混在テスト", content }, llm);
-      // primary(score降順): 50,40。40の親30が文脈追加されチェーン整合順(親→子)で出る。
-      expect(reactionNumbers(body)).toEqual([50, 30, 40]);
+      // 選定(primary score降順50,40。40の親30が文脈追加)は不変だが、polish-S1で表示順はレス番号昇順になる。
+      expect(reactionNumbers(body)).toEqual([30, 40, 50]);
     });
   });
 });

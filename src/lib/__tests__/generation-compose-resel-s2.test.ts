@@ -107,8 +107,9 @@ describe("buildReactionBlocks（reddit統一選定、resel-S2 F-RS2-2）", () =>
       const content =
         "1: 最初の話題。\n" + "2: >>1 それについて。\n" + "3 (score:999): 高scoreだが独立(アンカー無し)レス。";
       const body = await composeArticleBody({ sourceType: "5ch", title: "5ch統一選定テスト", content }, llm);
-      // primaryはscore(=番号)降順: 3,2,1。3は独立(親なし)で先に出る。2の親1が文脈としてチェーン整合順で続く。
-      expect(reactionNumbers(body)).toEqual([3, 1, 2]);
+      // 選定はscore(=番号)降順(3,2,1。3は独立で先に出る想定)のままだが、polish-S1で表示順は
+      // レス番号昇順(古い→新しい)になる。
+      expect(reactionNumbers(body)).toEqual([1, 2, 3]);
     });
   });
 

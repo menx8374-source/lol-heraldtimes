@@ -835,6 +835,12 @@ async function buildReactionBlocks(
       anchorDepth: reactionAnchorDepth(),
       hardCap: target + 3,
     });
+    // polish-S1 F-P1-2: 5ch（統一選定）のみ、選定された集合はそのまま（新しめ優先）に、表示順だけを
+    // レス番号昇順（古い→新しい＝掲示板の時系列）に並び替える。reddit はチェーン整合順（upvote由来）
+    // のまま不変（並び替えない）。
+    if (sourceType === "5ch") {
+      selectedIndices = [...selectedIndices].sort((a, b) => reses[a].number - reses[b].number);
+    }
   } else {
     // ここに来るのは REACTION_SELECT_MODE=llm のとき（reddit/5ch共通、reactqual-S4で不変）のみ。
     // LLM選定（selectReactionReses）が失敗した場合（null）、拡張E43以前は「全レス無制限」に

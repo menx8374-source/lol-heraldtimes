@@ -80,9 +80,9 @@ describe("compose NG文の言い換え表示（resel-S3、既定soften）", () =
     );
     const reactions = reactionBlocksOf(body);
     const texts = reactions.flatMap((b) => b.lines.map((l) => l.text));
-    // reactqual-S4: 5chはレス番号を疑似score(新しい=高score)とする統一選定になるため、
-    // 番号の大きい2(独立・親なし)がprimaryとして先に選ばれ、続けて1が出る(親子関係が無い独立レス同士)。
-    expect(texts).toEqual(["普通の反応だけ。", "そのプレイは残念だと思う。でも強いと思う。"]);
+    // reactqual-S4: 選定は番号(疑似score)降順(2,1)のまま不変。polish-S1で表示順はレス番号昇順
+    // (1→2、時系列)になる。
+    expect(texts).toEqual(["そのプレイは残念だと思う。でも強いと思う。", "普通の反応だけ。"]);
     expect(texts.every((t) => findNgWord(t) === null)).toBe(true);
   });
 
