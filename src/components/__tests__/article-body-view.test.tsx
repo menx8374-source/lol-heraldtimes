@@ -875,6 +875,73 @@ describe("ArticleBodyView（redditSourceブロック、Reddit-source F-RS-3）",
   });
 });
 
+describe("ResLines（URL自動リンク化, reactqual-S2 F-RQ2-2, バグ4修正）", () => {
+  it("レス本文中のhttp/https URLを<a target=_blank rel=noopener noreferrer nofollow>として描画する", () => {
+    const blocks: ArticleBodyBlock[] = [
+      {
+        type: "reaction",
+        number: 1,
+        name: "国内プレイヤーさん",
+        lines: [{ text: "見て→https://example.com/path すごい" }],
+      },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain('href="https://example.com/path"');
+    expect(html).toContain('target="_blank"');
+    expect(html).toContain('rel="noopener noreferrer nofollow"');
+    expect(html).toContain("見て→");
+    expect(html).toContain("すごい");
+  });
+
+  it("URLを含まない行は逐語のまま表示される(回帰なし)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "reaction", number: 1, name: "国内プレイヤーさん", lines: [{ text: "普通の反応だよ" }] },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("普通の反応だよ");
+    expect(html).not.toContain("<a ");
+  });
+
+  it("javascript:等 http/https以外はリンク化されない(危険スキーム排除)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      { type: "reaction", number: 1, name: "国内プレイヤーさん", lines: [{ text: "javascript:alert(1) を試す" }] },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).not.toContain("<a ");
+    expect(html).toContain("javascript:alert(1) を試す");
+  });
+
+  it("強調色(red)の行でもURLがリンク化される(色クラスとリンククラスが共存)", () => {
+    const blocks: ArticleBodyBlock[] = [
+      {
+        type: "reaction",
+        number: 1,
+        name: "国内プレイヤーさん",
+        lines: [{ text: "神プレイ動画 https://example.com/clip", emphasis: "red" }],
+      },
+    ];
+    const html = renderToStaticMarkup(<ArticleBodyView blocks={blocks} />);
+    expect(html).toContain("text-red-600");
+    expect(html).toContain('href="https://example.com/clip"');
+    expect(html).toContain("underline");
+  });
+
+  it("dangerouslySetInnerHTMLは使わない(URL自動リンク化後もコンポーネントソースに不在)", async () => {
+    const fs = await import("node:fs/promises");
+    const src = await fs.readFile(new URL("../article-body-view.tsx", import.meta.url), "utf-8");
+    expect(src).not.toContain("dangerouslySetInnerHTML=");
+  });
+
+  it("コメント欄と共用のResLinesでも同様にリンク化される(コンポーネント自体は共用のため直接ResLinesを確認)", async () => {
+    const { ResLines } = await import("@/components/article-body-view");
+    const html = renderToStaticMarkup(
+      <ResLines lines={[{ text: "詳細はこちら https://example.com/detail を見て" }]} />,
+    );
+    expect(html).toContain('href="https://example.com/detail"');
+    expect(html).toContain('rel="noopener noreferrer nofollow"');
+  });
+});
+
 describe("ArticleBodyView（X反応記事の元ポストembed→反応まとめ, X-reply-S3 F-XR3-3）", () => {
   const blocks: ArticleBodyBlock[] = [
     { type: "heading", text: "Xでの反応" },

@@ -8,6 +8,7 @@ import { AdSlot } from "@/components/ad-slot";
 import { isAsciiArtLine } from "@/lib/aa";
 import { isAllowedEmbedUrl, embedIframeSrc, EMBED_PROVIDER_LABELS, type EmbedProvider } from "@/lib/embed";
 import { getSiteUrl } from "@/lib/site";
+import { linkifyText } from "@/lib/linkify";
 
 /** 強調(赤/オレンジ)を持つレス本文行のテキストカラー。未指定は通常色。 */
 const LINE_EMPHASIS_CLASS: Record<"red" | "orange", string> = {
@@ -23,6 +24,35 @@ const RES_EMPHASIS_COLOR_CLASS: Record<"red" | "blue" | "purple" | "orange", str
   purple: "text-purple-600 dark:text-purple-400",
   orange: "text-orange-600 dark:text-orange-400",
 };
+
+/**
+ * レス本文の1行を、URL部分だけ`<a>`リンク化して描画する（reactqual-S2 F-RQ2-2、バグ4修正）。
+ * `linkifyText`（純関数・逐語不変）が返したテキスト/リンクのセグメント配列をそのままJSXに渡すだけで
+ * `dangerouslySetInnerHTML`は使わない。非URLテキストはReactの自動エスケープに任せる。
+ * リンクは新規タブ・`rel="noopener noreferrer nofollow"`・下線+sky色（既存の強調色はp側で維持）。
+ */
+function LinkifiedLine({ text }: { text: string }) {
+  const segments = linkifyText(text);
+  return (
+    <>
+      {segments.map((seg, i) =>
+        seg.type === "link" ? (
+          <a
+            key={i}
+            href={seg.href}
+            target="_blank"
+            rel="noopener noreferrer nofollow"
+            className="underline text-sky-700 dark:text-sky-400 break-all"
+          >
+            {seg.value}
+          </a>
+        ) : (
+          <Fragment key={i}>{seg.value}</Fragment>
+        ),
+      )}
+    </>
+  );
+}
 
 /** レスの「番号: 名前」見出し行（名前は緑）。まとめ本文の reaction ブロック描画でのみ使う
  * （拡張E12でコメント欄は専用ヘッダーに差別化したため、このファイル内ローカル関数に降格）。 */
@@ -46,6 +76,8 @@ function ResHeader({ number, name }: { number: number; name: string }) {
  * 通常サイズ・非太字にする。レス単位の`emphasis`フラグ自体は`data-res-emphasis`属性の付与にのみ
  * 使い、色が無ければ見た目には影響しない）。行単位のemphasis(red/orange)がある行はそちらの色を
  * 優先する（役割が違うため上書きしない）。
+ * 各行のhttp/https URLは`LinkifiedLine`（reactqual-S2 F-RQ2-2、バグ4修正）で自動リンク化する
+ * （逐語不変・dangerouslySetInnerHTML不使用）。5ch/reddit/X/コメント欄で共用のため一括で効く。
  */
 export function ResLines({
   lines,
@@ -74,7 +106,7 @@ export function ResLines({
             <p
               className={(line.emphasis ? LINE_EMPHASIS_CLASS[line.emphasis] : baseColorClass) + sizeClass + aaClass}
             >
-              {line.text}
+              <LinkifiedLine text={line.text} />
             </p>
           </div>
         );
