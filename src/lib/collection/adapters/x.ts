@@ -59,7 +59,9 @@ export function buildDefaultSearchQueries(hot: { minScore: number; minComments: 
   // （#LoLはハッシュタグとして「笑」と区別できるため残す）。
   const domestic = `(LJL OR "リーグ・オブ・レジェンド" OR リーグオブレジェンド OR リグオブ OR #LoL OR "League of Legends") min_faves:${domesticMinFaves} min_replies:${minReplies} lang:ja -filter:retweets -filter:replies`;
   const overseas = `("League of Legends" OR #LeagueOfLegends OR #LoL OR LJL) min_faves:${overseasMinFaves} min_replies:${minReplies} lang:en -filter:retweets`;
-  const esports = `(LJL OR LCK OR LPL OR LEC OR MSI OR Worlds OR "世界大会") min_faves:${esportsMinFaves} min_replies:${minReplies} lang:ja -filter:retweets`;
+  // reactqual-S5: MSI/Worlds/世界大会は汎用語（非LoL誤収集の原因、かつ関連再チェックに無く必ず落ちる死に枝）
+  // のため除去し、LoLリーグ名のみに絞る（クエリ語 ⊆ containsLoLTermの単語境界群）。
+  const esports = `(LJL OR LCK OR LPL OR LEC) min_faves:${esportsMinFaves} min_replies:${minReplies} lang:ja -filter:retweets`;
 
   return [domestic, overseas, esports];
 }

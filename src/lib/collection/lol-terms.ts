@@ -29,7 +29,8 @@ export const LOL_SPECIFIC_TERMS: string[] = [
   "リグオブ",
   "#lol",
   "#leagueoflegends",
-  "世界大会",
+  // "世界大会"はeスポーツ全般の世界大会（EWC等の複数タイトル合同大会含む）を指す汎用語で、
+  // 非LoLを通すため関連判定に含めない（reactqual-S5）。
   // 主要チャンピオン（DEFAULT_LOL_KEYWORDSと同じ厳選ラインナップ。アーリは誤爆のため除外）。
   "yasuo",
   "ヤスオ",

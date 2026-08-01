@@ -2,7 +2,8 @@
  * containsLoLTerm（reactqual-S1 F-RQ1-2、精度改善リファインメント）の単体テスト。
  * 「裸"lol"（笑）を弾き、LoL固有語のみを通す」ことに加え、
  * ASCII略語の部分一致誤爆（"lec"⊂"election"等）を単語境界一致で解消し、
- * "世界大会"/"ヤスオ"の誤除外を解消することを検証する。
+ * "ヤスオ"の誤除外を解消することを検証する。
+ * "世界大会"はeスポーツ全般の汎用語のため、非LoLを通さないことを検証する（reactqual-S5）。
  */
 import { describe, expect, it } from "vitest";
 import { containsLoLTerm } from "@/lib/collection/lol-terms";
@@ -16,7 +17,18 @@ describe("containsLoLTerm", () => {
     expect(containsLoLTerm("LJLの決勝、最高だった")).toBe(true);
     expect(containsLoLTerm("ゼドが強い")).toBe(true);
     expect(containsLoLTerm("ヤスオのアウトプレイ")).toBe(true);
-    expect(containsLoLTerm("世界大会の決勝")).toBe(true);
+    expect(containsLoLTerm("#LoL 楽しい")).toBe(true);
+    expect(containsLoLTerm("LJL開幕")).toBe(true);
+    expect(containsLoLTerm("LCK決勝")).toBe(true);
+  });
+
+  it("reactqual-S5: 世界大会/EWC/SSGのみの非LoL投稿はfalse（汎用語の誤収集根絶）", () => {
+    expect(
+      containsLoLTerm(
+        "vs SSG 1-2 lose 今回のEWCはここで終わりです また次の世界大会でリベンジします",
+      ),
+    ).toBe(false);
+    expect(containsLoLTerm("世界大会の決勝")).toBe(false);
   });
 
   it("裸の\"lol\"（笑）しか含まない文はfalse（誤ヒットの根絶）", () => {

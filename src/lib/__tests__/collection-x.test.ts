@@ -205,6 +205,17 @@ describe("純関数: buildDefaultSearchQueries（fetchopt-S1 F-FO1-1、既定ク
     const bareLolPattern = /(?<![#\w])lol(?![a-z])/i;
     expect(bareLolPattern.test(esports)).toBe(false);
   });
+
+  it("reactqual-S5: eスポーツ特化クエリはLoLリーグ名のみ（MSI/Worlds/世界大会を含まない）", () => {
+    const [domestic, overseas, esports] = buildDefaultSearchQueries();
+    expect(esports.startsWith("(LJL OR LCK OR LPL OR LEC)")).toBe(true);
+    expect(esports).not.toContain("MSI");
+    expect(esports).not.toContain("Worlds");
+    expect(esports).not.toContain("世界大会");
+    // domestic/overseasは従来どおり（#LoL/League of Legends/リーグ名を含む）
+    expect(domestic).toContain("#LoL");
+    expect(overseas).toContain("League of Legends");
+  });
 });
 
 describe("XAdapter.fetchItems（ブリーフ テスト1〜3、実APIは叩かない）", () => {
