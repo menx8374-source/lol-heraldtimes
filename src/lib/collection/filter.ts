@@ -3,6 +3,7 @@
  * 無関係アイテム（別ゲーム・無関係スレッド）の混入を防ぐ純関数。
  */
 import type { RelevanceFilterConfig, SourceType } from "@/lib/collection/types";
+import { containsLoLTerm } from "@/lib/collection/lol-terms";
 
 /** reddit の `sourceUrl` からサブレディット名を取り出す（見つからなければ null）。 */
 export function extractSubreddit(sourceUrl: string): string | null {
@@ -36,17 +37,18 @@ export function matchesKeyword(title: string, keywords: string[]): boolean {
  * リファクタリングS7b: `riot-news`（Riot公式ニュース）は出典自体が公式ニュースドメインで
  * URLルール分類済み（RiotNewsAdapter）のため、キーワード一致判定はバイパスし常に関連ありとする
  * （og:titleが日本語の商品的な見出しでDEFAULT_LOL_KEYWORDSに一致しないケースを誤って除外しないため）。
- * X-reply-S1 F-XR1-1: `x`（X/旧Twitter）も同様にバイパスする。X検索クエリ（`x.ts`の
- * DOMESTIC_QUERY/OVERSEAS_QUERY等）は既に `LoL OR LJL …` ＋ `min_faves:` ＋ `lang:` operatorで
- * 発見段階でLoL関連＋人気度に絞り込み済みのため、title（＝ツイート先頭一文）の再判定は冗長かつ、
- * ハッシュタグ等で一致した投稿を誤って除外する原因になっていた（実データでX saved=0を確認）。
+ * reactqual-S1 F-RQ1-2: `x`（X/旧Twitter）は、X検索クエリの裸`LoL`/`lol`が「lol＝笑」に誤ヒットし
+ * 非LoLツイート（政治ツイート等）が素通りしていた実データ不具合を受け、キーワード一致バイパスを廃止し
+ * 「tweet全文（content優先・無ければtitle）にLoL固有語を含むか」の再チェック（`containsLoLTerm`）に
+ * 置き換える。ハッシュタグ（#LoL等）を含むLoL固有語のみで判定し、裸"lol"（笑）は判定語に含まないため
+ * 誤除外は起きない（X-reply-S1で解消したハッシュタグ誤除外は維持される）。
  */
 export function isRelevantItem(
-  item: { sourceType: SourceType; sourceUrl: string; title: string },
+  item: { sourceType: SourceType; sourceUrl: string; title: string; content?: string },
   config: RelevanceFilterConfig,
 ): boolean {
   if (item.sourceType === "riot-news") return true;
-  if (item.sourceType === "x") return true;
+  if (item.sourceType === "x") return containsLoLTerm(item.content ?? item.title);
   if (item.sourceType === "reddit" && config.allowedSubreddits && config.allowedSubreddits.length > 0) {
     if (!isFromAllowedSubreddit(item.sourceUrl, config.allowedSubreddits)) return false;
   }

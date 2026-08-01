@@ -55,8 +55,10 @@ export function buildDefaultSearchQueries(hot: { minScore: number; minComments: 
   const overseasMinFaves = Math.max(OVERSEAS_MIN_FAVES_FLOOR, hot.minScore);
   const esportsMinFaves = Math.max(ESPORTS_MIN_FAVES_FLOOR, hot.minScore);
 
-  const domestic = `(LoL OR LJL OR "リーグ・オブ・レジェンド" OR リグオブ) min_faves:${domesticMinFaves} min_replies:${minReplies} lang:ja -filter:retweets -filter:replies`;
-  const overseas = `("League of Legends" OR #LeagueOfLegends OR LoL) min_faves:${overseasMinFaves} min_replies:${minReplies} lang:en -filter:retweets`;
+  // reactqual-S1 F-RQ1-1: 裸`LoL`/`lol`は「lol＝笑」に誤ヒットするため全廃し、ゲーム特化語のみに限定する
+  // （#LoLはハッシュタグとして「笑」と区別できるため残す）。
+  const domestic = `(LJL OR "リーグ・オブ・レジェンド" OR リーグオブレジェンド OR リグオブ OR #LoL OR "League of Legends") min_faves:${domesticMinFaves} min_replies:${minReplies} lang:ja -filter:retweets -filter:replies`;
+  const overseas = `("League of Legends" OR #LeagueOfLegends OR #LoL OR LJL) min_faves:${overseasMinFaves} min_replies:${minReplies} lang:en -filter:retweets`;
   const esports = `(LJL OR LCK OR LPL OR LEC OR MSI OR Worlds OR "世界大会") min_faves:${esportsMinFaves} min_replies:${minReplies} lang:ja -filter:retweets`;
 
   return [domestic, overseas, esports];

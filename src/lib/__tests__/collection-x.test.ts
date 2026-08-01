@@ -189,6 +189,22 @@ describe("純関数: buildDefaultSearchQueries（fetchopt-S1 F-FO1-1、既定ク
       expect(q).toContain("-filter:retweets");
     }
   });
+
+  it("reactqual-S1 F-RQ1-1: 国内/海外クエリに裸のLoL/lol（単語境界）を含まない（#LoL・\"League of Legends\"はOK）", () => {
+    const [domestic, overseas] = buildDefaultSearchQueries();
+    const bareLolPattern = /(?<![#\w])lol(?![a-z])/i;
+    expect(bareLolPattern.test(domestic)).toBe(false);
+    expect(bareLolPattern.test(overseas)).toBe(false);
+    expect(domestic).toContain("#LoL");
+    expect(overseas).toContain("#LoL");
+    expect(overseas).toContain("League of Legends");
+  });
+
+  it("eスポーツ特化クエリも既定値と同様に裸LoLを含まない（現状維持のはず）", () => {
+    const [, , esports] = buildDefaultSearchQueries();
+    const bareLolPattern = /(?<![#\w])lol(?![a-z])/i;
+    expect(bareLolPattern.test(esports)).toBe(false);
+  });
 });
 
 describe("XAdapter.fetchItems（ブリーフ テスト1〜3、実APIは叩かない）", () => {
