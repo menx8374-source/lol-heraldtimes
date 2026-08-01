@@ -23,6 +23,7 @@ import {
   rejectReviewArticleAction,
   setCategoryPolicyAction,
 } from "@/app/admin/actions";
+import { ManualArticlePanel } from "@/app/admin/ManualArticlePanel";
 
 const STATUS_LABELS: Record<string, string> = {
   published: "公開中",
@@ -92,6 +93,8 @@ export default async function AdminDashboardPage() {
         <p className="mt-1 text-sm text-neutral-400">
           自動運営パイプラインの稼働状況を確認する管理用ページです（非公開・一般閲覧者には非表示）。
         </p>
+
+        <ManualArticlePanel />
 
         <section className="mt-8">
           <h2 className="text-lg font-bold">公開ポリシー</h2>

@@ -24,6 +24,7 @@ import {
 } from "@/lib/admin/articles-admin";
 import { approveHeldComment, rejectHeldComment } from "@/lib/admin/comments-admin";
 import { setCategoryAutoPublish } from "@/lib/admin/category-policy";
+import { createManualArticleFromUrl, type ManualArticleResult } from "@/lib/admin/manual-article";
 import type { AdminAuthContext } from "@/lib/admin/auth-context";
 
 async function currentAuthContext(): Promise<AdminAuthContext> {
@@ -106,6 +107,25 @@ export async function rejectCommentAction(formData: FormData): Promise<void> {
   const auth = await currentAuthContext();
   await rejectHeldComment(requiredString(formData, "commentId"), auth);
   revalidatePath("/admin");
+}
+
+/**
+ * 指定URLからの手動記事化（admincms-S2 F5/F6）。`useActionState` から呼ばれる想定のため、
+ * 他アクションと異なり結果（成功/失敗と表示用メッセージ）をそのまま返す（redirectしない。
+ * クライアント側で実行中表示・結果表示・二重送信防止を行うため）。
+ */
+export async function manualArticleAction(
+  _prevState: ManualArticleResult | null,
+  formData: FormData,
+): Promise<ManualArticleResult> {
+  const auth = await currentAuthContext();
+  const url = typeof formData.get("url") === "string" ? (formData.get("url") as string) : "";
+  const result = await createManualArticleFromUrl(url, auth);
+  // 手動記事化は常にreview/held（非公開）で作られるため、公開一覧("/")の再検証は不要。
+  if (result.success) {
+    revalidatePath("/admin");
+  }
+  return result;
 }
 
 export async function updateArticleAction(formData: FormData): Promise<void> {
