@@ -773,19 +773,24 @@ async function buildReactionLinesBatch(
  * 改行区切りで行に分割して採用する（行数一致の制約は撤廃、resolveReactionDisplayLines参照）。訳が
  * 全く無いレスのみ英語原文フォールバックにする。
  * リファクタリングS3 F-S3-3: `REACTION_SELECT_MODE`（既定 rules）が"llm"でない限り、AIによる
- * `selectReactionReses` を呼ばず、常に `selectMajorConversationCluster`（数値ルール＝アンカー会話
- * クラスタ）でレスを選ぶ（AI選別・スコアリングを行わない）。強調は決定論（`computeLineEmphasis`＋
- * `applyMinColorFallback`）で付与する。
+ * `selectReactionReses` を呼ばず、常に決定論の数値ルールでレスを選ぶ（AI選別・スコアリングを行わない）。
+ * 強調は決定論（`computeLineEmphasis`＋`applyMinColorFallback`）で付与する。
  * resel-S2 F-RS2-2: **reddit かつ rulesモード**（`REACTION_SELECT_MODE`が"llm"でなく、かつLLM選定を
- * 呼んでいない場合）だけ、上記の`selectMajorConversationCluster`を`selectScoredAnchorReses`（統一選定
+ * 呼んでいない場合）だけ、旧`selectMajorConversationCluster`を`selectScoredAnchorReses`（統一選定
  * 「scoreの高いレスを選ぶ＋アンカーで連結した親レスも文脈採用」、`reaction-select.ts`）に置き換える。
  * items = reses を `{index, score: res.score??0, parentIndex: res.parentNumber→numberToIndex or null}`
- * に変換し、`target=reactionMaxReses()`（既定12）・`anchorDepth=reactionAnchorDepth()`（既定1）・
- * `hardCap=target+3` で選ぶ。この選定の出力は既にチェーン整合順（親→子）の最終リストのため、
- * 既存の「文脈1階層追加（>>Nアンカー）」ブロックは通さない（二重に文脈追加しない）。
- * **5ch は selectMajorConversationCluster 据え置き**（score常時0で選定が無意味なため、回帰なし）。
- * `REACTION_SELECT_MODE=llm` のとき（reddit含む、LLM選定成功・失敗いずれのフォールバックも）は
- * 本スプリントで不変（従来どおり`selectMajorConversationCluster`＋アンカー文脈追加ブロックを使う）。
+ * に変換する。
+ * reactqual-S4 F-RQ4-1: バグ2（5ch反応で古いレスが選ばれ直近の議論でない）の修正として、**5ch**も
+ * rulesモードでは同じ統一選定に載せる。5chは常時score=0（reddit由来のscore注釈が無い）ため、
+ * `score: res.number`（レス番号＝疑似score。新しい番号＝高score＝優先）を使い、`parentIndex`は
+ * `extractAnchors(res.lines)`の中で`numberToIndex`に存在し自己参照でない先頭の番号→indexとする
+ * （無ければnull。reddit由来の`parentNumber`注釈ではなく本文の`>>N`から辿る）。これにより5chは
+ * 「新しめの活発レス（primary）＋その参照先（親、文脈）」がチェーン整合順（親→子）で選ばれる。
+ * いずれのソースも`target=reactionMaxReses()`（既定12）・`anchorDepth=reactionAnchorDepth()`
+ * （既定1）・`hardCap=target+3`で選ぶ。この選定の出力は既にチェーン整合順（親→子）の最終リストの
+ * ため、既存の「文脈1階層追加（>>Nアンカー）」ブロックは通さない（二重に文脈追加しない）。
+ * `selectMajorConversationCluster`は削除せず、`REACTION_SELECT_MODE=llm`のAI選定が失敗した場合の
+ * フォールバック（reddit/5ch共通）として引き続き使う（llmモードは本スプリントで不変）。
  */
 async function buildReactionBlocks(
   candidate: GenerationCandidateInput,
@@ -800,18 +805,30 @@ async function buildReactionBlocks(
   const mode = reactionSelectMode();
   const selection = mode === "llm" ? await selectReactionReses(llmClient, candidate.title, reses) : null;
 
-  // resel-S2 F-RS2-2: reddit かつ rulesモード（selectReactionResesを呼んでいない="llm"でない）の
-  // ときだけ、統一選定（score優先＋アンカー文脈）に置き換える。5ch・llmモード（reddit含む、LLM選定
-  // 成功・失敗いずれも）は従来どおり（本スプリントで不変）。
-  const useUnifiedRedditSelection = sourceType === "reddit" && mode !== "llm";
+  // resel-S2 F-RS2-2 / reactqual-S4 F-RQ4-1: reddit または 5ch かつ rulesモード（selectReactionResesを
+  // 呼んでいない="llm"でない）のときだけ、統一選定（score優先＋アンカー文脈）に置き換える。llmモード
+  // （reddit/5ch共通、LLM選定成功・失敗いずれも）は従来どおり（本スプリントで不変）。
+  const useUnifiedSelection = (sourceType === "reddit" || sourceType === "5ch") && mode !== "llm";
 
   let selectedIndices: number[];
-  if (useUnifiedRedditSelection) {
-    const items = reses.map((res, i) => ({
-      index: i,
-      score: res.score ?? 0,
-      parentIndex: res.parentNumber !== undefined ? (numberToIndex.get(res.parentNumber) ?? null) : null,
-    }));
+  if (useUnifiedSelection) {
+    const items = reses.map((res, i) => {
+      if (sourceType === "reddit") {
+        return {
+          index: i,
+          score: res.score ?? 0,
+          parentIndex: res.parentNumber !== undefined ? (numberToIndex.get(res.parentNumber) ?? null) : null,
+        };
+      }
+      // 5ch（reactqual-S4）: レス番号を疑似score（新しい＝高score）にし、本文の>>Nから親を辿る
+      // （reddit由来のparentNumber注釈ではなく extractAnchors を使う。自己参照・存在しない番号はnull）。
+      const anchorParent = extractAnchors(res.lines).find((n) => n !== res.number && numberToIndex.has(n));
+      return {
+        index: i,
+        score: res.number,
+        parentIndex: anchorParent !== undefined ? (numberToIndex.get(anchorParent) ?? null) : null,
+      };
+    });
     const target = reactionMaxReses();
     selectedIndices = selectScoredAnchorReses(items, {
       target,
@@ -819,10 +836,11 @@ async function buildReactionBlocks(
       hardCap: target + 3,
     });
   } else {
-    // LLM選定を使わない（既定rulesモード、5ch）、またはLLM選定が失敗した場合（null）、拡張E43以前は
-    // 「全レス無制限」にフォールバックしており、話題バラバラの無関係レスが全部出てしまっていた。
-    // 拡張E43 F-E43-2で、代わりに>>Nアンカーで連結した会話クラスタのうち最大のもの（＝そのスレで
-    // 最も会話が集まっている中心的な議論）だけを採用するようにする（selectMajorConversationCluster）。
+    // ここに来るのは REACTION_SELECT_MODE=llm のとき（reddit/5ch共通、reactqual-S4で不変）のみ。
+    // LLM選定（selectReactionReses）が失敗した場合（null）、拡張E43以前は「全レス無制限」に
+    // フォールバックしており、話題バラバラの無関係レスが全部出てしまっていた。拡張E43 F-E43-2で、
+    // 代わりに>>Nアンカーで連結した会話クラスタのうち最大のもの（＝そのスレで最も会話が集まっている
+    // 中心的な議論）だけを採用するようにする（selectMajorConversationCluster）。
     const baseIndices = selection
       ? reses.map((_, i) => i).filter((i) => selection.keepLines.has(i))
       : selectMajorConversationCluster(reses);

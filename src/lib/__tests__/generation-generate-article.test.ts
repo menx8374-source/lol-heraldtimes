@@ -575,9 +575,9 @@ describe("generateArticleForCandidate（失敗パス）", () => {
 
 describe("generateArticleForCandidate（まとめ速報レス形式=5ch/reddit、逐語チェック対象外）", () => {
   it("5ch由来はレス本文が元ソースと完全一致(逐語)でもGenerationErrorにならない(意図的な転載のため)", async () => {
-    // アンカー(>>N)を含まない3レス構成にする(リファクタリングS3でレス選別の既定がAI(旧mockは全レス採用)
-    // から数値ルール(アンカー会話クラスタ)へ変わったため、アンカーが無ければ「全レスを安全側で採用」の
-    // フォールバックが働き、従来どおり3件とも採用される)。
+    // アンカー(>>N)を含まない3レス構成(reactqual-S4: 5chはレス番号を疑似score(新しい=高score)とする
+    // 統一選定になるため、アンカーが無い独立レス同士はscore降順=番号の大きい順に並ぶ。3件とも採用される
+    // 点は不変)。
     const content =
       "1: このジャングルナーフはマジでキツい。\nパワースパイクが遅れるとか勘弁してくれ。\n\n2: 同意、ジャングルメインは今回のパッチ悲惨すぎる。\n\n3: 一方でトップレーンからは歓迎の声も多いんだよな。";
     const result = await generateArticleForCandidate(
@@ -591,9 +591,12 @@ describe("generateArticleForCandidate（まとめ速報レス形式=5ch/reddit�
     // レス本文ブロックが逐語のまま含まれている(要約・言い換えされていない)
     const reactionBlocks = result.body.filter((b) => b.type === "reaction");
     expect(reactionBlocks.length).toBe(3);
-    expect(
-      reactionBlocks[0].type === "reaction" && reactionBlocks[0].lines.map((l) => l.text),
-    ).toEqual(["このジャングルナーフはマジでキツい。", "パワースパイクが遅れるとか勘弁してくれ。"]);
+    expect(reactionBlocks.map((b) => b.type === "reaction" && b.number)).toEqual([3, 2, 1]);
+    const res1 = reactionBlocks.find((b) => b.type === "reaction" && b.number === 1);
+    expect(res1?.type === "reaction" && res1.lines.map((l) => l.text)).toEqual([
+      "このジャングルナーフはマジでキツい。",
+      "パワースパイクが遅れるとか勘弁してくれ。",
+    ]);
 
     // body は「反応まとめ」見出し＋reactionブロックのみ(AI導入・まとめ段落なし)
     expect(result.body[0]).toEqual({ type: "heading", text: "反応まとめ" });

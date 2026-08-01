@@ -100,15 +100,15 @@ describe("buildReactionBlocks（reddit統一選定、resel-S2 F-RS2-2）", () =>
     });
   });
 
-  it("5chはscore/parent注釈があってもselectMajorConversationCluster据え置き(不変・score無視)", async () => {
+  it("5chはscore注釈を無視しレス番号を疑似score(新しい=高score)として統一選定を使う(reactqual-S4)", async () => {
     await withEnv({ REACTION_SELECT_MODE: "rules" }, async () => {
-      // 5chの選定はscoreを見ず、>>N本文アンカーで連結したクラスタのみを見る。
-      // score注釈があっても無視され、>>Nアンカーの無い独立レスは高scoreでも除外される。
+      // 5chのscore/parent注釈(reddit由来の記法)は無視され、レス番号自体が疑似scoreになる。
+      // parentIndexは本文の>>Nアンカーから導出する(score:999注釈があっても無視)。
       const content =
         "1: 最初の話題。\n" + "2: >>1 それについて。\n" + "3 (score:999): 高scoreだが独立(アンカー無し)レス。";
-      const body = await composeArticleBody({ sourceType: "5ch", title: "5ch不変テスト", content }, llm);
-      // クラスタ(1,2)のみ採用、高scoreの独立レス(3)は選ばれない(5chはscore無視のまま)。
-      expect(reactionNumbers(body)).toEqual([1, 2]);
+      const body = await composeArticleBody({ sourceType: "5ch", title: "5ch統一選定テスト", content }, llm);
+      // primaryはscore(=番号)降順: 3,2,1。3は独立(親なし)で先に出る。2の親1が文脈としてチェーン整合順で続く。
+      expect(reactionNumbers(body)).toEqual([3, 1, 2]);
     });
   });
 

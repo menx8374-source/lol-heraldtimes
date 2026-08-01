@@ -39,12 +39,14 @@ async function withReactionSelectMode<T>(mode: "rules" | "llm" | undefined, fn: 
   }
 }
 
-// 58-59-61が>>Nアンカーで連結した会話クラスタ(サイズ3)、413は無関係な独立レス(アンカー無し)。
+// 58-59-61が>>Nアンカーで連結した会話チェーン(サイズ3)、413は無関係な独立レス(アンカー無し)。
+// reactqual-S4: 5chはレス番号を疑似score(新しい=高score)とする統一選定になるため、413(最新・独立)も
+// primaryとして採用され、58-59-61のチェーンが親→子の順で続く(全4件)。
 const anchoredContent =
   "58: 拮抗してるゲームだった。\n59: >>58 それについてもう少し話そう。\n61: >>59 拮抗してるゲームが面白かった。\n413: 無関係な独立レス。";
 
 describe("buildReactionBlocks（REACTION_SELECT_MODEによる反応レス選別モード切替、リファクタリングS3 F-S3-3）", () => {
-  it("既定（未設定）はrulesモード: reaction-selectタスク(AI)が一切呼ばれず、会話クラスタ選定＋決定論強調になる", async () => {
+  it("既定（未設定）はrulesモード: reaction-selectタスク(AI)が一切呼ばれず、統一選定(スコア優先+アンカー文脈)＋決定論強調になる", async () => {
     await withReactionSelectMode(undefined, async () => {
       // AIが呼ばれれば独立レス(index3=413)だけを選ぶ応答を用意しておくが、rulesモードでは無視されるはず。
       const spy = new SpyLLMClient(JSON.stringify({ keep: [3], emphasize: [] }));
@@ -55,8 +57,8 @@ describe("buildReactionBlocks（REACTION_SELECT_MODEによる反応レス選別�
       expect(spy.kinds).not.toContain("reaction-select");
       const reactions = body.filter((b) => b.type === "reaction");
       const numbers = reactions.map((b) => (b.type === "reaction" ? b.number : -1));
-      // 最大クラスタ(58,59,61)のみ採用され、無関係な独立レス(413)は含まれない(AIには従わない)。
-      expect(numbers).toEqual([58, 59, 61]);
+      // 413(最新・独立、primary)が先頭、続けて58-59-61のチェーンが親→子の順で出る(AIには従わない)。
+      expect(numbers).toEqual([413, 58, 59, 61]);
     });
   });
 
@@ -69,7 +71,7 @@ describe("buildReactionBlocks（REACTION_SELECT_MODEによる反応レス選別�
       );
       expect(spy.kinds).not.toContain("reaction-select");
       const reactions = body.filter((b) => b.type === "reaction");
-      expect(reactions.map((b) => (b.type === "reaction" ? b.number : -1))).toEqual([58, 59, 61]);
+      expect(reactions.map((b) => (b.type === "reaction" ? b.number : -1))).toEqual([413, 58, 59, 61]);
     });
   });
 
