@@ -11,7 +11,7 @@
  * extractConcreteElements が sourceText から取り出した「そのままの部分文字列」だけを使う
  * （新しい文字列を組み立てて主張することはしない）。
  */
-import { stripNgWords } from "@/lib/moderation/ng-words";
+import { stripNgWordsExcluding } from "@/lib/moderation/ng-words";
 import type { LLMClient } from "@/lib/generation/llm-client";
 
 /** 冒頭ラベル語彙。生成タイトルは必ずこの中から1つを【】で囲んで先頭に付ける。 */
@@ -52,7 +52,7 @@ export const MIN_TITLE_LENGTH = 20;
 export const MAX_TITLE_LENGTH = 48;
 
 // 具体要素や文脈の穴埋めは 5ch/Reddit 等ユーザー投稿由来の生コンテンツから抜き出すため、
-// 差別的・攻撃的表現の混入防止に F9 の moderation/ng-words.ts の stripNgWords を直接適用する
+// 差別的・攻撃的表現の混入防止に F9 の moderation/ng-words.ts の stripNgWordsExcluding（CHAMPIONS除外、reactqual-S3b）を直接適用する
 // （NGワード語彙は moderation 側に一元化。ここで別途語彙を持たない）。
 
 /** ASCII(半角)は0.5、それ以外(全角)は1として数える「全角文字相当」の長さ。 */
@@ -256,7 +256,7 @@ export function generateHookTitle(input: TitleGenInput, isControversial = false)
   const sourceText = `${input.title}\n${input.content}`;
   const elements = extractConcreteElements(sourceText);
   const rawSubject = elements[0] ?? fallbackSubject(input);
-  const safeSubject = stripNgWords(rawSubject);
+  const safeSubject = stripNgWordsExcluding(rawSubject, CHAMPIONS);
   const subject = safeSubject.length > 0 ? safeSubject : fallbackSubject(input);
 
   const label = isControversial ? CONTROVERSY_LABEL : pickFromArray(LABELS, sourceText);
@@ -289,8 +289,9 @@ export function generateHookTitle(input: TitleGenInput, isControversial = false)
   if (maxCoreLen <= 0) return fixedText;
 
   const contentPool = input.content.trim();
-  const contextPool = stripNgWords(
+  const contextPool = stripNgWordsExcluding(
     contentPool.length > 0 ? `${contentPool}。${FILLER_PADDING}` : FILLER_PADDING,
+    CHAMPIONS,
   );
   let core = buildCoreText(contextPool, maxCoreLen);
   if (core.length === 0) return fixedText;
@@ -362,7 +363,7 @@ export const LLM_TITLE_SYSTEM_PROMPT =
 
 /**
  * LLM経由でタイトルを生成する（拡張E24 F-E24-2）。本文の意味を踏まえた「【ラベル】＋惹きつける
- * 完結タイトル」の生成をLLMClientに委ねるが、生成結果は必ず stripNgWords（NGワード除去）→
+ * 完結タイトル」の生成をLLMClientに委ねるが、生成結果は必ず stripNgWordsExcluding（NGワード除去。CHAMPIONS除外）→
  * checkTitleQuality（ラベル/具体要素/フック/文字数の検証）を通す。
  * 検証不通過・空文字・APIエラー（LLMClient実装は失敗時に例外を投げず空文字を返す設計だが、
  * 念のためここでも例外を握りつぶす）の場合は必ずルールベースの generateHookTitle にフォールバックする
@@ -377,7 +378,7 @@ export const LLM_MIN_TITLE_LENGTH = 12;
  * 必須は「冒頭に既定ラベル(【速報】等)」と「文字数（LLM_MIN〜MAX）」の2点のみ。
  * ⚠ 当初は「本文由来の具体要素を厳密な部分文字列一致で含むこと」も要求していたが、LLMの自然な言い回し
  * ではほぼ一致せず毎回ルールベースへフォールバックしてしまい、LLMタイトル採用という目的が達成できなかった
- * （拡張E26で撤廃）。捏造防止は「本文に無い固有名詞・事実を作らない」旨のプロンプト指示と stripNgWords に委ねる。
+ * （拡張E26で撤廃）。捏造防止は「本文に無い固有名詞・事実を作らない」旨のプロンプト指示と stripNgWordsExcluding に委ねる。
  */
 export function checkLLMTitleQuality(title: string): boolean {
   const labelMatch = title.match(/^【([^】]+)】/);
@@ -424,13 +425,13 @@ export async function generateHookTitleLLM(
       { role: "user", content: sourceText },
     ]);
     // Haikuが付けがちな前置き・引用符・コードフェンス・改行を除去してタイトル本体を取り出す（拡張E26）。
-    const candidate = stripNgWords(extractLLMTitle(raw));
+    const candidate = stripNgWordsExcluding(extractLLMTitle(raw), CHAMPIONS);
     if (candidate.length === 0) {
       return generateHookTitle(input, isControversial);
     }
     // LLMは自然な言い回しの完結タイトルを作るため、固定フック語彙も本文由来の具体要素も要求しない
     // （要求するとほぼ全てフォールバックし本来の意図＝LLMタイトル採用が達成できない。拡張E26）。
-    // 必須はラベルと文字数のみ。捏造防止はプロンプト指示とstripNgWordsに委ねる。
+    // 必須はラベルと文字数のみ。捏造防止はプロンプト指示とstripNgWordsExcluding（CHAMPIONS除外）に委ねる。
     if (!checkLLMTitleQuality(candidate)) {
       return generateHookTitle(input, isControversial);
     }

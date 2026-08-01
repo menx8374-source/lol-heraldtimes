@@ -30,7 +30,7 @@ import {
 } from "@/lib/generation/thread-format";
 import { selectScoredAnchorReses } from "@/lib/generation/reaction-select";
 import { isAllowedEmbedUrl, embedProviderForUrl, isValidTweetStatusUrl } from "@/lib/embed";
-import { findNgWord, findNgWordExcluding, maskNgWords } from "@/lib/moderation/ng-words";
+import { findNgWordExcluding, maskNgWordsExcluding } from "@/lib/moderation/ng-words";
 import { PATCH_NOTES_MIN_LENGTH } from "@/lib/collection/adapters/riot-datadragon";
 import { CHAMPIONS } from "@/lib/generation/title";
 import { isSafeImageUrl } from "@/lib/image-url";
@@ -387,9 +387,12 @@ async function softenNgSentences(
     if (!normalized) return new Map();
 
     // 安全側の再検査: 言い換え結果にNGワードが残っていれば不採用にする(moderation保留の回避)。
+    // 判定は moderateArticleContent と同じ findNgWordExcluding(CHAMPIONS) にそろえる（reactqual-S3b）。
+    // 素の findNgWord だと「グレイブス」等チャンピオン名を誤検知して、moderationは通る言い換えを
+    // 過剰に不採用（→削除フォールバック）にしてしまうため。本物のNGは依然として不採用にする。
     const verified = new Map<number, string>();
     for (const [index, text] of normalized) {
-      if (findNgWord(text) === null) verified.set(index, text);
+      if (findNgWordExcluding(text, CHAMPIONS) === null) verified.set(index, text);
     }
     return verified;
   } catch {
@@ -726,7 +729,7 @@ async function buildReactionLinesBatch(
         .map((sentence, sentenceIndex) => {
           const ng = ngByPosition.get(`${key}:${lineIndex}:${sentenceIndex}`);
           if (!ng) return sentence; // 非NG文は逐語のまま変更しない
-          if (mode === "mask") return maskNgWords(sentence);
+          if (mode === "mask") return maskNgWordsExcluding(sentence, CHAMPIONS);
           if (mode === "soften") return softened.get(ng.index) ?? ""; // 採用不可は削除フォールバック
           return ""; // remove（既定の削除挙動）
         })

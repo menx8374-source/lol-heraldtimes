@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { findNgWord, stripNgWords, maskNgWords, findNgWordExcluding } from "@/lib/moderation/ng-words";
+import {
+  findNgWord,
+  stripNgWords,
+  maskNgWords,
+  findNgWordExcluding,
+  stripNgWordsExcluding,
+  maskNgWordsExcluding,
+} from "@/lib/moderation/ng-words";
 import { CHAMPIONS } from "@/lib/generation/title";
 import { detectPersonalAttack } from "@/lib/moderation/personal-attack";
 import { containsRumorMarker } from "@/lib/moderation/rumor";
@@ -76,6 +83,39 @@ describe("findNgWordExcluding（reactqual-S3: チャンピオン名との部分�
 
   it("NGワードを含まない文はnull", () => {
     expect(findNgWordExcluding("グレイブスの立ち回りが上手い", CHAMPIONS)).toBeNull();
+  });
+});
+
+describe("stripNgWordsExcluding / maskNgWordsExcluding（reactqual-S3b: タイトル生成・mask経路のチャンピオン名誤検知除外）", () => {
+  it("stripNgWordsExcludingはチャンピオン名（NGワードの部分文字列を含む）を保持しつつ、本物のNGワードは除去する", () => {
+    expect(stripNgWordsExcluding("グレイブスの育ち方が異常", CHAMPIONS)).toBe("グレイブスの育ち方が異常");
+    expect(stripNgWordsExcluding("グレイブス使ってるやつ死ね", CHAMPIONS)).toBe("グレイブス使ってるやつ");
+  });
+
+  it("stripNgWordsExcludingはチャンピオン名の外側に単独で存在するNGワードは従来どおり除去する", () => {
+    expect(stripNgWordsExcluding("このゴミチャンピオンは強い", CHAMPIONS)).toBe("このチャンピオンは強い");
+  });
+
+  it("stripNgWords（既存関数）の挙動は変わらない（チャンピオン名は保護されず誤って欠損する回帰確認）", () => {
+    expect(stripNgWords("グレイブスの育ち方が異常")).toBe("グレイの育ち方が異常");
+  });
+
+  it("maskNgWordsExcludingはチャンピオン名を保持しつつ、本物のNGワードは伏字化する", () => {
+    expect(maskNgWordsExcluding("グレイブスはゴミ", CHAMPIONS)).toBe("グレイブスは**");
+    expect(findNgWordExcluding(maskNgWordsExcluding("グレイブスはゴミ", CHAMPIONS), CHAMPIONS)).toBeNull();
+  });
+
+  it("maskNgWordsExcludingはチャンピオン名の外側に単独で存在するNGワードは従来どおり伏字化する", () => {
+    expect(maskNgWordsExcluding("このゴミチャンピオンは強い", CHAMPIONS)).toBe("この**チャンピオンは強い");
+  });
+
+  it("maskNgWords（既存関数）の挙動は変わらない（チャンピオン名を誤って伏字化する回帰確認）", () => {
+    expect(maskNgWords("グレイブスはゴミ")).toBe("グレイ**は**");
+  });
+
+  it("NGワードを含まない文はそのまま返す", () => {
+    expect(stripNgWordsExcluding("グレイブスの立ち回りが上手い", CHAMPIONS)).toBe("グレイブスの立ち回りが上手い");
+    expect(maskNgWordsExcluding("グレイブスの立ち回りが上手い", CHAMPIONS)).toBe("グレイブスの立ち回りが上手い");
   });
 });
 

@@ -94,3 +94,57 @@ export function stripNgWords(text: string): string {
 export function maskNgWords(text: string): string {
   return NG_WORDS.reduce((acc, word) => acc.split(word).join("*".repeat(word.length)), text);
 }
+
+/**
+ * `findNgWordExcluding` と同じ「除外語をマスクしてから照合する」方式で、`exemptions`
+ * （例: LoLチャンピオン名一覧）に完全に含まれる形で一致するNGワードは除去せず保持する
+ * （reactqual-S3b、タイトル生成での誤検知対応。例:「グレイブス」の「ブス」を誤って
+ * 削除しない）。exemptions 文字列に重ならない位置の本物のNGワードは従来どおり除去する。
+ * `stripNgWords` 自体のシグネチャ・挙動は変えず、この関数は別名の新規エクスポートとする。
+ */
+export function stripNgWordsExcluding(text: string, exemptions: readonly string[]): string {
+  const placeholder = "〓";
+  let masked = text;
+  const restoreMap: string[] = [];
+  for (const exemption of exemptions) {
+    if (exemption.length === 0) continue;
+    if (masked.includes(exemption)) {
+      const token = placeholder.repeat(exemption.length);
+      masked = masked.split(exemption).join(token);
+      restoreMap.push(exemption);
+    }
+  }
+  let stripped = NG_WORDS.reduce((acc, word) => acc.split(word).join(""), masked);
+  // マスクしたexemption文字列を元に戻す（プレースホルダ文字列は本文に自然出現しない前提）。
+  for (const exemption of restoreMap) {
+    const token = placeholder.repeat(exemption.length);
+    stripped = stripped.split(token).join(exemption);
+  }
+  return stripped;
+}
+
+/**
+ * `maskNgWords` の exemptions 対応版。`exemptions`（例: LoLチャンピオン名一覧）に完全に含まれる
+ * 形で一致するNGワードは伏字化せず保持する（reactqual-S3b、NG_REPHRASE_MODE=mask時の誤検知対応。
+ * 例:「グレイブス」の「ブス」を誤って伏字化しない）。`maskNgWords` 自体のシグネチャ・挙動は
+ * 変えず、この関数は別名の新規エクスポートとする。
+ */
+export function maskNgWordsExcluding(text: string, exemptions: readonly string[]): string {
+  const placeholder = "〓";
+  let masked = text;
+  const restoreMap: string[] = [];
+  for (const exemption of exemptions) {
+    if (exemption.length === 0) continue;
+    if (masked.includes(exemption)) {
+      const token = placeholder.repeat(exemption.length);
+      masked = masked.split(exemption).join(token);
+      restoreMap.push(exemption);
+    }
+  }
+  let result = NG_WORDS.reduce((acc, word) => acc.split(word).join("*".repeat(word.length)), masked);
+  for (const exemption of restoreMap) {
+    const token = placeholder.repeat(exemption.length);
+    result = result.split(token).join(exemption);
+  }
+  return result;
+}
