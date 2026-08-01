@@ -168,6 +168,20 @@ export const getArticleBySlug = cache(
 );
 
 /**
+ * 管理画面プレビュー専用（admincms-S1 F4）: status を問わず記事詳細を取得する。
+ * PUBLISHED_ONLY を経由しないため、要レビュー(review)・保留(held)等の記事も表示できる。
+ * `/admin` 配下（Basic認証・robots除外）からのみ呼び出すこと。公開サイト側では絶対に使わない。
+ */
+export async function getArticleByIdForAdminPreview(articleId: string): Promise<ArticleDetail | null> {
+  const article = await prisma.article.findUnique({
+    where: { id: articleId },
+    ...articleWithRelations,
+  });
+  if (!article) return null;
+  return toDetail(article);
+}
+
+/**
  * listArticles/listArticlesByCategory/listArticlesByTag に共通の「絞り込み条件→ページ結果」処理。
  * 月別アーカイブ（拡張E4, lib/archive.ts）も同じページング契約で流用するため export する。
  */

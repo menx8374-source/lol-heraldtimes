@@ -13,6 +13,10 @@ import {
   scheduleArticlePublish,
   cancelScheduledPublish,
   getArticleForEdit,
+  listReviewQueue,
+  countReviewQueue,
+  approveReviewArticle,
+  rejectReviewArticle,
 } from "@/lib/admin/articles-admin";
 import { UnauthorizedError } from "@/lib/auth/basic-auth";
 import { listArticles, listPopularArticles, PUBLISHED_ONLY } from "@/lib/articles";
@@ -209,13 +213,117 @@ describe("運営CMS 記事管理（認可ゲート含む）", () => {
     expect(await getArticleForEdit("nonexistent-id")).toBeNull();
   });
 
-  it("公開限定クエリ(PUBLISHED_ONLY)はheld/scheduled/rejectedをすべて除外する", async () => {
+  it("公開限定クエリ(PUBLISHED_ONLY)はheld/scheduled/rejected/reviewをすべて除外する", async () => {
     await createArticle({ slug: "s-held", status: "held" });
     await createArticle({ slug: "s-scheduled", status: "scheduled", scheduledAt: new Date(Date.now() + 3600_000) });
     await createArticle({ slug: "s-rejected", status: "rejected" });
+    await createArticle({ slug: "s-review", status: "review" });
     await createArticle({ slug: "s-published", status: "published" });
 
     const list = await listArticles(1, 20);
     expect(list.items.map((a) => a.slug)).toEqual(["s-published"]);
+  });
+});
+
+describe("レビューキュー（admincms-S1 F2、要レビュー状態の承認/却下）", () => {
+  const originalAdminUser = process.env.ADMIN_USER;
+  const originalAdminPassword = process.env.ADMIN_PASSWORD;
+
+  beforeEach(() => {
+    process.env.ADMIN_USER = "test-admin";
+    process.env.ADMIN_PASSWORD = "test-pass";
+  });
+
+  afterAll(() => {
+    process.env.ADMIN_USER = originalAdminUser;
+    process.env.ADMIN_PASSWORD = originalAdminPassword;
+  });
+
+  it("listReviewQueueはstatus=reviewの記事のみを新しい順(createdAt)で返し、出典URLを含める", async () => {
+    // createArticleヘルパーはcreatedAtを明示指定できない(@default(now())のため)ため、
+    // 順序を決定論的に検証するにはこのテストだけ直接prisma.article.createでcreatedAtを指定する。
+    const older = await prisma.article.create({
+      data: {
+        slug: "review-old",
+        title: "古い要レビュー記事",
+        category: "パッチ/メタ",
+        body: [{ type: "paragraph", text: "本文" }],
+        publishedAt: new Date("2026-07-20T00:00:00+09:00"),
+        createdAt: new Date("2026-07-20T00:00:00+09:00"),
+        status: "review",
+        sources: { create: [{ label: "reddit", url: "https://reddit.com/r/leagueoflegends/example" }] },
+      },
+    });
+    const newer = await prisma.article.create({
+      data: {
+        slug: "review-new",
+        title: "新しい要レビュー記事",
+        category: "パッチ/メタ",
+        body: [{ type: "paragraph", text: "本文" }],
+        publishedAt: new Date("2026-07-21T00:00:00+09:00"),
+        createdAt: new Date("2026-07-21T00:00:00+09:00"),
+        status: "review",
+        sources: { create: [{ label: "reddit", url: "https://reddit.com/r/leagueoflegends/newer" }] },
+      },
+    });
+    await createArticle({ slug: "not-review", status: "held" });
+    void older;
+
+    const queue = await listReviewQueue();
+    expect(queue.map((a) => a.slug)).toEqual(["review-new", "review-old"]);
+    expect(queue.find((a) => a.id === newer.id)?.sourceUrl).toBe(
+      "https://reddit.com/r/leagueoflegends/newer",
+    );
+  });
+
+  it("レビューキューが0件のときは空配列、countReviewQueueは0を返す", async () => {
+    expect(await listReviewQueue()).toEqual([]);
+    expect(await countReviewQueue()).toBe(0);
+  });
+
+  it("approveReviewArticleはstatus=reviewの記事のみpublishedへ遷移でき、未レビュー件数が減る", async () => {
+    const article = await createArticle({ slug: "to-approve", status: "review" });
+    expect(await countReviewQueue()).toBe(1);
+
+    await approveReviewArticle(article.id, authorizedContext());
+
+    const updated = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
+    expect(updated.status).toBe("published");
+    expect(await countReviewQueue()).toBe(0);
+
+    const publicList = await listArticles(1, 20);
+    expect(publicList.items.some((a) => a.slug === article.slug)).toBe(true);
+  });
+
+  it("rejectReviewArticleはstatus=reviewの記事のみrejectedへ遷移でき、公開限定クエリから除外される", async () => {
+    const article = await createArticle({ slug: "to-reject", status: "review" });
+    await rejectReviewArticle(article.id, authorizedContext());
+
+    const updated = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
+    expect(updated.status).toBe("rejected");
+
+    const publicList = await listArticles(1, 20);
+    expect(publicList.items.some((a) => a.slug === article.slug)).toBe(false);
+  });
+
+  it("approveReviewArticle/rejectReviewArticleはstatus=review以外の記事には不正な遷移として拒否し、状態を変えない", async () => {
+    const heldArticle = await createArticle({ slug: "not-review-for-approve", status: "held" });
+    await expect(approveReviewArticle(heldArticle.id, authorizedContext())).rejects.toThrow();
+    const unchanged1 = await prisma.article.findUniqueOrThrow({ where: { id: heldArticle.id } });
+    expect(unchanged1.status).toBe("held");
+
+    const publishedArticle = await createArticle({ slug: "not-review-for-reject", status: "published" });
+    await expect(rejectReviewArticle(publishedArticle.id, authorizedContext())).rejects.toThrow();
+    const unchanged2 = await prisma.article.findUniqueOrThrow({ where: { id: publishedArticle.id } });
+    expect(unchanged2.status).toBe("published");
+  });
+
+  it("未認証コンテキストではapproveReviewArticle/rejectReviewArticleが拒否され、DBを変更しない", async () => {
+    const article = await createArticle({ slug: "review-unauth", status: "review" });
+    await expect(approveReviewArticle(article.id, UNAUTHORIZED)).rejects.toThrow(UnauthorizedError);
+    await expect(rejectReviewArticle(article.id, UNAUTHORIZED)).rejects.toThrow(UnauthorizedError);
+
+    const unchanged = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
+    expect(unchanged.status).toBe("review");
   });
 });

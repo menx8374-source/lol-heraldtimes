@@ -1,7 +1,7 @@
 /**
  * 統合パイプラインの単独実行スクリプト。`npm run pipeline` で実行する（F10）。
  * 収集→重複排除→記事生成→タイトル生成→安全フィルタ→公開までを人手介入なしで1回実行し、
- * 実行結果のサマリ（収集件数・記事化候補数・生成成功/失敗数・公開数・保留数）を標準出力へ表示する。
+ * 実行結果のサマリ（収集件数・記事化候補数・生成成功/失敗数・公開数・保留数・要レビュー数）を標準出力へ表示する。
  * 実際のcron常駐は不要（brief方針）。繰り返し実行はこのスクリプトを間隔(PIPELINE_INTERVAL_MS)を
  * 空けて再度起動する運用を想定し、次回実行の目安時刻を表示するのみに留める。
  */
@@ -10,6 +10,7 @@
 import "dotenv/config";
 import { runFullPipeline } from "../src/lib/pipeline/run-pipeline";
 import { getPipelineConfig, computeNextRunAt } from "../src/lib/pipeline/config";
+import { formatPublicationStatus, formatRunSummaryLine } from "../src/lib/pipeline/cli-format";
 import { prisma } from "../src/lib/prisma";
 
 async function main() {
@@ -35,16 +36,14 @@ async function main() {
   for (const r of report.generationSummary?.results ?? []) {
     const sourceId = "postId" in r ? `postId=${r.postId}` : `collectedItemId=${r.collectedItemId}`;
     if (r.status === "success") {
-      const pub = r.publicationStatus === "held" ? `held(理由:${r.heldReason})` : "published";
+      const pub = formatPublicationStatus(r);
       console.log(`  [生成] ${sourceId} -> articleId=${r.articleId} status=${pub}`);
     } else {
       console.log(`  [生成失敗] ${sourceId}: ${r.errorMessage}`);
     }
   }
 
-  console.log(
-    `実行サマリ: 収集=${report.collectedCount} 候補=${report.candidateCount} 生成成功=${report.generationSucceeded} 生成失敗=${report.generationFailed} 公開=${report.publishedCount} 保留=${report.heldCount} 予約公開昇格=${report.scheduledPublishedCount}`,
-  );
+  console.log(formatRunSummaryLine(report));
   if (report.status === "failure") {
     console.log(`  ※想定外のエラーが発生しましたが、パイプラインは正常終了しました: ${report.errorMessage}`);
   }

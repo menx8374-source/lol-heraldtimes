@@ -16,6 +16,8 @@ export type RunHistoryEntry = {
   generationFailed: number;
   publishedCount: number;
   heldCount: number;
+  /** カテゴリの公開ポリシーにより要レビュー(status="review")として保存された件数（admincms-S1 F3）。 */
+  reviewCount: number;
   errorMessage: string | null;
 };
 
@@ -34,6 +36,7 @@ export async function listRunHistory(limit = 20): Promise<RunHistoryEntry[]> {
     generationFailed: r.generationFailed,
     publishedCount: r.publishedCount,
     heldCount: r.heldCount,
+    reviewCount: r.reviewCount,
     errorMessage: r.errorMessage,
   }));
 }

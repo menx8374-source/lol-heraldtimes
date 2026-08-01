@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>運営CMS v2 画面ワイヤーフレーム</title>
+    <style>
+      /* グレースケールのみ。配色・タイポグラフィ等の実装判断は含まない（枠と位置関係だけを示す） */
+      body {
+        margin: 0;
+        padding: 24px;
+        background: #f2f2f2;
+        color: #222;
+        font-family: sans-serif;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+      h1 {
+        font-size: 18px;
+      }
+      .note {
+        color: #555;
+        font-size: 12px;
+        margin-bottom: 20px;
+      }
+      .screen {
+        background: #fff;
+        border: 2px solid #444;
+        border-radius: 4px;
+        padding: 16px;
+        margin-bottom: 28px;
+      }
+      .screen > h2 {
+        font-size: 15px;
+        margin: 0 0 4px;
+        border-bottom: 1px solid #999;
+        padding-bottom: 6px;
+      }
+      .screen > .desc {
+        color: #555;
+        font-size: 12px;
+        margin: 6px 0 14px;
+      }
+      .box {
+        border: 1px solid #888;
+        background: #eaeaea;
+        padding: 6px 8px;
+        margin: 4px 0;
+        border-radius: 2px;
+      }
+      .box.solid {
+        background: #d5d5d5;
+        border-color: #666;
+      }
+      .box.light {
+        background: #f7f7f7;
+      }
+      .box.dashed {
+        border-style: dashed;
+        background: #f7f7f7;
+      }
+      .panel {
+        border: 1px solid #666;
+        padding: 10px;
+        margin: 10px 0;
+        background: #fbfbfb;
+      }
+      .panel > .title {
+        font-weight: bold;
+        margin-bottom: 6px;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .row > * {
+        margin: 4px 0;
+      }
+      .grow {
+        flex: 1;
+        min-width: 120px;
+      }
+      .cols {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+      }
+      .col {
+        flex: 1;
+      }
+      .muted {
+        color: #666;
+      }
+      .small {
+        font-size: 11px;
+      }
+      ul.plain {
+        margin: 4px 0;
+        padding-left: 18px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>運営CMS v2 画面ワイヤーフレーム（グレースケール／構造のみ）</h1>
+    <p class="note">
+      「どの画面に、どの情報と操作が並ぶか」だけを示す簡易ワイヤーフレームです。配色・フォント・コンポーネント構成などの
+      実装判断は含みません。角括弧付きの矩形は UI 要素のプレースホルダーです。既存画面（/admin ダッシュボード）に対しては
+      追加するパネルを明示しています。
+    </p>
+
+    <!-- 画面1 -->
+    <section class="screen">
+      <h2>画面1: /admin 運営ダッシュボード（既存画面＋本追加のパネル）</h2>
+      <p class="desc">Basic 認証の内側。既存セクションはそのまま残し、上部に「未レビュー件数」「公開ポリシー」「指定URLから記事化」「レビューキュー」を追加する。</p>
+
+      <div class="box solid">[ページ見出: 運営監視ダッシュボード]　[バッジ: 未レビュー N件]</div>
+
+      <div class="panel">
+        <div class="title">［新規］公開ポリシー（カテゴリ別 自動公開 / 要レビュー）</div>
+        <div class="row"><div class="box grow">[カテゴリ名: 5chの反応]</div><div class="box">[トグル: 要レビュー ⇄ 自動公開]</div><div class="box light">[現在: 要レビュー]</div></div>
+        <div class="row"><div class="box grow">[カテゴリ名: 海外の反応]</div><div class="box">[トグル]</div><div class="box light">[現在: 要レビュー]</div></div>
+        <div class="row"><div class="box grow">[カテゴリ名: Xの反応]</div><div class="box">[トグル]</div><div class="box light">[現在: 要レビュー]</div></div>
+        <div class="row"><div class="box grow">[カテゴリ名: パッチ/メタ]</div><div class="box">[トグル]</div><div class="box light">[現在: 自動公開]</div></div>
+        <div class="row"><div class="box grow">[カテゴリ名: Riot公式]</div><div class="box">[トグル]</div><div class="box light">[現在: 要レビュー]</div></div>
+        <div class="row"><div class="box grow">[カテゴリ名: eスポーツ]</div><div class="box">[トグル]</div><div class="box light">[現在: 要レビュー]</div></div>
+        <div class="box dashed small">[説明文: 既定は全カテゴリ「要レビュー」。自動公開にしたカテゴリは従来どおり即公開されます]</div>
+      </div>
+
+      <div class="panel">
+        <div class="title">［新規］指定URLから記事化（X投稿 / Redditスレッド）</div>
+        <div class="row">
+          <div class="box grow">[入力: 記事化したい X投稿URL または RedditスレッドURL]</div>
+          <div class="box solid">[実行ボタン: 記事化する]</div>
+        </div>
+        <div class="box dashed small">[説明: 盛り上がり判定は無視して強制的に下書きを作成します。5chは対象外。作成された記事は「要レビュー」で保存されます]</div>
+        <div class="box light small">[状態表示: 実行中… / 記事を作成しました → [プレビュー] [編集] / エラーメッセージ]</div>
+        <div class="box dashed small">[警告（X_API_KEY未設定時のみ）: XのAPIキーが未設定のため、X投稿URLからの記事化は利用できません]</div>
+      </div>
+
+      <div class="panel">
+        <div class="title">［新規］レビューキュー（要レビュー）</div>
+        <div class="row">
+          <div class="box">[フィルタ: カテゴリ絞り込み（すべて / 各カテゴリ）]</div>
+          <div class="box">[まとめて承認ボタン]</div>
+          <div class="box light small">[結果表示: 承認 N件 / 失敗 M件（理由）]</div>
+        </div>
+        <div class="box">
+          <div class="row">
+            <div class="box light">[チェックボックス]</div>
+            <div class="box grow">[記事タイトル]</div>
+            <div class="box light small">[カテゴリ]</div>
+            <div class="box light small">[生成日時]</div>
+          </div>
+          <div class="box light small">[出典リンク: 元スレッド/元ポストURL]</div>
+          <div class="row">
+            <div class="box solid">[承認して公開]</div>
+            <div class="box">[却下]</div>
+            <div class="box">[編集する]</div>
+            <div class="box">[プレビュー]</div>
+          </div>
+        </div>
+        <div class="box light small">[同じ形の記事行が繰り返し／0件時: 「要レビューの記事はありません」]</div>
+      </div>
+
+      <div class="panel">
+        <div class="title">［既存・変更なし］以降のセクション</div>
+        <div class="box light">[直近の実行結果テーブル（収集/生成/公開/保留/※要レビュー回付数を追加表示）]</div>
+        <div class="box light">[保留キュー（承認して公開 / 却下 / 予約公開に設定）]</div>
+        <div class="box light">[保留コメント（承認 / 削除）]</div>
+        <div class="box light">[記事管理（状態ラベルに「要レビュー」を追加／編集リンク・ピン留め・予約解除）]</div>
+        <div class="box light">[公開記事の総数 ／ 人気記事ランキング ／ エラー・失敗ログ]</div>
+      </div>
+    </section>
+
+    <!-- 画面2 -->
+    <section class="screen">
+      <h2>画面2: 公開前プレビュー（/admin 配下・新規）</h2>
+      <p class="desc">要レビュー記事を、公開記事ページと同じ体裁で確認する画面。ここから承認・編集に進む。認証内側・検索エンジン非インデックス。</p>
+
+      <div class="row">
+        <div class="box grow solid">[見出し: プレビュー（このページは公開されていません）]</div>
+        <div class="box light">[状態バッジ: 要レビュー]</div>
+      </div>
+      <div class="row">
+        <div class="box solid">[承認して公開]</div>
+        <div class="box">[編集する]</div>
+        <div class="box">[却下]</div>
+        <div class="box">[レビューキューに戻る]</div>
+      </div>
+
+      <div class="panel">
+        <div class="title">記事本体（公開ページと同じ構造で描画）</div>
+        <div class="box light">[サムネイル画像領域]</div>
+        <div class="box">[記事タイトル]</div>
+        <div class="row">
+          <div class="box light small">[カテゴリ]</div>
+          <div class="box light small">[タグ1] [タグ2]</div>
+          <div class="box light small">[生成日時]</div>
+        </div>
+        <div class="box light">[本文ブロック: 目次 / 見出し / 段落 / 引用]</div>
+        <div class="box light">[本文ブロック: レス枠（番号: 名前・本文行・強調色・アンカー）が連続する枠]</div>
+        <div class="box light">[本文ブロック: 埋め込みカード（提供元・URL・キャプション）]</div>
+        <div class="box light">[本文ブロック: パッチ変更表（対象名・方向・スキル別の変更行）]</div>
+        <div class="box light small">[出典リンク／AI生成の注記（公開ページと同じ表示）]</div>
+      </div>
+    </section>
+
+    <!-- 画面3 -->
+    <section class="screen">
+      <h2>画面3: フル構造エディタ（反応記事: 5ch / 海外 / X）</h2>
+      <p class="desc">既存の「本文＝生JSONのtextarea」を置き換える画面。上部に記事メタ、下部にブロックのカード列。公開前・公開後の両方で同じ画面を使う。</p>
+
+      <div class="box solid">[見出し: 記事編集]　[状態バッジ: 要レビュー / 公開中]</div>
+      <div class="box dashed small">[エラー表示領域: 保存できません — ブロック[3] のレス本文行が空です 等]</div>
+
+      <div class="panel">
+        <div class="title">記事メタ</div>
+        <div class="row"><div class="box grow">[入力: タイトル]</div></div>
+        <div class="row"><div class="box grow">[入力: 要約（メタディスクリプション）]</div></div>
+        <div class="row">
+          <div class="box">[選択: カテゴリ]</div>
+          <div class="box grow">[入力: タグ（追加）] [タグ1 ×] [タグ2 ×]</div>
+        </div>
+        <div class="row">
+          <div class="box grow">[入力: サムネイルURL]</div>
+          <div class="box">[選択: 公開状態（要レビュー / 公開）]</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="title">本文ブロック（カード列）</div>
+
+        <div class="box">
+          <div class="row">
+            <div class="box light small">[種別: Redditソース]</div>
+            <div class="box small">[↑]</div><div class="box small">[↓]</div><div class="box small">[削除]</div>
+          </div>
+          <div class="row"><div class="box grow">[入力: 元スレタイトル]</div></div>
+          <div class="row"><div class="box">[入力: 作者]</div><div class="box">[入力: サブレディット]</div><div class="box grow">[入力: 元スレURL]</div></div>
+        </div>
+
+        <div class="box">
+          <div class="row">
+            <div class="box light small">[種別: 見出し]</div>
+            <div class="box small">[↑]</div><div class="box small">[↓]</div><div class="box small">[削除]</div>
+          </div>
+          <div class="row"><div class="box grow">[入力: 見出しテキスト]</div><div class="box">[入力: アンカー]</div></div>
+        </div>
+
+        <div class="box">
+          <div class="row">
+            <div class="box light small">[種別: レス]</div>
+            <div class="box small">[↑]</div><div class="box small">[↓]</div><div class="box small">[削除]</div>
+          </div>
+          <div class="row">
+            <div class="box">[入力: レス番号]</div>
+            <div class="box grow">[入力: 名前]</div>
+            <div class="box">[入力: アンカー（返信先番号）]</div>
+          </div>
+          <div class="row">
+            <div class="box">[チェック: レス全体を強調]</div>
+            <div class="box">[選択: 強調色（赤/青/紫/オレンジ）]</div>
+          </div>
+          <div class="row"><div class="box grow">[入力: 本文行1]</div><div class="box">[選択: 行の強調（なし/赤/オレンジ）]</div><div class="box small">[行を削除]</div></div>
+          <div class="row"><div class="box grow">[入力: 本文行2]</div><div class="box">[選択: 行の強調]</div><div class="box small">[行を削除]</div></div>
+          <div class="row"><div class="box">[行を追加]</div></div>
+        </div>
+
+        <div class="box">
+          <div class="row">
+            <div class="box light small">[種別: 埋め込み]</div>
+            <div class="box small">[↑]</div><div class="box small">[↓]</div><div class="box small">[削除]</div>
+          </div>
+          <div class="row"><div class="box">[選択: 提供元]</div><div class="box grow">[入力: URL]</div><div class="box grow">[入力: キャプション]</div></div>
+        </div>
+
+        <div class="box dashed">
+          <div class="row">
+            <div class="box">[ブロックを追加: 種別を選択（レス / 見出し / 段落 / 引用 / 埋め込み / 画像）]</div>
+            <div class="box">[挿入位置: 末尾 / このブロックの直後]</div>
+            <div class="box solid">[追加]</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="box solid">[保存する]</div>
+        <div class="box">[プレビュー]</div>
+        <div class="box">[キャンセル]</div>
+      </div>
+    </section>
+
+    <!-- 画面4 -->
+    <section class="screen">
+      <h2>画面4: フル構造エディタ（パッチ記事のブロック型）</h2>
+      <p class="desc">画面3と同じ枠組みで、パッチ/メタ記事に使うブロック型のカードを扱う。メタ欄・保存・プレビュー・キャンセルは画面3と共通。</p>
+
+      <div class="panel">
+        <div class="title">本文ブロック（カード列・パッチ記事の例）</div>
+
+        <div class="box">
+          <div class="row">
+            <div class="box light small">[種別: 目次]</div>
+            <div class="box small">[↑]</div><div class="box small">[↓]</div><div class="box small">[削除]</div>
+          </div>
+          <div class="row"><div class="box grow">[入力: 項目1 表示名]</div><div class="box">[入力: リンク先アンカー]</div><div class="box small">[項目を削除]</div></div>
+          <div class="row"><div class="box">[項目を追加]</div></div>
+        </div>
+
+        <div class="box">
+          <div class="row">
+            <div class="box light small">[種別: 画像]</div>
+            <div class="box small">[↑]</div><div class="box small">[↓]</div><div class="box small">[削除]</div>
+          </div>
+          <div class="row"><div class="box grow">[入力: 画像URL]</div><div class="box grow">[入力: 代替テキスト]</div><div class="box">[入力: クレジット]</div></div>
+        </div>
+
+        <div class="box">
+          <div class="row">
+            <div class="box light small">[種別: パッチ変更]</div>
+            <div class="box small">[↑]</div><div class="box small">[↓]</div><div class="box small">[削除]</div>
+          </div>
+          <div class="row">
+            <div class="box grow">[入力: 対象名]</div>
+            <div class="box">[選択: 対象種別（チャンピオン/アイテム/ルーン/システム/バグ修正/アリーナ/オーグメント/その他）]</div>
+            <div class="box">[選択: 方向（バフ/ナーフ/調整）]</div>
+          </div>
+          <div class="row"><div class="box grow">[入力: 変更意図]</div></div>
+
+          <div class="box light">
+            <div class="row"><div class="box">[選択: スキル区分（パッシブ/Q/W/E/R/基礎ステータス）]</div><div class="box grow">[入力: スキル名]</div><div class="box small">[グループを削除]</div></div>
+            <div class="row"><div class="box">[入力: 項目名]</div><div class="box">[入力: 変更前]</div><div class="box">[入力: 変更後]</div><div class="box small">[行を削除]</div></div>
+            <div class="row"><div class="box grow">[入力: 記述式変更の本文]</div><div class="box small">[行を削除]</div></div>
+            <div class="row"><div class="box">[数値変更の行を追加]</div><div class="box">[記述式変更の行を追加]</div></div>
+          </div>
+          <div class="row"><div class="box">[グループを追加]</div></div>
+        </div>
+
+        <div class="box">
+          <div class="row">
+            <div class="box light small">[種別: リンクボタン]</div>
+            <div class="box small">[↑]</div><div class="box small">[↓]</div><div class="box small">[削除]</div>
+          </div>
+          <div class="row"><div class="box grow">[入力: ボタンラベル]</div><div class="box grow">[入力: URL（https のみ）]</div></div>
+        </div>
+
+        <div class="box dashed">
+          <div class="row">
+            <div class="box">[ブロックを追加: 種別を選択（パッチ変更 / 目次 / 見出し / 段落 / 画像 / リンクボタン）]</div>
+            <div class="box">[挿入位置]</div>
+            <div class="box solid">[追加]</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 画面5 -->
+    <section class="screen">
+      <h2>画面5: 手動記事化の結果表示（状態バリエーション）</h2>
+      <p class="desc">画面1の「指定URLから記事化」パネルの状態表示領域が取り得る表示。運営者が次に何をすればよいか分かることを重視する。</p>
+      <div class="cols">
+        <div class="col">
+          <div class="box light small">成功</div>
+          <div class="box">[記事を作成しました（要レビュー）] [プレビュー] [編集]</div>
+          <div class="box light small">記事化済み</div>
+          <div class="box">[このURLは記事化済みです] [既存の記事を開く]</div>
+          <div class="box light small">実行中</div>
+          <div class="box">[取得中…（実行ボタンは無効）]</div>
+        </div>
+        <div class="col">
+          <div class="box light small">URL 形式エラー</div>
+          <div class="box">[この URL 形式には対応していません（対応: X投稿URL / RedditスレッドURL）]</div>
+          <div class="box light small">取得失敗</div>
+          <div class="box">[元の投稿が見つかりません（削除済み・非公開の可能性）]</div>
+          <div class="box">[取得回数の上限に達しました。時間をおいて再実行してください]</div>
+          <div class="box light small">キー未設定</div>
+          <div class="box">[XのAPIキーが未設定のため利用できません]</div>
+          <div class="box light small">安全フィルタで保留</div>
+          <div class="box">[記事は作成されましたが安全フィルタにより保留です → 保留キューを確認]</div>
+        </div>
+      </div>
+    </section>
+  </body>
+</html>

@@ -21,6 +21,7 @@ vi.mock("@/lib/generation/generate-article", async (importOriginal) => {
 
 import { generateArticlesFromHotPosts, extractPostXReplies } from "@/lib/generation/post-pipeline";
 import { generateArticleForCandidate } from "@/lib/generation/generate-article";
+import { CATEGORY_LABELS } from "@/lib/categories";
 
 async function resetDb() {
   await prisma.articleSource.deleteMany();
@@ -29,6 +30,12 @@ async function resetDb() {
   await prisma.postMetricsHistory.deleteMany();
   await prisma.post.deleteMany();
   await prisma.tag.deleteMany();
+  // admincms-S1: このファイルはXリプライ配線の検証が目的のため、既定「全カテゴリ要レビュー」に
+  // よる回帰を避けるべく全カテゴリを自動公開にしておく。
+  await prisma.categoryPublishPolicy.deleteMany();
+  await prisma.categoryPublishPolicy.createMany({
+    data: CATEGORY_LABELS.map((category) => ({ category, autoPublish: true })),
+  });
 }
 
 const llm = new MockLLMClient();

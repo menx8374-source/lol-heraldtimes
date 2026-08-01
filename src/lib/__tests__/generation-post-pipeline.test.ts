@@ -14,6 +14,7 @@ import { nextPublishSlots } from "@/lib/generation/publish-schedule";
 import { parseArticleBody } from "@/lib/article-body";
 import fs from "node:fs";
 import path from "node:path";
+import { CATEGORY_LABELS } from "@/lib/categories";
 
 const PATCH_FIXTURE_HTML = fs.readFileSync(
   path.join(__dirname, "..", "generation", "__fixtures__", "patch-26-14.html"),
@@ -27,6 +28,13 @@ async function resetDb() {
   await prisma.postMetricsHistory.deleteMany();
   await prisma.post.deleteMany();
   await prisma.tag.deleteMany();
+  // admincms-S1: このファイルはhotness/moderation/dedup等の検証が目的のため、既定「全カテゴリ
+  // 要レビュー」による回帰を避けるべく全カテゴリを自動公開にしておく（カテゴリポリシー自体の
+  // 検証は category-policy.test.ts / generation-post-pipeline-category-policy.test.ts が担う）。
+  await prisma.categoryPublishPolicy.deleteMany();
+  await prisma.categoryPublishPolicy.createMany({
+    data: CATEGORY_LABELS.map((category) => ({ category, autoPublish: true })),
+  });
 }
 
 /** SEO_SYSTEM_PROMPT向けの呼び出しだけ有効なSEO JSONを返し、それ以外はMockLLMClientに委譲するスタブ（S5b）。 */

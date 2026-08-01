@@ -9,7 +9,8 @@ import {
 } from "@/lib/dashboard";
 import { formatPublishedAt } from "@/lib/format";
 import { listHeldCommentsForAdmin } from "@/lib/admin/comments-admin";
-import { listArticlesForAdmin } from "@/lib/admin/articles-admin";
+import { listArticlesForAdmin, listReviewQueue } from "@/lib/admin/articles-admin";
+import { getCategoryPoliciesForDisplay } from "@/lib/admin/category-policy";
 import {
   approveArticleAction,
   rejectArticleAction,
@@ -18,6 +19,9 @@ import {
   cancelScheduleAction,
   approveCommentAction,
   rejectCommentAction,
+  approveReviewArticleAction,
+  rejectReviewArticleAction,
+  setCategoryPolicyAction,
 } from "@/app/admin/actions";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -25,6 +29,7 @@ const STATUS_LABELS: Record<string, string> = {
   held: "保留中",
   rejected: "却下済み",
   scheduled: "予約公開待ち",
+  review: "要レビュー",
 };
 
 // パイプライン実行直後の最新状態を必ず反映するため、キャッシュせず毎回DBから取得する。
@@ -43,24 +48,154 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 export default async function AdminDashboardPage() {
-  const [runHistory, publishedTotal, popularArticles, heldArticles, failureLog, heldComments, adminArticles] =
-    await Promise.all([
-      listRunHistory(),
-      countPublishedArticles(),
-      getPopularArticlesForDashboard(),
-      getHeldArticlesForDashboard(),
-      listFailureLog(),
-      listHeldCommentsForAdmin(),
-      listArticlesForAdmin(),
-    ]);
+  const [
+    runHistory,
+    publishedTotal,
+    popularArticles,
+    heldArticles,
+    failureLog,
+    heldComments,
+    adminArticles,
+    reviewQueue,
+    categoryPolicies,
+  ] = await Promise.all([
+    listRunHistory(),
+    countPublishedArticles(),
+    getPopularArticlesForDashboard(),
+    getHeldArticlesForDashboard(),
+    listFailureLog(),
+    listHeldCommentsForAdmin(),
+    listArticlesForAdmin(),
+    listReviewQueue(),
+    getCategoryPoliciesForDisplay(),
+  ]);
+  // バッジ件数は全件取得済みの reviewQueue から導出する（listReviewQueue はtake未指定で全件返すため
+  // 別COUNTクエリは不要）。
+  const reviewQueueCount = reviewQueue.length;
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100">
       <div className="mx-auto max-w-5xl px-4 py-8">
-        <h1 className="text-2xl font-bold">運営監視ダッシュボード</h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <h1 className="text-2xl font-bold">運営監視ダッシュボード</h1>
+          <span
+            data-review-queue-badge
+            className={
+              reviewQueueCount > 0
+                ? "rounded-full bg-amber-600 px-3 py-1 text-sm font-bold text-white"
+                : "rounded-full bg-neutral-800 px-3 py-1 text-sm font-bold text-neutral-300"
+            }
+          >
+            未レビュー {reviewQueueCount}件
+          </span>
+        </div>
         <p className="mt-1 text-sm text-neutral-400">
           自動運営パイプラインの稼働状況を確認する管理用ページです（非公開・一般閲覧者には非表示）。
         </p>
+
+        <section className="mt-8">
+          <h2 className="text-lg font-bold">公開ポリシー</h2>
+          <p className="mt-1 text-xs text-neutral-400">
+            カテゴリごとに「自動公開」か「要レビュー」かを設定する。未設定のカテゴリは既定で「要レビュー」。
+          </p>
+          <ul className="mt-3 flex flex-col gap-2">
+            {categoryPolicies.map((policy) => (
+              <li
+                key={policy.category}
+                className="flex flex-wrap items-center gap-3 rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm"
+              >
+                <span className="min-w-[8rem] font-bold">{policy.category}</span>
+                <span
+                  data-policy-status
+                  className={
+                    policy.autoPublish
+                      ? "rounded bg-emerald-900 px-2 py-0.5 text-xs text-emerald-300"
+                      : "rounded bg-neutral-800 px-2 py-0.5 text-xs text-neutral-300"
+                  }
+                >
+                  {policy.autoPublish ? "自動公開" : "要レビュー"}
+                </span>
+                <form action={setCategoryPolicyAction} className="ml-auto">
+                  <input type="hidden" name="category" value={policy.category} />
+                  <input type="hidden" name="autoPublish" value={policy.autoPublish ? "false" : "true"} />
+                  <button
+                    type="submit"
+                    className="rounded border border-neutral-700 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+                  >
+                    {policy.autoPublish ? "要レビューに切替" : "自動公開に切替"}
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="mt-8">
+          <h2 className="text-lg font-bold">レビューキュー（要レビュー）</h2>
+          {reviewQueue.length === 0 ? (
+            <p className="mt-2 text-sm text-neutral-400">要レビューの記事はありません。</p>
+          ) : (
+            <ul className="mt-3 flex flex-col gap-2">
+              {reviewQueue.map((article) => (
+                <li
+                  key={article.id}
+                  className="rounded-lg border border-sky-900 bg-sky-950/30 px-3 py-2 text-sm"
+                >
+                  <div className="flex flex-wrap items-baseline gap-2">
+                    <span className="rounded bg-sky-900 px-2 py-0.5 text-xs text-sky-300">{article.category}</span>
+                    <span className="font-bold">{article.title}</span>
+                    <span className="text-xs text-neutral-500">{formatPublishedAt(article.createdAt)}</span>
+                  </div>
+                  {article.sourceUrl && (
+                    <p className="mt-1 truncate text-xs text-neutral-500">
+                      出典:{" "}
+                      <a
+                        href={article.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer nofollow"
+                        className="text-sky-400 hover:underline"
+                      >
+                        {article.sourceUrl}
+                      </a>
+                    </p>
+                  )}
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Link
+                      href={`/admin/articles/${article.id}/preview`}
+                      className="rounded border border-neutral-700 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+                    >
+                      プレビュー
+                    </Link>
+                    <Link
+                      href={`/admin/articles/${article.id}/edit`}
+                      className="rounded border border-neutral-700 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+                    >
+                      編集
+                    </Link>
+                    <form action={approveReviewArticleAction}>
+                      <input type="hidden" name="articleId" value={article.id} />
+                      <button
+                        type="submit"
+                        className="rounded bg-emerald-700 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-600"
+                      >
+                        承認して公開
+                      </button>
+                    </form>
+                    <form action={rejectReviewArticleAction}>
+                      <input type="hidden" name="articleId" value={article.id} />
+                      <button
+                        type="submit"
+                        className="rounded bg-red-800 px-3 py-1 text-xs font-bold text-white hover:bg-red-700"
+                      >
+                        却下
+                      </button>
+                    </form>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
         <section className="mt-8">
           <h2 className="text-lg font-bold">直近の実行結果</h2>
@@ -78,6 +213,7 @@ export default async function AdminDashboardPage() {
                     <th className="px-3 py-2 text-right">生成失敗</th>
                     <th className="px-3 py-2 text-right">公開件数</th>
                     <th className="px-3 py-2 text-right">保留件数</th>
+                    <th className="px-3 py-2 text-right">要レビュー件数</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -103,6 +239,7 @@ export default async function AdminDashboardPage() {
                       <td className="px-3 py-2 text-right">{run.generationFailed}</td>
                       <td className="px-3 py-2 text-right">{run.publishedCount}</td>
                       <td className="px-3 py-2 text-right">{run.heldCount}</td>
+                      <td className="px-3 py-2 text-right">{run.reviewCount}</td>
                     </tr>
                   ))}
                 </tbody>

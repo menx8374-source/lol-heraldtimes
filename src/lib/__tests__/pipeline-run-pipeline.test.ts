@@ -9,6 +9,7 @@ import { runFullPipeline, type PipelineRunOptions } from "@/lib/pipeline/run-pip
 import { rebuildCandidateQueue } from "@/lib/collection/queue";
 import { MockLLMClient } from "@/lib/generation/llm-client";
 import type { RawCollectionItem, SourceAdapter, SourceType } from "@/lib/collection/types";
+import { CATEGORY_LABELS } from "@/lib/categories";
 
 /**
  * このテストファイルは実APIを叩かない方針のため、championMap は明示的にnull
@@ -54,6 +55,13 @@ async function resetDb() {
   await prisma.collectedItem.deleteMany();
   await prisma.article.deleteMany();
   await prisma.tag.deleteMany();
+  // admincms-S1: このファイルは統合パイプライン(収集〜公開の完走・上限・重複防止等)の検証が
+  // 目的のため、既定「全カテゴリ要レビュー」による回帰を避けるべく全カテゴリを自動公開にしておく
+  // （カテゴリポリシー自体の検証は category-policy.test.ts が担う）。
+  await prisma.categoryPublishPolicy.deleteMany();
+  await prisma.categoryPublishPolicy.createMany({
+    data: CATEGORY_LABELS.map((category) => ({ category, autoPublish: true })),
+  });
 }
 
 beforeEach(async () => {
@@ -356,6 +364,35 @@ describe("runFullPipeline（統合パイプライン）", () => {
 
     expect(receivedOptions?.maxCandidates).toBe(1);
     expect(receivedOptions?.maxPerCategory).toBeUndefined();
+  });
+
+  it("カテゴリのポリシーが要レビューだと、report.reviewCountに件数が反映されPipelineRunLogにも記録される(admincms-S1 F3)", async () => {
+    // resetDbで全カテゴリautoPublish=trueに揃えているため、riot(パッチ/メタ)だけ要レビューに上書きする。
+    await prisma.categoryPublishPolicy.upsert({
+      where: { category: "パッチ/メタ" },
+      create: { category: "パッチ/メタ", autoPublish: false },
+      update: { autoPublish: false },
+    });
+    const adapters = [
+      new FakeAdapter("riot", [
+        item({
+          sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/patch-review-count/",
+          title: "要レビュー件数確認用パッチノート",
+          content: "要レビュー件数(reviewCount)がPipelineRunLogに記録されることを確認するための本文。",
+        }),
+      ]),
+    ];
+
+    const report = await runPipeline({ adapters, llmClient: llm, now: T0 });
+
+    expect(report.publishedCount).toBe(0);
+    expect(report.reviewCount).toBe(1);
+
+    const reviewTotal = await prisma.article.count({ where: { status: "review" } });
+    expect(reviewTotal).toBe(1);
+
+    const log = await prisma.pipelineRunLog.findFirst({ orderBy: { startedAt: "desc" } });
+    expect(log?.reviewCount).toBe(1);
   });
 
   it("工程をまたぐ想定外の例外が起きてもクラッシュせず、実行ログに失敗として記録して正常終了する", async () => {

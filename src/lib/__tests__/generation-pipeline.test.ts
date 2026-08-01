@@ -13,6 +13,7 @@ import { SEO_SYSTEM_PROMPT } from "@/lib/generation/seo";
 import { normalizeUrl } from "@/lib/collection/normalize";
 import type { SourceType } from "@/lib/collection/types";
 import { nextPublishSlots } from "@/lib/generation/publish-schedule";
+import { CATEGORY_LABELS } from "@/lib/categories";
 
 async function resetDb() {
   await prisma.articleSource.deleteMany();
@@ -20,6 +21,12 @@ async function resetDb() {
   await prisma.collectedItem.deleteMany();
   await prisma.article.deleteMany();
   await prisma.tag.deleteMany();
+  // admincms-S1: このファイルはカテゴリ公開ポリシー自体ではなく生成ロジック(maxPerCategory等)の
+  // 検証が目的のため、既定「全カテゴリ要レビュー」による回帰を避けるべく全カテゴリを自動公開にしておく。
+  await prisma.categoryPublishPolicy.deleteMany();
+  await prisma.categoryPublishPolicy.createMany({
+    data: CATEGORY_LABELS.map((category) => ({ category, autoPublish: true })),
+  });
 }
 
 /** SEO_SYSTEM_PROMPT向けの呼び出しだけ有効なSEO JSONを返し、それ以外はMockLLMClientに委譲するスタブ（S5b）。 */
@@ -177,5 +184,72 @@ describe("generateArticlesForQueue（投稿スケジュール分散、成長G6 F
     const riotArticle = await prisma.article.findUnique({ where: { id: riotArticleId } });
     expect(riotArticle?.status).toBe("published");
     expect(riotArticle?.scheduledAt).toBeNull();
+  });
+});
+
+describe("generateArticlesForQueue（カテゴリ別公開ポリシー、admincms-S1 F3・旧経路）", () => {
+  it("カテゴリのポリシーが要レビューなら、安全フィルタ通過済みでもstatus=reviewで保存される(公開されない)", async () => {
+    // resetDbで全カテゴリautoPublish=trueに揃えているため、5ch(=「5chの反応」)だけ要レビューに上書きする。
+    await prisma.categoryPublishPolicy.upsert({
+      where: { category: "5chの反応" },
+      create: { category: "5chの反応", autoPublish: false },
+      update: { autoPublish: false },
+    });
+    const id = await createQueuedItem("5ch");
+
+    const summary = await generateArticlesForQueue(llm, { championMap: null });
+    const result = summary.results.find((r) => r.collectedItemId === id);
+    expect(result).toMatchObject({ status: "success", publicationStatus: "review" });
+
+    const articleId = result && result.status === "success" ? result.articleId : undefined;
+    const article = await prisma.article.findUniqueOrThrow({ where: { id: articleId } });
+    expect(article.status).toBe("review");
+  });
+
+  it("安全フィルタ不通過(重複)は、カテゴリが自動公開でも公開されずheldになる(held優先)", async () => {
+    // riot(事実速報モード)はcandidate.titleがそのままタイトルになるため、同一タイトル+同一本文の
+    // 2件を用意すると2件目が既存公開記事(1件目)と重複判定されheld(duplicate)になる
+    // （generation-post-pipeline.test.tsの重複検証と同じ手法。resetDbで「パッチ/メタ」(riot既定
+    // カテゴリ)もautoPublish=trueに揃っているため、ポリシーではなくheld優先であることを検証できる）。
+    const riotTitle = "パッチ26.14ノート公開（admincms-S1held優先テスト）";
+    const riotContent = "本パッチではジャングルモンスターの経験値量が引き下げられ、序盤のペースに変化が生まれた。";
+    const itemA = await prisma.collectedItem.create({
+      data: {
+        sourceType: "riot",
+        sourceUrl: "https://example.com/riot/held-priority-a",
+        normalizedUrl: "https://example.com/riot/held-priority-a",
+        title: riotTitle,
+        content: riotContent,
+        fetchedAt: new Date(),
+        status: "queued",
+      },
+    });
+    const itemB = await prisma.collectedItem.create({
+      data: {
+        sourceType: "riot",
+        sourceUrl: "https://example.com/riot/held-priority-b",
+        normalizedUrl: "https://example.com/riot/held-priority-b",
+        title: riotTitle,
+        content: riotContent,
+        fetchedAt: new Date(),
+        status: "queued",
+      },
+    });
+
+    const summary = await generateArticlesForQueue(llm, { championMap: null });
+    const resultA = summary.results.find((r) => r.collectedItemId === itemA.id);
+    const resultB = summary.results.find((r) => r.collectedItemId === itemB.id);
+    expect(resultA?.status).toBe("success");
+    expect(resultB?.status).toBe("success");
+
+    const articleIdA = resultA && resultA.status === "success" ? resultA.articleId : undefined;
+    const articleIdB = resultB && resultB.status === "success" ? resultB.articleId : undefined;
+    const articleA = await prisma.article.findUniqueOrThrow({ where: { id: articleIdA } });
+    const articleB = await prisma.article.findUniqueOrThrow({ where: { id: articleIdB } });
+
+    const statuses = [articleA.status, articleB.status].sort();
+    expect(statuses).toEqual(["held", "published"]); // 片方は重複でheld、片方はpublished(要レビューにはならない)
+    const heldArticle = [articleA, articleB].find((a) => a.status === "held");
+    expect(heldArticle?.heldReason).toBe("duplicate");
   });
 });

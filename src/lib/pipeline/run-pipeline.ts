@@ -85,6 +85,8 @@ export type PipelineRunReport = {
   generationFailed: number;
   publishedCount: number;
   heldCount: number;
+  /** カテゴリの公開ポリシーにより要レビュー(status="review")として保存された件数（admincms-S1 F3）。 */
+  reviewCount: number;
   /** 予約公開（拡張E7）: このパイプライン実行で scheduledAt 到来により公開へ昇格した件数。 */
   scheduledPublishedCount: number;
   errorMessage?: string;
@@ -117,6 +119,7 @@ async function persistRunLog(report: PipelineRunReport): Promise<void> {
         generationFailed: report.generationFailed,
         publishedCount: report.publishedCount,
         heldCount: report.heldCount,
+        reviewCount: report.reviewCount,
         errorMessage: report.errorMessage,
       },
     })
@@ -151,6 +154,7 @@ export async function runFullPipeline(options: PipelineRunOptions = {}): Promise
   let generationFailed = 0;
   let publishedCount = 0;
   let heldCount = 0;
+  let reviewCount = 0;
   let scheduledPublishedCount = 0;
   let generationSummary: GenerationRunSummary | PostGenerationRunSummary | undefined;
   let status: "success" | "failure" = "success";
@@ -199,6 +203,9 @@ export async function runFullPipeline(options: PipelineRunOptions = {}): Promise
     heldCount = generationSummary.results.filter(
       (r) => r.status === "success" && r.publicationStatus === "held",
     ).length;
+    reviewCount = generationSummary.results.filter(
+      (r) => r.status === "success" && r.publicationStatus === "review",
+    ).length;
     newlyPublishedArticleIds.push(
       ...generationSummary.results.filter(isNewlyPublishedSuccess).map((r) => r.articleId),
     );
@@ -244,6 +251,7 @@ export async function runFullPipeline(options: PipelineRunOptions = {}): Promise
     generationFailed,
     publishedCount,
     heldCount,
+    reviewCount,
     scheduledPublishedCount,
     errorMessage,
     sourceSummaries,

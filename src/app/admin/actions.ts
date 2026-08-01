@@ -19,8 +19,11 @@ import {
   toggleArticlePinned,
   scheduleArticlePublish,
   cancelScheduledPublish,
+  approveReviewArticle,
+  rejectReviewArticle,
 } from "@/lib/admin/articles-admin";
 import { approveHeldComment, rejectHeldComment } from "@/lib/admin/comments-admin";
+import { setCategoryAutoPublish } from "@/lib/admin/category-policy";
 import type { AdminAuthContext } from "@/lib/admin/auth-context";
 
 async function currentAuthContext(): Promise<AdminAuthContext> {
@@ -69,6 +72,27 @@ export async function scheduleArticleAction(formData: FormData): Promise<void> {
 export async function cancelScheduleAction(formData: FormData): Promise<void> {
   const auth = await currentAuthContext();
   await cancelScheduledPublish(requiredString(formData, "articleId"), auth);
+  revalidatePath("/admin");
+}
+
+export async function approveReviewArticleAction(formData: FormData): Promise<void> {
+  const auth = await currentAuthContext();
+  await approveReviewArticle(requiredString(formData, "articleId"), auth);
+  revalidatePath("/admin");
+  revalidatePath("/");
+}
+
+export async function rejectReviewArticleAction(formData: FormData): Promise<void> {
+  const auth = await currentAuthContext();
+  await rejectReviewArticle(requiredString(formData, "articleId"), auth);
+  revalidatePath("/admin");
+}
+
+export async function setCategoryPolicyAction(formData: FormData): Promise<void> {
+  const auth = await currentAuthContext();
+  const category = requiredString(formData, "category");
+  const autoPublish = formData.get("autoPublish") === "true";
+  await setCategoryAutoPublish(category, autoPublish, auth);
   revalidatePath("/admin");
 }
 

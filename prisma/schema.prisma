@@ -23,10 +23,11 @@ model Article {
   thumbnailUrl  String?
   /// 閲覧数指標（F3 で加算ロジックを実装予定。本スプリントはシード値のみ）
   viewCount     Int      @default(0)
-  /// 公開状態（F9 安全フィルタのゲート／拡張E7 運営CMS）: "published"（公開・閲覧サイトに表示）
-  /// | "held"（保留・非公開） | "rejected"（運営が却下・非公開） | "scheduled"（予約公開待ち・非公開）。
-  /// 公開記事は必ず安全フィルタ通過済みという不変条件を保つため、閲覧系クエリは必ずこの列で絞り込む
-  /// （published 以外は一切公開サイトに出さない）。
+  /// 公開状態（F9 安全フィルタのゲート／拡張E7 運営CMS／admincms-S1 F2）: "published"（公開・閲覧サイトに表示）
+  /// | "held"（安全フィルタ不通過・非公開） | "rejected"（運営が却下・非公開） | "scheduled"（予約公開待ち・非公開）
+  /// | "review"（安全フィルタは通過したがカテゴリの公開ポリシーにより運営承認待ち・非公開）。
+  /// 公開記事は必ず安全フィルタ通過済みという不変条件を保つため、閲覧系クエリは必ず `status === "published"` で
+  /// 絞り込む（published 以外＝review含む全ての非公開状態は一切公開サイトに出さない）。
   status        String   @default("published")
   /// 保留理由コード（F9）: "ng_word" | "missing_source" | "personal_attack" | "duplicate"。
   /// status="held" のときのみ設定される（保留キューの記録に使う）。
@@ -237,10 +238,22 @@ model PipelineRunLog {
   generationFailed    Int      @default(0)
   publishedCount      Int      @default(0)
   heldCount           Int      @default(0)
+  /// この実行でカテゴリの公開ポリシーにより要レビュー(status="review")として保存された件数（admincms-S1 F3）。
+  reviewCount         Int      @default(0)
   /// status="failure" のときのみ設定される、想定外の例外メッセージ。
   errorMessage        String?
 
   @@index([startedAt])
+}
+
+/// カテゴリ別 公開ポリシー（admincms-S1 F1）。カテゴリごとに「自動公開」か「要レビュー」かを保存する。
+/// 未登録のカテゴリは autoPublish=false（要レビュー）を既定値として扱う（読み取りは
+/// lib/admin/category-policy.ts の resolveAutoPublish 純関数に委譲し、ここでは保存のみを担う）。
+model CategoryPublishPolicy {
+  id          String   @id @default(cuid())
+  category    String   @unique
+  autoPublish Boolean  @default(false)
+  updatedAt   DateTime @updatedAt
 }
 
 /// 新収集経路（リファクタリング S1〜）で取り込む生投稿。ソース非依存の1レコード＝1投稿。

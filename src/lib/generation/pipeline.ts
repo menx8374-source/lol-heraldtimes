@@ -27,6 +27,8 @@ import { fetchChampionNameToIdMap, type ChampionNameToIdMap } from "@/lib/genera
 import { getExemptSourceTypes } from "@/lib/hotness/config";
 import { getPublishScheduleMode } from "@/lib/pipeline/config";
 import { nextPublishSlots } from "@/lib/generation/publish-schedule";
+import { decidePublishState } from "@/lib/generation/publish-decision";
+import { loadCategoryPolicyRows, resolveAutoPublish } from "@/lib/admin/category-policy";
 
 /** 重複判定の比較対象にする既存公開記事の上限件数（記事数増加時のコスト有界化。related-articles.ts と同じ考え方）。 */
 const DUPLICATE_CHECK_POOL = 200;
@@ -60,10 +62,12 @@ export type GenerationRunResult =
       articleId: string;
       slug: string;
       /**
-       * F9の安全フィルタ判定結果＋成長G6の公開状態。held のときは heldReason に理由コードが入る。
+       * F9の安全フィルタ判定結果＋成長G6の公開状態＋admincms-S1のカテゴリ公開ポリシー。
+       * held のときは heldReason に理由コードが入る。
        * "scheduled": スケジュール分散モードで公開スロットへ予約された（まだ非公開。DBのstatus="scheduled"に対応）。
+       * "review": 安全フィルタは通過したがカテゴリの公開ポリシーが要レビューのため非公開のまま保存された。
        */
-      publicationStatus: "published" | "held" | "scheduled";
+      publicationStatus: "published" | "held" | "scheduled" | "review";
       heldReason?: string;
     }
   | { collectedItemId: string; status: "failure"; errorMessage: string };
@@ -140,6 +144,10 @@ export async function generateArticlesForQueue(
   // 重複判定の比較プールはこの実行中に公開された記事も随時追加し、同一実行内での重複も検出する。
   const contentPool = await loadPublishedContentPool();
 
+  // カテゴリ別公開ポリシー（admincms-S1 F3）: run開始時に1回だけ全カテゴリ分を取得し、
+  // 候補ごとには再フェッチしない（championMapと同じ「1回だけ取得」方針）。
+  const categoryPolicyRows = await loadCategoryPolicyRows();
+
   // チャンピオン検出用Mapはrun開始時に1回だけ取得し、記事ごとにはフェッチしない（拡張E31 F-E31-1）。
   // 明示的にnullが渡された場合はフェッチ自体を行わずチャンピオン検出をスキップする。
   const championMap: ChampionNameToIdMap | undefined =
@@ -173,14 +181,25 @@ export async function generateArticlesForQueue(
       );
       const isPublished = moderation.status === "published";
 
+      // カテゴリ別公開ポリシー（admincms-S1 F3）: 安全フィルタ通過後、記事カテゴリのポリシーが
+      // 「要レビュー」ならpublishedにはせずreviewで保存する（held優先はdecidePublishState内で担保）。
+      const publishDecision = decidePublishState({
+        moderationHeld: !isPublished,
+        autoPublish: resolveAutoPublish(categoryPolicyRows, generated.category),
+      });
+
       // 投稿スケジュール分散（成長G6 F-G6-2）: mode="immediate"（既定）では常にelse分岐に入り、
       // 従来どおり status="published"/publishedAt=new Date() のまま（挙動は1バイトも変わらない）。
-      // mode="schedule"かつ免除ソース(riot/riot-news)以外の場合のみ、公開スロットへ予約する。
-      let articleStatus: "published" | "held" | "scheduled";
+      // mode="schedule"かつ免除ソース(riot/riot-news)以外の場合のみ、公開スロットへ予約する
+      // （publishDecision==="published"のときのみ、すなわち自動公開カテゴリのみが対象になる）。
+      let articleStatus: "published" | "held" | "scheduled" | "review";
       let publishedAt: Date;
       let scheduledAt: Date | null = null;
-      if (!isPublished) {
+      if (publishDecision === "held") {
         articleStatus = "held";
+        publishedAt = new Date();
+      } else if (publishDecision === "review") {
+        articleStatus = "review";
         publishedAt = new Date();
       } else if (scheduleMode === "schedule" && !exemptSourceTypes.includes(candidate.sourceType)) {
         scheduledSlotCount += 1;
@@ -239,8 +258,10 @@ export async function generateArticlesForQueue(
         return article.id;
       });
 
-      if (isPublished) {
-        // 同一実行内の後続候補が、今公開したばかりの記事と重複判定されるようにプールへ追加する。
+      if (articleStatus === "published" || articleStatus === "scheduled") {
+        // 同一実行内の後続候補が、公開(予定)の記事と重複判定されるようにプールへ追加する。
+        // review(要レビュー)は公開/却下が未確定なのでプールに入れない（却下時に、その重複として
+        // 弾かれた後続記事が失われるのを防ぐ。admincms-S1 code-review）。
         contentPool.unshift({ title: generated.title, content: bodyText });
       }
 
