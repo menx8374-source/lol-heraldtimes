@@ -18,6 +18,7 @@
 import type { RawCollectionItem, SourceAdapter } from "@/lib/collection/types";
 import { fetchJsonSafe, dedupeBySourceUrl } from "@/lib/collection/adapters/http";
 import { splitIntoSentences } from "@/lib/generation/text-utils";
+import { getHotnessConfig } from "@/lib/hotness/config";
 
 const GETXAPI_BASE = "https://api.getxapi.com";
 
@@ -27,18 +28,39 @@ const X_FETCH_TIMEOUT_MS = 10_000;
 /** クエリを複数指定する際の区切り文字（query自体にカンマ・改行が含まれ得るため専用の区切りにする）。 */
 const QUERY_SEPARATOR = "|||";
 
-/** 国内向け既定クエリ（コスト最小＝当たりだけ。min_faves:100で課金制御）。 */
-const DOMESTIC_QUERY =
-  '(LoL OR LJL OR "リーグ・オブ・レジェンド" OR リグオブ) min_faves:100 lang:ja -filter:retweets -filter:replies';
-/** 海外パッチ反応向け既定クエリ（min_faves:1000でより厳選）。 */
-const OVERSEAS_QUERY = '("League of Legends" OR #LeagueOfLegends OR LoL) min_faves:1000 lang:en -filter:retweets';
 /**
- * 議論特化クエリ（X-reply-S1 F-XR1-3）。いいねだけでなくリプライ多数＝賛否が割れた投稿を
- * 発見段階で拾う。`min_replies:` はGetXAPIの確証あるoperator。
+ * 国内向けmin_favesのfloor（hot整合、fetchopt-S1 F-FO1-1）。`hot.minScore`(=100)とfloorの大きい方を
+ * 採用するため、現状は100同士で実質minScore依存。将来hot.minScoreが100未満に下がってもfloorで
+ * 下限を維持する（過剰に緩めない）。
  */
-const DISCUSSION_QUERY = '(LoL OR LJL OR "リーグ・オブ・レジェンド") min_replies:30 min_faves:30 lang:ja -filter:retweets';
+const DOMESTIC_MIN_FAVES_FLOOR = 100;
+/**
+ * 海外向けmin_favesのfloor（fetchopt-S1 F-FO1-1）。1000はhot要件ではなく英語圏の物量/コスト制御の
+ * 下限として維持する（hot.minScore=100より厳しい側を常に採用）。
+ */
+const OVERSEAS_MIN_FAVES_FLOOR = 1000;
+/** eスポーツ特化クエリのmin_favesのfloor（国内と同じ100。fetchopt-S1 F-FO1-1）。 */
+const ESPORTS_MIN_FAVES_FLOOR = 100;
 
-const DEFAULT_SEARCH_QUERIES = [DOMESTIC_QUERY, OVERSEAS_QUERY, DISCUSSION_QUERY];
+/**
+ * 既定3クエリ（国内/海外/eスポーツ特化）をhotness config（`getHotnessConfig("x")`）から動的導出する
+ * 純関数（fetchopt-S1 F-FO1-1）。全クエリに `min_replies:${hot.minComments}` を付与し、`min_faves:`は
+ * `max(floor, hot.minScore)`。目的は「同じクエリ数（=3、クレジット不変）で記事化可能なhot整合ツイートを
+ * 多く拾う」こと。`X_SEARCH_QUERIES` env指定時はこの導出結果を使わず、そちらが優先される
+ * （`parseSearchQueries`の既存挙動、呼び出し側は変えない）。
+ */
+export function buildDefaultSearchQueries(hot: { minScore: number; minComments: number } = getHotnessConfig("x")): string[] {
+  const minReplies = hot.minComments;
+  const domesticMinFaves = Math.max(DOMESTIC_MIN_FAVES_FLOOR, hot.minScore);
+  const overseasMinFaves = Math.max(OVERSEAS_MIN_FAVES_FLOOR, hot.minScore);
+  const esportsMinFaves = Math.max(ESPORTS_MIN_FAVES_FLOOR, hot.minScore);
+
+  const domestic = `(LoL OR LJL OR "リーグ・オブ・レジェンド" OR リグオブ) min_faves:${domesticMinFaves} min_replies:${minReplies} lang:ja -filter:retweets -filter:replies`;
+  const overseas = `("League of Legends" OR #LeagueOfLegends OR LoL) min_faves:${overseasMinFaves} min_replies:${minReplies} lang:en -filter:retweets`;
+  const esports = `(LJL OR LCK OR LPL OR LEC OR MSI OR Worlds OR "世界大会") min_faves:${esportsMinFaves} min_replies:${minReplies} lang:ja -filter:retweets`;
+
+  return [domestic, overseas, esports];
+}
 
 /** tweetタイトルの最大長（本文の一部をそのまま短縮するのみ・捏造しない）。 */
 const TITLE_MAX_LENGTH = 40;
@@ -52,12 +74,13 @@ function envIntLocal(name: string, fallback: number): number {
 
 /**
  * env文字列（`|||`区切り）をクエリ配列にパースする。未設定・空・全て空文字列なら `defaultQueries`。
- * `defaultQueries` 省略時は本アダプタの既定2クエリ（国内/海外）。PBE-S3の `pbe-x-source.ts` も
- * この関数を共有し、PBE用の既定クエリを渡して再利用する（重複実装しない）。
+ * `defaultQueries` 省略時は `buildDefaultSearchQueries()`（既定3クエリ＝国内/海外/eスポーツ特化、
+ * hotness config由来でhot整合、fetchopt-S1 F-FO1-1）。PBE-S3の `pbe-x-source.ts` もこの関数を共有し、
+ * PBE用の既定クエリを渡して再利用する（重複実装しない）。
  */
 export function parseSearchQueries(
   raw: string | undefined,
-  defaultQueries: string[] = DEFAULT_SEARCH_QUERIES,
+  defaultQueries: string[] = buildDefaultSearchQueries(),
 ): string[] {
   if (!raw || raw.trim().length === 0) return defaultQueries;
   const parsed = raw
@@ -350,12 +373,19 @@ export async function fetchTopReplies(
 export type XAdapterOptions = {
   /** テスト・注入用。既定は env `X_API_KEY`。 */
   apiKey?: string;
-  /** 検索クエリ配列。既定は env `X_SEARCH_QUERIES`（`|||`区切り）、未設定時は既定クエリ3件（国内/海外/議論特化）。 */
+  /**
+   * 検索クエリ配列。既定は env `X_SEARCH_QUERIES`（`|||`区切り）、未設定時は
+   * `buildDefaultSearchQueries()`（既定クエリ3件＝国内/海外/eスポーツ特化、hotness config由来でhot整合、
+   * fetchopt-S1 F-FO1-1）。
+   */
   queries?: string[];
   product?: "Latest" | "Top";
   /** 現在時刻の注入点（テスト用、since:窓の計算に使う）。既定は実時刻。 */
   now?: () => Date;
-  /** since:窓の遡り時間（時間）。既定は env `X_SINCE_HOURS`（既定24＝前日分まで）。 */
+  /**
+   * since:窓の遡り時間（時間）。既定は env `X_SINCE_HOURS`（既定72＝hotのmaxAgeHoursに整合、
+   * fetchopt-S1 F-FO1-2）。
+   */
   sinceHours?: number;
   /** 連続fetch間のディレイ(ms)。既定は env `X_REQUEST_DELAY_MS`（既定1000）。 */
   delayMs?: number;
@@ -365,9 +395,9 @@ export type XAdapterOptions = {
 
 /**
  * X（旧Twitter、GetXAPI）から収集する live アダプタ（成長G7）。複数の検索クエリ（既定: 国内/海外/
- * 議論特化の3クエリ、X-reply-S1 F-XR1-3）を直列で呼び、結果をマージ・重複排除して返す。`X_API_KEY`
- * はこのクラス自体でも未設定なら空配列を返す（呼び出し側 adapters/index.ts の mock フォールバックと
- * 二重に安全側へ倒す）。
+ * eスポーツ特化の3クエリ、hotness config由来でhot整合、fetchopt-S1 F-FO1-1）を直列で呼び、結果を
+ * マージ・重複排除して返す。`X_API_KEY` はこのクラス自体でも未設定なら空配列を返す（呼び出し側
+ * adapters/index.ts の mock フォールバックと二重に安全側へ倒す）。
  */
 export class XAdapter implements SourceAdapter {
   readonly sourceType = "x" as const;
@@ -384,7 +414,7 @@ export class XAdapter implements SourceAdapter {
     this.queries = options.queries ?? parseSearchQueries(process.env.X_SEARCH_QUERIES);
     this.product = options.product ?? "Latest";
     this.now = options.now ?? (() => new Date());
-    this.sinceHours = options.sinceHours ?? envIntLocal("X_SINCE_HOURS", 24);
+    this.sinceHours = options.sinceHours ?? envIntLocal("X_SINCE_HOURS", 72);
     this.delayMs = options.delayMs ?? envIntLocal("X_REQUEST_DELAY_MS", 1000);
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
   }

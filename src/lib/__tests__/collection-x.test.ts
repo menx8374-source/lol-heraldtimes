@@ -7,12 +7,14 @@ import {
   XAdapter,
   appendSinceIfMissing,
   buildAdvancedSearchUrl,
+  buildDefaultSearchQueries,
   buildTweetTitle,
   buildXItem,
   parseSearchQueries,
   type GetXApiSearchResponse,
   type GetXApiTweet,
 } from "@/lib/collection/adapters/x";
+import { getHotnessConfig } from "@/lib/hotness/config";
 
 function tweet(overrides: Partial<GetXApiTweet> = {}): GetXApiTweet {
   return {
@@ -95,15 +97,15 @@ describe("純関数: buildTweetTitle（tweet本文からの短いタイトル生
 });
 
 describe("純関数: parseSearchQueries / appendSinceIfMissing", () => {
-  it("未設定・空文字列は既定クエリ3件(国内/海外/議論特化、X-reply-S1 F-XR1-3)を返す", () => {
+  it("未設定・空文字列は既定クエリ3件(国内/海外/eスポーツ特化、fetchopt-S1 F-FO1-1)を返す", () => {
     expect(parseSearchQueries(undefined)).toHaveLength(3);
     expect(parseSearchQueries("")).toHaveLength(3);
     expect(parseSearchQueries("   ")).toHaveLength(3);
   });
 
-  it("X-reply-S1 F-XR1-3: 既定クエリ集合に議論特化クエリ(min_replies:を含む)が含まれる", () => {
+  it("既定クエリ全件にmin_replies:(hot.minComments由来)が含まれる(fetchopt-S1 F-FO1-1)", () => {
     const queries = parseSearchQueries(undefined);
-    expect(queries.some((q) => /min_replies:/.test(q))).toBe(true);
+    expect(queries.every((q) => /min_replies:/.test(q))).toBe(true);
   });
 
   it("X_SEARCH_QUERIES(カスタムクエリ)指定時はそちらが優先される(既存挙動不変)", () => {
@@ -143,6 +145,52 @@ describe("純関数: buildAdvancedSearchUrl（GetXAPI仕様: GET .../advanced_se
   });
 });
 
+describe("純関数: buildDefaultSearchQueries（fetchopt-S1 F-FO1-1、既定クエリのhot整合）", () => {
+  it("クエリ数は3のまま（クレジット不変）", () => {
+    expect(buildDefaultSearchQueries()).toHaveLength(3);
+  });
+
+  it("全クエリが hot.minComments 由来の min_replies:30 を含む（既定 HOTNESS_X_MIN_COMMENTS=30）", () => {
+    const hot = getHotnessConfig("x");
+    expect(hot.minComments).toBe(30);
+    const queries = buildDefaultSearchQueries();
+    for (const q of queries) {
+      expect(q).toContain(`min_replies:${hot.minComments}`);
+    }
+  });
+
+  it("min_favesは max(floor, hot.minScore)（国内100/海外1000/eスポ100、既定 HOTNESS_X_MIN_SCORE=100）", () => {
+    const hot = getHotnessConfig("x");
+    expect(hot.minScore).toBe(100);
+    const [domestic, overseas, esports] = buildDefaultSearchQueries();
+    expect(domestic).toContain("min_faves:100");
+    expect(overseas).toContain("min_faves:1000");
+    expect(esports).toContain("min_faves:100");
+  });
+
+  it("hot設定を変えるとmin_faves/min_repliesがそれに追随する（config由来であることの確認）", () => {
+    const queries = buildDefaultSearchQueries({ minScore: 500, minComments: 40 });
+    for (const q of queries) {
+      expect(q).toContain("min_replies:40");
+    }
+    expect(queries[0]).toContain("min_faves:500"); // 国内floor(100) < 500 → minScore採用
+    expect(queries[1]).toContain("min_faves:1000"); // 海外floor(1000) >= 500 → floor維持
+    expect(queries[2]).toContain("min_faves:500"); // eスポfloor(100) < 500 → minScore採用
+  });
+
+  it("eスポーツ特化クエリは国内クエリと同一文字列でない（重複回避）", () => {
+    const [domestic, , esports] = buildDefaultSearchQueries();
+    expect(esports).not.toBe(domestic);
+  });
+
+  it("全クエリに lang: と -filter:retweets が付く", () => {
+    for (const q of buildDefaultSearchQueries()) {
+      expect(q).toMatch(/lang:(ja|en)/);
+      expect(q).toContain("-filter:retweets");
+    }
+  });
+});
+
 describe("XAdapter.fetchItems（ブリーフ テスト1〜3、実APIは叩かない）", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -179,8 +227,56 @@ describe("XAdapter.fetchItems（ブリーフ テスト1〜3、実APIは叩かな
     expect(calls).toHaveLength(2);
     expect(calls.every((c) => c.headers.Authorization === "Bearer test-key")).toBe(true);
     const firstQ = new URL(calls[0].url).searchParams.get("q");
-    expect(firstQ).toContain("since:2026-07-26"); // 既定sinceHours=24
+    expect(firstQ).toContain("since:2026-07-24"); // 既定sinceHours=72（fetchopt-S1 F-FO1-2）
     expect(items).toHaveLength(2);
+  });
+
+  it("X_SINCE_HOURS env指定時はそちらのsinceHoursで上書きされる（fetchopt-S1 F-FO1-2、appendSinceIfMissing不変）", async () => {
+    const original = process.env.X_SINCE_HOURS;
+    process.env.X_SINCE_HOURS = "24";
+    try {
+      const calls: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => {
+          calls.push(url);
+          return jsonResponse({ tweets: [] } satisfies GetXApiSearchResponse);
+        }),
+      );
+      const adapter = new XAdapter({
+        apiKey: "test-key",
+        queries: ["query min_faves:100"],
+        sleep: vi.fn(async () => {}),
+        now: () => new Date("2026-07-27T12:00:00.000Z"),
+      });
+      await adapter.fetchItems();
+      const q = new URL(calls[0]).searchParams.get("q");
+      expect(q).toContain("since:2026-07-26"); // 24h前 = 07-27T12:00 - 24h = 07-26
+    } finally {
+      if (original === undefined) delete process.env.X_SINCE_HOURS;
+      else process.env.X_SINCE_HOURS = original;
+    }
+  });
+
+  it("既定クエリ(env未指定)使用時、クエリ数=3のままAPI呼び出し回数が3回（クレジット不変、fetchopt-S1）", async () => {
+    const originalQueries = process.env.X_SEARCH_QUERIES;
+    delete process.env.X_SEARCH_QUERIES;
+    try {
+      const calls: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => {
+          calls.push(url);
+          return jsonResponse({ tweets: [] } satisfies GetXApiSearchResponse);
+        }),
+      );
+      const adapter = new XAdapter({ apiKey: "test-key", sleep: vi.fn(async () => {}) });
+      await adapter.fetchItems();
+      expect(calls).toHaveLength(3);
+    } finally {
+      if (originalQueries === undefined) delete process.env.X_SEARCH_QUERIES;
+      else process.env.X_SEARCH_QUERIES = originalQueries;
+    }
   });
 
   it("非2xx応答は例外を投げず空配列を返す", async () => {
