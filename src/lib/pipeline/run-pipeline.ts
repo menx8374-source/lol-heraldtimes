@@ -32,6 +32,7 @@ import { getLLMClient, type LLMClient } from "@/lib/generation/llm-client";
 import { getPipelineConfig, getGenerationSource, type GenerationSource } from "@/lib/pipeline/config";
 import { promoteScheduledArticles } from "@/lib/generation/scheduled-publish";
 import { notifyPublishedArticles } from "@/lib/generation/delivery";
+import { revalidatePublishedListings } from "@/lib/generation/revalidate-listings";
 
 export type PipelineRunOptions = {
   /** 収集に使うアダプタ群。未指定時は設定（COLLECTION_MODE）に従った既定アダプタ。 */
@@ -220,6 +221,15 @@ export async function runFullPipeline(options: PipelineRunOptions = {}): Promise
       await notifyPublishedArticles(articles);
     } catch (err) {
       console.error("Discord通知の準備に失敗しました:", err);
+    }
+
+    // 一覧ページのオンデマンド再検証（revalidate-S1 F-RV1-3、B）: REVALIDATE_SECRET未設定なら
+    // revalidatePublishedListings内でno-op。失敗（ネット断/非2xx/タイムアウト）は関数内で握りつぶされる
+    // ため、ここでのtry/catchは想定外の同期例外に対する二重の安全網（本体を止めない）。
+    try {
+      await revalidatePublishedListings();
+    } catch (err) {
+      console.error("一覧ページの再検証呼び出しに失敗しました:", err);
     }
   }
 

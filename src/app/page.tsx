@@ -5,6 +5,11 @@ import { PageWithSidebar } from "@/components/page-with-sidebar";
 import { PickupCarousel } from "@/components/pickup-carousel";
 import { Pagination } from "@/components/pagination";
 
+// 一覧の自動更新（revalidate-S1 F-RV1-1）: A=短いISR（保険、既定300秒）。Bのオンデマンド再検証が主。
+// Next.jsの静的AST解析の制約でインポート変数を参照できないため数値リテラルを直書きする
+// （src/lib/revalidate-config.ts の LISTING_REVALIDATE_SECONDS と同値を維持すること）。
+export const revalidate = 300;
+
 const PICKUP_LIMIT = 5;
 
 type Props = {

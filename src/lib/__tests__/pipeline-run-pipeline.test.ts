@@ -529,3 +529,104 @@ describe("runFullPipeline の配信導線（Discord Webhook通知、成長G6 F-G
     expect(report.publishedCount).toBeGreaterThan(0);
   });
 });
+
+/**
+ * 一覧ページのオンデマンド再検証（revalidate-S1 F-RV1-3、B）の結合テスト。実`/api/revalidate`は
+ * 叩かずfetchをモックする。REVALIDATE_SECRET未設定時はAだけが効く前提でno-opになることも検証する。
+ */
+describe("runFullPipeline の一覧再検証（revalidate-S1 F-RV1-3、B）", () => {
+  const originalFetch = global.fetch;
+  const originalSecret = process.env.REVALIDATE_SECRET;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    if (originalSecret === undefined) delete process.env.REVALIDATE_SECRET;
+    else process.env.REVALIDATE_SECRET = originalSecret;
+  });
+
+  it("REVALIDATE_SECRET未設定時は新規公開があってもfetchを呼ばない(no-op、Aの短いISRのみが効く)", async () => {
+    delete process.env.REVALIDATE_SECRET;
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const report = await runPipeline({
+      adapters: [
+        new FakeAdapter("riot", [
+          item({
+            sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/patch-revalidate-noop/",
+            title: "一覧再検証no-op確認用パッチノート",
+            content: "一覧再検証のno-op確認用の本文。",
+          }),
+        ]),
+      ],
+      llmClient: llm,
+      now: T0,
+    });
+
+    expect(report.publishedCount).toBeGreaterThan(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("新規公開が0件のときはREVALIDATE_SECRET設定済みでもfetchを呼ばない", async () => {
+    process.env.REVALIDATE_SECRET = "correct-secret";
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const report = await runPipeline({ now: T0, adapters: [] }); // 収集元アダプタなし→候補0→公開0
+
+    expect(report.publishedCount).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("REVALIDATE_SECRET設定時、新規公開が1件以上あると内部URLへ再検証POSTが呼ばれる", async () => {
+    process.env.REVALIDATE_SECRET = "correct-secret";
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const report = await runPipeline({
+      adapters: [
+        new FakeAdapter("riot", [
+          item({
+            sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/patch-revalidate-notify/",
+            title: "一覧再検証確認用パッチノート",
+            content: "一覧再検証の呼び出し確認用の本文。",
+          }),
+        ]),
+      ],
+      llmClient: llm,
+      now: T0,
+    });
+
+    expect(report.publishedCount).toBeGreaterThan(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toContain("/api/revalidate");
+    expect(init.headers["x-revalidate-secret"]).toBe("correct-secret");
+  });
+
+  it("再検証の呼び出しが失敗してもパイプライン本体は成功のまま完走する(補助処理は本体を止めない)", async () => {
+    process.env.REVALIDATE_SECRET = "correct-secret";
+    const fetchMock = vi.fn().mockRejectedValue(new Error("network error(テスト用)"));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const report = await runPipeline({
+      adapters: [
+        new FakeAdapter("riot", [
+          item({
+            sourceUrl: "https://www.leagueoflegends.com/ja-jp/news/patch-revalidate-fail/",
+            title: "一覧再検証失敗確認用パッチノート",
+            content: "一覧再検証の送信失敗確認用の本文。",
+          }),
+        ]),
+      ],
+      llmClient: llm,
+      now: T0,
+    });
+
+    expect(report.status).toBe("success");
+    expect(report.publishedCount).toBeGreaterThan(0);
+
+    const publishedTotal = await prisma.article.count({ where: { status: "published" } });
+    expect(publishedTotal).toBe(report.publishedCount);
+  });
+});
