@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { parseThreadReses, extractAnchors, computeLineEmphasis } from "@/lib/generation/thread-format";
+import {
+  parseThreadReses,
+  extractAnchors,
+  computeLineEmphasis,
+  isPureAnchorLine,
+  hasNonAnchorLine,
+} from "@/lib/generation/thread-format";
 
 describe("parseThreadReses", () => {
   it("「N: 」形式の複数レスをレス番号・本文行の配列にパースする", () => {
@@ -121,5 +127,39 @@ describe("computeLineEmphasis", () => {
     expect(computeLineEmphasis(["普通の行", "今回の戦犯はこいつだろ"])).toEqual([undefined, "red"]);
     expect(computeLineEmphasis(["言い訳にしか聞こえない"])).toEqual(["red"]);
     expect(computeLineEmphasis(["それは完全に論破されてる"])).toEqual(["red"]);
+  });
+});
+
+describe("isPureAnchorLine（reactqual-S3 F-RQ3-1）", () => {
+  it("「>>N」のみの行はtrue", () => {
+    expect(isPureAnchorLine(">>101")).toBe(true);
+    expect(isPureAnchorLine("  >>1  ")).toBe(true);
+  });
+
+  it("本文を伴う行はfalse", () => {
+    expect(isPureAnchorLine("グレイブスのスモークスクリーンか？")).toBe(false);
+    expect(isPureAnchorLine(">>101 それな")).toBe(false);
+  });
+
+  it("空文字はfalse（非アンカー扱い）", () => {
+    expect(isPureAnchorLine("")).toBe(false);
+    expect(isPureAnchorLine("   ")).toBe(false);
+  });
+});
+
+describe("hasNonAnchorLine（reactqual-S3 F-RQ3-1）", () => {
+  it("アンカーのみの行だけで構成される場合はfalse", () => {
+    expect(hasNonAnchorLine([">>101"])).toBe(false);
+    expect(hasNonAnchorLine([">>101", "  "])).toBe(false);
+  });
+
+  it("非アンカーの非空行が1つでもあればtrue", () => {
+    expect(hasNonAnchorLine([">>101", "グレイブスのスモークスクリーンか？"])).toBe(true);
+    expect(hasNonAnchorLine(["本文のみ"])).toBe(true);
+  });
+
+  it("空配列・空行のみはfalse", () => {
+    expect(hasNonAnchorLine([])).toBe(false);
+    expect(hasNonAnchorLine(["", "  "])).toBe(false);
   });
 });

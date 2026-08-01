@@ -24,6 +24,26 @@ const RES_START =
 const ANNOTATION_SCORE = /score:(-?\d+)/;
 const ANNOTATION_PARENT = /parent:(\d+)/;
 
+/**
+ * 行が「アンカーのみ」（例: `>>101`）かどうかを判定する（reactqual-S3 F-RQ3-1）。
+ * トリム後に `>>数字` のみで構成される行だけを true とする。
+ */
+export function isPureAnchorLine(text: string): boolean {
+  return /^>>\d+$/.test(text.trim());
+}
+
+/**
+ * 行配列に、アンカーのみでない非空行が1つでもあるか（reactqual-S3 F-RQ3-1）。
+ * これが false（=全行が空、またはアンカーのみ）のレスは「実質空白」とみなす
+ * （F-RQ3-2の抽出フォールバック・F-RQ3-3の掲載ガードで使う）。
+ */
+export function hasNonAnchorLine(lines: string[]): boolean {
+  return lines.some((line) => {
+    const trimmed = line.trim();
+    return trimmed.length > 0 && !isPureAnchorLine(trimmed);
+  });
+}
+
 /** レス本文中の重要・面白い行を判定するキーワード（1レスあたり最大1行を赤で強調する）。 */
 const EMPHASIS_KEYWORDS = [
   "ワロタ",

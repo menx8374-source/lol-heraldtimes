@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { findNgWord, stripNgWords, maskNgWords } from "@/lib/moderation/ng-words";
+import { findNgWord, stripNgWords, maskNgWords, findNgWordExcluding } from "@/lib/moderation/ng-words";
+import { CHAMPIONS } from "@/lib/generation/title";
 import { detectPersonalAttack } from "@/lib/moderation/personal-attack";
 import { containsRumorMarker } from "@/lib/moderation/rumor";
 import { findDuplicateArticle } from "@/lib/moderation/duplicate";
@@ -59,6 +60,22 @@ describe("findNgWord / stripNgWords（NGワード検出, F9）", () => {
     expect(findNgWord("こいつｶﾞｲｼﾞ")).toBe("ガイジ");
     // 中立的な文は誤検知しない（空白分断は正規化対象外なので「バ カメラ」等の誤検知は起きない）。
     expect(findNgWord("その バ カメラは高性能だ")).toBeNull();
+  });
+});
+
+describe("findNgWordExcluding（reactqual-S3: チャンピオン名との部分一致誤検知を除外）", () => {
+  it("「グレイブス」はNGワード「ブス」を部分文字列として含むが、CHAMPIONS除外時は検出しない", () => {
+    expect(findNgWord("グレイブスが強い")).toBe("ブス"); // 従来のfindNgWordは誤検知する（回帰確認）
+    expect(findNgWordExcluding("グレイブスが強い", CHAMPIONS)).toBeNull();
+  });
+
+  it("チャンピオン名の外側に単独で存在するNGワードは除外後も検出する", () => {
+    expect(findNgWordExcluding("このゴミチャンピオンは強い", CHAMPIONS)).toBe("ゴミ");
+    expect(findNgWordExcluding("グレイブスはカスだと思う", CHAMPIONS)).toBe("カス");
+  });
+
+  it("NGワードを含まない文はnull", () => {
+    expect(findNgWordExcluding("グレイブスの立ち回りが上手い", CHAMPIONS)).toBeNull();
   });
 });
 
@@ -133,6 +150,15 @@ describe("moderateArticleContent（公開前安全フィルタの統合判定, F
     const result = moderateArticleContent({
       title: "【速報】パッチ14.6ノート公開、新たな調整が話題に",
       bodyText: "本日Riot Gamesはパッチ14.6のノートを公式に発表した。多くのプレイヤーが注目している。",
+      sourceCount: 1,
+    });
+    expect(result.status).toBe("published");
+  });
+
+  it("チャンピオン名「グレイブス」を含む記事はNGワード「ブス」の誤検知でheldにならない（reactqual-S3）", () => {
+    const result = moderateArticleContent({
+      title: "【LoL】グレイブスの立ち回りについて",
+      bodyText: "グレイブスのスモークスクリーンが強いという反応が寄せられている。",
       sourceCount: 1,
     });
     expect(result.status).toBe("published");

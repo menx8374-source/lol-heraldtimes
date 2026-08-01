@@ -61,6 +61,26 @@ export function findNgWord(text: string): string | null {
   return NG_WORDS.find((word) => normalized.includes(word)) ?? null;
 }
 
+/**
+ * `findNgWord` と同じ判定だが、`exemptions`（例: LoLチャンピオン名一覧）の文字列に**完全に含まれる形**で
+ * 一致したNGワードは無視する（reactqual-S3、バグ3の真因対応）。
+ * 例:「グレイブス」（チャンピオン名）は「ブス」というNGワードを部分文字列として偶然含むが、
+ * これは差別語ではない誤検知（false positive）であり、`exemptions`に渡すことで除外できる。
+ * 一方「ゴミチャンピオン」のように、NGワードが exemptions の文字列の外側に単独で存在する場合は
+ * 従来どおり検出する（exemptions文字列の出現箇所だけを無害な記号列に置換してから照合するため、
+ * exemptions文字列に重ならない位置のNGワードは検出され続ける）。
+ */
+export function findNgWordExcluding(text: string, exemptions: readonly string[]): string | null {
+  let masked = normalizeForNgMatch(text);
+  for (const exemption of exemptions) {
+    if (exemption.length === 0) continue;
+    if (masked.includes(exemption)) {
+      masked = masked.split(exemption).join("〓".repeat(exemption.length));
+    }
+  }
+  return NG_WORDS.find((word) => masked.includes(word)) ?? null;
+}
+
 /** text からNGワードをすべて除去する（タイトル生成の具体要素穴埋め等で安全側に倒すために使う）。 */
 export function stripNgWords(text: string): string {
   return NG_WORDS.reduce((acc, word) => acc.split(word).join(""), text);

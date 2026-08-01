@@ -21,10 +21,16 @@ import type { SourceType } from "@/lib/collection/types";
 import type { XReplyItem } from "@/lib/collection/adapters/x";
 import type { LLMClient, GenerationTask } from "@/lib/generation/llm-client";
 import { splitIntoSentences, excerptForQuote } from "@/lib/generation/text-utils";
-import { parseThreadReses, extractAnchors, computeLineEmphasis, type ThreadRes } from "@/lib/generation/thread-format";
+import {
+  parseThreadReses,
+  extractAnchors,
+  computeLineEmphasis,
+  hasNonAnchorLine,
+  type ThreadRes,
+} from "@/lib/generation/thread-format";
 import { selectScoredAnchorReses } from "@/lib/generation/reaction-select";
 import { isAllowedEmbedUrl, embedProviderForUrl, isValidTweetStatusUrl } from "@/lib/embed";
-import { findNgWord, maskNgWords } from "@/lib/moderation/ng-words";
+import { findNgWord, findNgWordExcluding, maskNgWords } from "@/lib/moderation/ng-words";
 import { PATCH_NOTES_MIN_LENGTH } from "@/lib/collection/adapters/riot-datadragon";
 import { CHAMPIONS } from "@/lib/generation/title";
 import { isSafeImageUrl } from "@/lib/image-url";
@@ -661,8 +667,11 @@ function resolveReactionDisplayLines(extractedLines: string[], translatedText: s
  * - 各エントリ（`key`はレスを一意に識別する呼び出し側のindex）ごとに`resolveReactionDisplayLines`で
  *   表示テキストを確定し、`computeLineEmphasis`で強調判定・`splitIntoSentences`で文分割する
  *   （ここまではLLM不使用）。
- * - 全エントリ横断で`findNgWord`該当のNG文を1回だけ収集し、通し番号(index)を振る。NG文が1つも無ければ
- *   `softenNgSentences`を含め一切のNG処理コストをかけない（コスト最小、既存動作と同じ）。
+ * - 全エントリ横断で`findNgWordExcluding`（CHAMPIONS除外、reactqual-S3）該当のNG文を1回だけ収集し、
+ *   通し番号(index)を振る。NG文が1つも無ければ`softenNgSentences`を含め一切のNG処理コストをかけない
+ *   （コスト最小、既存動作と同じ）。CHAMPIONSを除外するのは、「グレイブス」のようにNGワード「ブス」を
+ *   部分文字列として偶然含むだけの実在するチャンピオン名が、差別語ではないのに誤ってNG判定され本文が
+ *   丸ごと削除・空白レス化していた根本原因（reactqual-S3バグ3）を塞ぐため。
  * - `NG_REPHRASE_MODE`が`soften`（既定）かつNG文が1件以上あるときだけ、収集した全NG文をまとめて
  *   1回`softenNgSentences`に送る（翻訳と同様、記事単位のバッチ）。結果（再検査済み）で置換し、
  *   採用できなかったNG文（API失敗・再検査でNG語残存等）は従来どおり削除にフォールバックする。
@@ -689,7 +698,7 @@ async function buildReactionLinesBatch(
   for (const { key, perLineSentences } of perEntry) {
     perLineSentences.forEach((sentences, lineIndex) => {
       sentences.forEach((sentence, sentenceIndex) => {
-        if (findNgWord(sentence) !== null) {
+        if (findNgWordExcluding(sentence, CHAMPIONS) !== null) {
           ngEntries.push({ key, lineIndex, sentenceIndex, index: ngEntries.length, text: sentence });
         }
       });
@@ -834,10 +843,16 @@ async function buildReactionBlocks(
 
   // 表示対象レスの実表示行（keepLines適用後、英語のまま）を先に確定しておく（翻訳バッチ・強調判定・
   // NG削除のいずれもこの行配列を起点にする）。
+  // reactqual-S3 F-RQ3-2: keepLines指定（llm選定相当）がアンカー行indexだけを選んでいた場合、抽出結果に
+  // 本文（非アンカー行）が1行も残らず「アンカーのみの空白レス」になってしまう。この場合はそのレスの
+  // res.lines全体（逐語）にフォールバックし、本文が消えないようにする（keepLines指定が無い/全行採用の
+  // 場合はhasNonAnchorLineが真になる限りフォールバックせず従来どおり）。
   const extractedLinesByIndex = new Map<number, string[]>(
     selectedIndices.map((i) => {
       const lineIndices = selection?.keepLines.get(i) ?? null;
-      return [i, lineIndices ? lineIndices.map((li) => reses[i].lines[li]) : reses[i].lines];
+      const extracted = lineIndices ? lineIndices.map((li) => reses[i].lines[li]) : reses[i].lines;
+      const finalLines = hasNonAnchorLine(extracted) ? extracted : reses[i].lines;
+      return [i, finalLines];
     }),
   );
 
@@ -877,7 +892,9 @@ async function buildReactionBlocks(
       const isEmphasized = selection ? selection.emphasize.has(i) : false;
       const emphasisColor = isEmphasized ? (selection!.emphasize.get(i) ?? null) : null;
       const cleanedLines = reactionLinesByIndex.get(i) ?? [];
-      if (cleanedLines.length === 0) return null;
+      // reactqual-S3 F-RQ3-3: 空、またはアンカーのみ（本文が無い＝実質空白）のレスは掲載しない
+      // （番号採番・チェーン整合順は他レスに影響しない）。
+      if (cleanedLines.length === 0 || !hasNonAnchorLine(cleanedLines.map((l) => l.text))) return null;
 
       return {
         type: "reaction",
@@ -2284,7 +2301,9 @@ export async function buildXReactionBlocks(
     .map((index): ArticleBodyReactionBlock | null => {
       const reply = xReplies[index];
       const cleanedLines = reactionLinesByIndex.get(index) ?? [];
-      if (cleanedLines.length === 0) return null;
+      // reactqual-S3 F-RQ3-3: 空、またはアンカーのみ（Xはアンカー無しなので実質NG全消の空レス）の
+      // リプは掲載しない（連番は下のmapで採用分だけ振り直すため整合する）。
+      if (cleanedLines.length === 0 || !hasNonAnchorLine(cleanedLines.map((l) => l.text))) return null;
 
       const label = reply.isQuote ? "引用" : "返信";
       const name = `@${reply.author} ・ 👍${formatCount(reply.likeCount)} 💬${formatCount(reply.replyCount)} [${label}]`;

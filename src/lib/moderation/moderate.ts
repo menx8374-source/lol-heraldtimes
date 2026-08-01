@@ -7,10 +7,11 @@
  * 判定ロジックはすべて LLM 非依存の決定論的純関数（ng-words / personal-attack / rumor / duplicate）
  * に委譲し、この関数はそれらを「公開/保留」の1つの判定に統合するだけの薄い層にする。
  */
-import { findNgWord } from "@/lib/moderation/ng-words";
+import { findNgWordExcluding } from "@/lib/moderation/ng-words";
 import { detectPersonalAttack } from "@/lib/moderation/personal-attack";
 import { containsRumorMarker } from "@/lib/moderation/rumor";
 import { findDuplicateArticle } from "@/lib/moderation/duplicate";
+import { CHAMPIONS } from "@/lib/generation/title";
 import type { SimilarityComparable } from "@/lib/collection/similarity";
 
 export type ModerationReason = "ng_word" | "missing_source" | "personal_attack" | "duplicate";
@@ -44,7 +45,9 @@ export function moderateArticleContent(
     return { status: "held", reason: "missing_source", detail: "出典リンクがありません" };
   }
 
-  const ngWord = findNgWord(combinedText);
+  // reactqual-S3: 「グレイブス」のようにNGワード「ブス」を部分文字列として偶然含むだけの実在する
+  // チャンピオン名を差別語と誤判定して保留にしないよう、CHAMPIONSに一致する箇所は除外して照合する。
+  const ngWord = findNgWordExcluding(combinedText, CHAMPIONS);
   if (ngWord) {
     return { status: "held", reason: "ng_word", detail: `NGワード「${ngWord}」が検出されました` };
   }
