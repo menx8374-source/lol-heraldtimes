@@ -25,6 +25,7 @@ import {
 import { approveHeldComment, rejectHeldComment } from "@/lib/admin/comments-admin";
 import { setCategoryAutoPublish } from "@/lib/admin/category-policy";
 import { createManualArticleFromUrl, type ManualArticleResult } from "@/lib/admin/manual-article";
+import { draftsToRawBlocks, type BlockDraft } from "@/lib/admin/article-editor-form";
 import type { AdminAuthContext } from "@/lib/admin/auth-context";
 
 async function currentAuthContext(): Promise<AdminAuthContext> {
@@ -128,17 +129,52 @@ export async function manualArticleAction(
   return result;
 }
 
-export async function updateArticleAction(formData: FormData): Promise<void> {
+/** `updateArticleAction`の実行結果（admincms-S3補完）。失敗時は`ArticleEditor`が自身のReact state
+ * （編集中のブロック/メタ）を保持したまま、このエラーメッセージだけを表示できるようにするため
+ * redirectせず戻り値として返す（`useActionState`で受け取る想定）。 */
+export type UpdateArticleActionState = { success: true } | { success: false; error: string };
+
+/**
+ * 構造化エディタ（admincms-S3）の保存アクション。`ArticleEditor.tsx` がブロックドラフト配列・タグ配列を
+ * JSON文字列にシリアライズしてhidden inputに詰めて送信し、`useActionState`経由で呼び出す。
+ * ここではFormDataの取り出しとJSONパースのみを行い、ブロックドラフト→本文の変換(`draftsToRawBlocks`)と
+ * 検証(`parseArticleBody`＋アンカー整合)は`updateArticleContent`（と内部で使う純関数）に委譲する。
+ * 検証NG・不正なJSON等は例外を投げず`{success:false, error}`を返す（DBは一切変更しない＝記事不変）。
+ * これによりクライアント側は編集中の入力内容を保ったままエラーメッセージだけを表示できる
+ * （旧実装のredirectはDB再取得でフォームをリセットしてしまうため、成功時のみredirectする）。
+ */
+export async function updateArticleAction(
+  _prevState: UpdateArticleActionState | null,
+  formData: FormData,
+): Promise<UpdateArticleActionState> {
   const auth = await currentAuthContext();
   const articleId = requiredString(formData, "articleId");
   const title = requiredString(formData, "title");
-  const bodyText = requiredString(formData, "bodyText");
+  const category = requiredString(formData, "category");
+  const metaDescription = (formData.get("metaDescription") as string | null) ?? "";
+  const thumbnailUrl = (formData.get("thumbnailUrl") as string | null) ?? "";
+  const tagsJson = (formData.get("tagsJson") as string | null) ?? "[]";
+  const blocksJson = requiredString(formData, "blocksJson");
+  const statusRaw = formData.get("status");
+  const status = statusRaw === "review" || statusRaw === "published" ? statusRaw : undefined;
+
+  let tags: string[];
+  let drafts: BlockDraft[];
+  try {
+    tags = JSON.parse(tagsJson);
+    drafts = JSON.parse(blocksJson);
+  } catch {
+    return { success: false, error: "フォームの内容が不正です" };
+  }
 
   try {
-    await updateArticleContent(articleId, { title, bodyText }, auth);
+    await updateArticleContent(
+      articleId,
+      { title, metaDescription, category, tags, thumbnailUrl, status, body: draftsToRawBlocks(drafts) },
+      auth,
+    );
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    redirect(`/admin/articles/${articleId}/edit?error=${encodeURIComponent(message)}`);
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
   }
 
   revalidatePath("/admin");

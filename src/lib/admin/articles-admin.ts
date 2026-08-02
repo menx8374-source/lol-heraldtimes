@@ -6,10 +6,12 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { parseArticleBody, type ArticleBodyBlock } from "@/lib/article-body";
+import { validateReactionAnchors } from "@/lib/admin/article-editor-form";
 import { bodyBlocksToText } from "@/lib/search";
 import { moderateArticleContent } from "@/lib/moderation/moderate";
 import { requireAuthorized, type AdminAuthContext } from "@/lib/admin/auth-context";
 import { revalidatePublishedListings } from "@/lib/generation/revalidate-listings";
+import { CATEGORY_LABELS, type CategoryLabel } from "@/lib/categories";
 
 export type AdminArticleSummary = {
   id: string;
@@ -44,17 +46,35 @@ export async function listArticlesForAdmin(options: { take?: number } = {}): Pro
   });
 }
 
+/** 構造化エディタ（admincms-S3）用: 編集画面が必要とする記事の全フィールド。 */
 export type AdminArticleEditData = {
   id: string;
   title: string;
-  bodyText: string;
+  metaDescription: string;
+  category: string;
+  tags: string[];
+  thumbnailUrl: string;
+  status: string;
+  body: ArticleBodyBlock[];
 };
 
-/** 編集フォーム用: 記事のタイトルと本文(整形済みJSONテキスト)を取得する。 */
+/** 編集フォーム用: 記事のタイトル・メタ・タグ・本文(検証済みブロック配列)を取得する。 */
 export async function getArticleForEdit(articleId: string): Promise<AdminArticleEditData | null> {
-  const article = await prisma.article.findUnique({ where: { id: articleId }, select: { id: true, title: true, body: true } });
+  const article = await prisma.article.findUnique({
+    where: { id: articleId },
+    include: { tags: { include: { tag: true } } },
+  });
   if (!article) return null;
-  return { id: article.id, title: article.title, bodyText: JSON.stringify(article.body, null, 2) };
+  return {
+    id: article.id,
+    title: article.title,
+    metaDescription: article.metaDescription ?? "",
+    category: article.category,
+    tags: article.tags.map((t) => t.tag.name),
+    thumbnailUrl: article.thumbnailUrl ?? "",
+    status: article.status,
+    body: parseArticleBody(article.body),
+  };
 }
 
 /** 保留記事を承認して公開する（status=published, publishedAt更新）。予約設定が残っていれば解除する。 */
@@ -81,26 +101,52 @@ export async function rejectHeldArticle(articleId: string, auth: AdminAuthContex
   });
 }
 
+/** `updateArticleContent` の入力（構造化エディタ、admincms-S3）。 */
+export type UpdateArticleContentInput = {
+  title: string;
+  metaDescription?: string;
+  category: string;
+  tags: string[];
+  thumbnailUrl?: string;
+  /**
+   * "review"/"published" を指定したときのみその状態へ遷移する。undefined は現在の状態を
+   * 変えない（held/rejected/scheduled 等、エディタの2択トグル対象外の状態を保つ＝編集で
+   * 勝手に公開しない）。
+   */
+  status?: "review" | "published";
+  /** 検証前の本文（`parseArticleBody` に通す前の値。ブロック配列でもJSONパース後の値でもよい）。 */
+  body: unknown;
+};
+
 /**
- * 記事のタイトル・本文を編集する。編集後の内容は安全フィルタ（NGワード/出典欠落/個人中傷）を再チェックし、
- * 「公開中の記事だったが編集後は不合格」なら保留(held)へ落として公開の不変条件を守る
- * （held/rejected/scheduled だった記事はそのまま編集内容のみ反映し、状態は変えない＝編集で勝手に公開しない）。
+ * 記事のタイトル・メタ情報・カテゴリ・タグ・サムネイル・公開状態・本文を編集する（admincms-S3構造化
+ * エディタ）。本文は必ず `parseArticleBody`＋`validateReactionAnchors`（同一記事内に存在する
+ * reaction番号かの整合）を通し、不正なら例外メッセージ（`本文ブロック[i]の…`の粒度）をそのまま投げて
+ * 記事を一切変更しない。編集後の内容は安全フィルタ（NGワード/出典欠落/個人中傷）を再チェックし、
+ * 「公開される予定だったが編集後は不合格」なら保留(held)へ落として公開の不変条件を守る
+ * （status を変更対象にしていない場合＝held/rejected/scheduled はそのまま編集内容のみ反映し、
+ * 状態は変えない＝編集で勝手に公開しない）。tags は connectOrCreate で置換更新する
+ * （追加/削除が反映され既存タグを失わない）。
  */
 export async function updateArticleContent(
   articleId: string,
-  input: { title: string; bodyText: string },
+  input: UpdateArticleContentInput,
   auth: AdminAuthContext,
 ): Promise<void> {
   requireAuthorized(auth);
 
   const title = input.title.trim();
   if (!title) throw new Error("タイトルは必須です");
+  if (!CATEGORY_LABELS.includes(input.category as CategoryLabel)) {
+    throw new Error(`カテゴリが不正です: ${input.category}`);
+  }
 
   let body: ArticleBodyBlock[];
   try {
-    body = parseArticleBody(JSON.parse(input.bodyText));
+    body = parseArticleBody(input.body);
+    validateReactionAnchors(body);
   } catch (err) {
-    throw new Error(`本文の形式が不正です: ${err instanceof Error ? err.message : String(err)}`);
+    throw err instanceof Error ? err : new Error(String(err));
   }
 
   const article = await prisma.article.findUnique({
@@ -112,8 +158,34 @@ export async function updateArticleContent(
   const bodyText = bodyBlocksToText(body);
   const moderation = moderateArticleContent({ title, bodyText, sourceCount: article.sources.length });
 
-  const data: Prisma.ArticleUpdateInput = { title, body };
-  if (article.status === "published" && moderation.status !== "published") {
+  const tags = Array.from(new Set(input.tags.map((t) => t.trim()).filter((t) => t.length > 0)));
+  const metaDescription = input.metaDescription?.trim() || null;
+  const thumbnailUrl = input.thumbnailUrl?.trim() || null;
+
+  const data: Prisma.ArticleUpdateInput = {
+    title,
+    body,
+    category: input.category,
+    metaDescription,
+    thumbnailUrl,
+    tags: {
+      deleteMany: {},
+      create: tags.map((name) => ({ tag: { connectOrCreate: { where: { name }, create: { name } } } })),
+    },
+  };
+
+  if (input.status === "published") {
+    data.status = "published";
+    if (article.status !== "published") data.publishedAt = new Date();
+    data.heldReason = null;
+    data.heldDetail = null;
+    data.scheduledAt = null;
+  } else if (input.status === "review") {
+    data.status = "review";
+  }
+
+  const resultingStatus = typeof data.status === "string" ? data.status : article.status;
+  if (resultingStatus === "published" && moderation.status !== "published") {
     data.status = "held";
     data.heldReason = moderation.reason;
     data.heldDetail = moderation.detail;

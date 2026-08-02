@@ -25,13 +25,7 @@ import {
 } from "@/app/admin/actions";
 import { ManualArticlePanel } from "@/app/admin/ManualArticlePanel";
 
-const STATUS_LABELS: Record<string, string> = {
-  published: "公開中",
-  held: "保留中",
-  rejected: "却下済み",
-  scheduled: "予約公開待ち",
-  review: "要レビュー",
-};
+import { ARTICLE_STATUS_LABELS as STATUS_LABELS } from "@/lib/admin/article-status-labels";
 
 // パイプライン実行直後の最新状態を必ず反映するため、キャッシュせず毎回DBから取得する。
 export const dynamic = "force-dynamic";

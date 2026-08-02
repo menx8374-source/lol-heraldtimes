@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getArticleForEdit } from "@/lib/admin/articles-admin";
-import { updateArticleAction } from "@/app/admin/actions";
+import { ArticleEditor } from "./ArticleEditor";
 
 export const dynamic = "force-dynamic";
 
@@ -12,12 +12,16 @@ export const metadata: Metadata = {
 
 type Props = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string }>;
 };
 
-export default async function AdminArticleEditPage({ params, searchParams }: Props) {
+/**
+ * 構造化エディタ（admincms-S3 F7/F8）: 本文ブロックをカードで並べて編集する画面。
+ * データ取得(サーバーコンポーネント)と入力状態の保持(`ArticleEditor`, Client Component)を分離する。
+ * 保存の成功/失敗は`ArticleEditor`側の`useActionState`が受け取るため、この画面はURLクエリで
+ * エラーを受け渡さない（検証NG時にDB再取得で入力内容が消えるのを避けるための設計、admincms-S3補完）。
+ */
+export default async function AdminArticleEditPage({ params }: Props) {
   const { id } = await params;
-  const { error } = await searchParams;
   const article = await getArticleForEdit(id);
   if (!article) notFound();
 
@@ -26,56 +30,19 @@ export default async function AdminArticleEditPage({ params, searchParams }: Pro
       <div className="mx-auto max-w-3xl px-4 py-8">
         <h1 className="text-2xl font-bold">記事編集</h1>
         <p className="mt-1 text-sm text-neutral-400">
-          本文はブロック配列のJSONテキストとして編集します（不正な形式は保存できません）。
+          本文ブロックをカードとして編集します（追加/削除/並べ替え可能）。
         </p>
 
-        {error && (
-          <div className="mt-4 rounded-lg border border-red-900 bg-red-950/40 px-3 py-2 text-sm text-red-300">
-            保存に失敗しました: {error}
-          </div>
-        )}
-
-        <form action={updateArticleAction} className="mt-6 flex flex-col gap-4">
-          <input type="hidden" name="articleId" value={article.id} />
-
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-bold">タイトル</span>
-            <input
-              type="text"
-              name="title"
-              defaultValue={article.title}
-              required
-              className="rounded border border-neutral-700 bg-neutral-900 px-3 py-2 text-sm text-neutral-100"
-            />
-          </label>
-
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-bold">本文（ブロック配列JSON）</span>
-            <textarea
-              name="bodyText"
-              defaultValue={article.bodyText}
-              required
-              rows={20}
-              spellCheck={false}
-              className="rounded border border-neutral-700 bg-neutral-900 px-3 py-2 font-mono text-xs text-neutral-100"
-            />
-          </label>
-
-          <div className="flex gap-3">
-            <button
-              type="submit"
-              className="rounded bg-emerald-700 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-600"
-            >
-              保存する
-            </button>
-            <a
-              href="/admin"
-              className="rounded border border-neutral-700 px-4 py-2 text-sm text-neutral-300 hover:bg-neutral-900"
-            >
-              キャンセル
-            </a>
-          </div>
-        </form>
+        <ArticleEditor
+          articleId={article.id}
+          initialTitle={article.title}
+          initialMetaDescription={article.metaDescription}
+          initialCategory={article.category}
+          initialTags={article.tags}
+          initialThumbnailUrl={article.thumbnailUrl}
+          initialStatus={article.status}
+          initialBlocks={article.body}
+        />
       </div>
     </div>
   );

@@ -121,8 +121,12 @@ describe("運営CMS 記事管理（認可ゲート含む）", () => {
       title: "旧タイトル",
       body: [{ type: "paragraph", text: "旧本文" }],
     });
-    const newBody = JSON.stringify([{ type: "paragraph", text: "新しい本文です" }]);
-    await updateArticleContent(article.id, { title: "新タイトル", bodyText: newBody }, authorizedContext());
+    const newBody = [{ type: "paragraph", text: "新しい本文です" }];
+    await updateArticleContent(
+      article.id,
+      { title: "新タイトル", category: "パッチ/メタ", tags: [], body: newBody },
+      authorizedContext(),
+    );
 
     const updated = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
     expect(updated.title).toBe("新タイトル");
@@ -131,8 +135,12 @@ describe("運営CMS 記事管理（認可ゲート含む）", () => {
 
   it("updateArticleContentは編集後にNGワードを含む場合、公開中記事を保留(held)へ落とす（公開不変条件を維持）", async () => {
     const article = await createArticle({ status: "published", title: "元タイトル" });
-    const ngBody = JSON.stringify([{ type: "paragraph", text: "死ね" }]);
-    await updateArticleContent(article.id, { title: "編集後タイトル", bodyText: ngBody }, authorizedContext());
+    const ngBody = [{ type: "paragraph", text: "死ね" }];
+    await updateArticleContent(
+      article.id,
+      { title: "編集後タイトル", category: "パッチ/メタ", tags: [], body: ngBody },
+      authorizedContext(),
+    );
 
     const updated = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
     expect(updated.status).toBe("held");
@@ -142,14 +150,109 @@ describe("運営CMS 記事管理（認可ゲート含む）", () => {
     expect(publicList.items.some((a) => a.slug === article.slug)).toBe(false);
   });
 
-  it("updateArticleContentは不正なJSON本文を保存せず例外を投げる", async () => {
+  it("updateArticleContentは不正な本文形式を保存せず例外を投げる", async () => {
     const article = await createArticle({ status: "published" });
     await expect(
-      updateArticleContent(article.id, { title: "x", bodyText: "not json" }, authorizedContext()),
+      updateArticleContent(
+        article.id,
+        { title: "x", category: "パッチ/メタ", tags: [], body: "not an array" },
+        authorizedContext(),
+      ),
     ).rejects.toThrow();
 
     const unchanged = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
     expect(unchanged.title).not.toBe("x");
+  });
+
+  it("updateArticleContentは存在しないアンカー番号を拒否し、記事を変更しない", async () => {
+    const article = await createArticle({ status: "published", title: "元タイトル" });
+    const badBody = [{ type: "reaction", number: 1, name: "A", lines: [{ text: "本文" }], anchors: [99] }];
+    await expect(
+      updateArticleContent(
+        article.id,
+        { title: "編集後タイトル", category: "パッチ/メタ", tags: [], body: badBody },
+        authorizedContext(),
+      ),
+    ).rejects.toThrow(/anchorsに存在しないレス番号があります/);
+
+    const unchanged = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
+    expect(unchanged.title).toBe("元タイトル");
+  });
+
+  it("updateArticleContentはタグをconnectOrCreateで置換更新し、既存タグを失わず追加/削除できる", async () => {
+    const article = await createArticle({ status: "published", body: [{ type: "paragraph", text: "本文" }] });
+    await updateArticleContent(
+      article.id,
+      { title: "タイトル", category: "パッチ/メタ", tags: ["ヤスオ", "アリ"], body: [{ type: "paragraph", text: "本文" }] },
+      authorizedContext(),
+    );
+    let withTags = await prisma.article.findUniqueOrThrow({
+      where: { id: article.id },
+      include: { tags: { include: { tag: true } } },
+    });
+    expect(withTags.tags.map((t) => t.tag.name).sort()).toEqual(["アリ", "ヤスオ"]);
+
+    // タグを1つ追加・1つ削除して保存し直す。
+    await updateArticleContent(
+      article.id,
+      { title: "タイトル", category: "パッチ/メタ", tags: ["ヤスオ", "ジンクス"], body: [{ type: "paragraph", text: "本文" }] },
+      authorizedContext(),
+    );
+    withTags = await prisma.article.findUniqueOrThrow({
+      where: { id: article.id },
+      include: { tags: { include: { tag: true } } },
+    });
+    expect(withTags.tags.map((t) => t.tag.name).sort()).toEqual(["ジンクス", "ヤスオ"]);
+  });
+
+  it("updateArticleContentはメタ情報の更新が独立に反映され、他フィールドを巻き込まない", async () => {
+    const article = await createArticle({
+      status: "published",
+      title: "タイトル",
+      body: [{ type: "paragraph", text: "本文" }],
+    });
+    await updateArticleContent(
+      article.id,
+      {
+        title: "タイトル",
+        category: "パッチ/メタ",
+        tags: [],
+        thumbnailUrl: "https://example.com/thumb.png",
+        metaDescription: "要約テキスト",
+        body: [{ type: "paragraph", text: "本文" }],
+      },
+      authorizedContext(),
+    );
+    const updated = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
+    expect(updated.thumbnailUrl).toBe("https://example.com/thumb.png");
+    expect(updated.metaDescription).toBe("要約テキスト");
+    expect(updated.title).toBe("タイトル");
+    expect(updated.category).toBe("パッチ/メタ");
+  });
+
+  it("updateArticleContentはstatus=publishedを指定するとreview記事を公開しレビューキューから外す", async () => {
+    const article = await createArticle({ status: "review", title: "レビュー中記事" });
+    await updateArticleContent(
+      article.id,
+      { title: "レビュー中記事", category: "パッチ/メタ", tags: [], status: "published", body: [{ type: "paragraph", text: "本文" }] },
+      authorizedContext(),
+    );
+    const updated = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
+    expect(updated.status).toBe("published");
+    const publicList = await listArticles(1, 20);
+    expect(publicList.items.some((a) => a.slug === article.slug)).toBe(true);
+  });
+
+  it("updateArticleContentはstatus未指定のときheld記事の状態を変えない（編集で勝手に公開しない）", async () => {
+    const article = await createArticle({ status: "held", heldReason: "ng_word" });
+    await updateArticleContent(
+      article.id,
+      { title: "編集後タイトル", category: "パッチ/メタ", tags: [], body: [{ type: "paragraph", text: "問題ない本文" }] },
+      authorizedContext(),
+    );
+    const updated = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
+    expect(updated.status).toBe("held");
+    expect(updated.title).toBe("編集後タイトル");
   });
 
   it("toggleArticlePinnedでピン留めされた記事は、公開が古くても一覧・注目枠の先頭に来る", async () => {
@@ -204,11 +307,16 @@ describe("運営CMS 記事管理（認可ゲート含む）", () => {
     await expect(toggleArticlePinned(article.id, true, UNAUTHORIZED)).rejects.toThrow(UnauthorizedError);
   });
 
-  it("getArticleForEditはタイトルと整形済み本文JSONを返し、存在しないIDはnullを返す", async () => {
+  it("getArticleForEditはタイトル・メタ・タグ・本文ブロックを返し、存在しないIDはnullを返す", async () => {
     const article = await createArticle({ title: "編集対象", body: [{ type: "paragraph", text: "本文テキスト" }] });
     const editData = await getArticleForEdit(article.id);
     expect(editData?.title).toBe("編集対象");
-    expect(JSON.parse(editData!.bodyText)).toEqual([{ type: "paragraph", text: "本文テキスト" }]);
+    expect(editData?.body).toEqual([{ type: "paragraph", text: "本文テキスト" }]);
+    expect(editData?.category).toBe("パッチ/メタ");
+    expect(editData?.tags).toEqual([]);
+    expect(editData?.metaDescription).toBe("");
+    expect(editData?.thumbnailUrl).toBe("");
+    expect(editData?.status).toBe("held");
 
     expect(await getArticleForEdit("nonexistent-id")).toBeNull();
   });
