@@ -6,7 +6,7 @@
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { parseArticleBody, type ArticleBodyBlock } from "@/lib/article-body";
-import { validateReactionAnchors } from "@/lib/admin/article-editor-form";
+import { validateReactionAnchors, validateTocAnchors } from "@/lib/admin/article-editor-form";
 import { bodyBlocksToText } from "@/lib/search";
 import { moderateArticleContent } from "@/lib/moderation/moderate";
 import { requireAuthorized, type AdminAuthContext } from "@/lib/admin/auth-context";
@@ -120,8 +120,9 @@ export type UpdateArticleContentInput = {
 
 /**
  * 記事のタイトル・メタ情報・カテゴリ・タグ・サムネイル・公開状態・本文を編集する（admincms-S3構造化
- * エディタ）。本文は必ず `parseArticleBody`＋`validateReactionAnchors`（同一記事内に存在する
- * reaction番号かの整合）を通し、不正なら例外メッセージ（`本文ブロック[i]の…`の粒度）をそのまま投げて
+ * エディタ、S4でパッチ系ブロックを追加）。本文は必ず `parseArticleBody`＋`validateReactionAnchors`
+ * （同一記事内に存在するreaction番号かの整合）＋`validateTocAnchors`（同一記事内に存在する
+ * heading anchorかの整合）を通し、不正なら例外メッセージ（`本文ブロック[i]の…`の粒度）をそのまま投げて
  * 記事を一切変更しない。編集後の内容は安全フィルタ（NGワード/出典欠落/個人中傷）を再チェックし、
  * 「公開される予定だったが編集後は不合格」なら保留(held)へ落として公開の不変条件を守る
  * （status を変更対象にしていない場合＝held/rejected/scheduled はそのまま編集内容のみ反映し、
@@ -145,6 +146,7 @@ export async function updateArticleContent(
   try {
     body = parseArticleBody(input.body);
     validateReactionAnchors(body);
+    validateTocAnchors(body);
   } catch (err) {
     throw err instanceof Error ? err : new Error(String(err));
   }

@@ -321,9 +321,23 @@ function parseTocBlock(b: Record<string, unknown>, index: number): ArticleBodyTo
   return { type: "toc", items };
 }
 
-const PATCH_ABILITY_KEYS = new Set(["passive", "Q", "W", "E", "R", "base"]);
-const PATCH_TARGET_KINDS = new Set(["champion", "item", "rune", "system", "bugfix", "arena", "augment", "other"]);
-const PATCH_DIRECTIONS = new Set(["buff", "nerf", "adjust"]);
+/** patchChange語彙（editable draft/UIのselect肢が参照する単一のsource of truth、admincms-S4）。 */
+export const PATCH_ABILITY_KEY_VALUES = ["passive", "Q", "W", "E", "R", "base"] as const;
+export const PATCH_TARGET_KIND_VALUES = [
+  "champion",
+  "item",
+  "rune",
+  "system",
+  "bugfix",
+  "arena",
+  "augment",
+  "other",
+] as const;
+export const PATCH_DIRECTION_VALUES = ["buff", "nerf", "adjust"] as const;
+
+const PATCH_ABILITY_KEYS = new Set<string>(PATCH_ABILITY_KEY_VALUES);
+const PATCH_TARGET_KINDS = new Set<string>(PATCH_TARGET_KIND_VALUES);
+const PATCH_DIRECTIONS = new Set<string>(PATCH_DIRECTION_VALUES);
 
 /**
  * patchChangeブロックのgroups[].changes[]を検証する（パッチ記事刷新S2 F-S2-1、S6で記述式変更に対応）。

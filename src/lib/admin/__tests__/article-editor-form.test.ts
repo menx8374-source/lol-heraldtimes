@@ -9,13 +9,28 @@ import {
   moveItem,
   removeItemAt,
   validateReactionAnchors,
+  validateTocAnchors,
   type BlockDraft,
+  type PatchChangeDraft,
+  type PatchChangeGroupDraft,
 } from "@/lib/admin/article-editor-form";
 import { parseArticleBody, type ArticleBodyBlock } from "@/lib/article-body";
 
 /** テスト用: reaction draftを型を保ったまま組み立てるヘルパー（spreadでの型幅拡がりを避ける）。 */
 function reactionDraft(overrides: Partial<Extract<BlockDraft, { type: "reaction" }>>): BlockDraft {
   const base = createDraftBlock("reaction") as Extract<BlockDraft, { type: "reaction" }>;
+  return { ...base, ...overrides };
+}
+
+/** テスト用: heading draftを型を保ったまま組み立てるヘルパー。 */
+function headingDraft(overrides: Partial<Extract<BlockDraft, { type: "heading" }>>): BlockDraft {
+  const base = createDraftBlock("heading") as Extract<BlockDraft, { type: "heading" }>;
+  return { ...base, ...overrides };
+}
+
+/** テスト用: patchChange draftを型を保ったまま組み立てるヘルパー。 */
+function patchChangeDraft(overrides: Partial<Extract<BlockDraft, { type: "patchChange" }>>): BlockDraft {
+  const base = createDraftBlock("patchChange") as Extract<BlockDraft, { type: "patchChange" }>;
   return { ...base, ...overrides };
 }
 
@@ -33,11 +48,19 @@ describe("article-editor-form: フォーム⇔ブロック変換", () => {
       { type: "quote", fill: (d) => (d.type === "quote" ? { ...d, text: "引用" } : d) },
       { type: "embed", fill: (d) => (d.type === "embed" ? { ...d, provider: "youtube", url: "https://youtube.com/watch?v=abcdefghijk" } : d) },
       { type: "image", fill: (d) => (d.type === "image" ? { ...d, url: "https://example.com/a.png", alt: "説明" } : d) },
+      { type: "linkButton", fill: (d) => (d.type === "linkButton" ? { ...d, url: "https://example.com/patch-notes", label: "公式パッチノート" } : d) },
+      { type: "patchChange", fill: (d) => (d.type === "patchChange" ? { ...d, targetName: "コーキ" } : d) },
     ];
     for (const c of cases) {
-      const draft = c.fill(createDraftBlock(c.type as Exclude<BlockDraft["type"], "raw">));
+      const draft = c.fill(createDraftBlock(c.type));
       expect(() => draftsToArticleBody([draft])).not.toThrow();
     }
+  });
+
+  it("toc(1件以上のitems)はheadingのanchorと対応していれば検証を通る", () => {
+    const heading = headingDraft({ text: "主な強化", anchor: "sec-1" });
+    const toc: BlockDraft = { type: "toc", items: [{ label: "主な強化", anchor: "sec-1" }] };
+    expect(() => draftsToArticleBody([heading, toc])).not.toThrow();
   });
 
   it("emphasisColorはemphasis:falseのとき出力しない（強調オフ→色の孤児化を防ぐ・S3 code-review修正）", () => {
@@ -72,6 +95,34 @@ describe("article-editor-form: フォーム⇔ブロック変換", () => {
       { type: "quote", text: "引用テキスト", source: "出典元" },
       { type: "embed", provider: "youtube", url: "https://youtube.com/watch?v=abcdefghijk", caption: "動画キャプション" },
       { type: "image", url: "https://example.com/img.png", alt: "画像alt", credit: "撮影者クレジット" },
+      { type: "linkButton", url: "https://example.com/patch-notes", label: "公式パッチノートを読む" },
+      { type: "toc", items: [{ label: "見出しテキストへ", anchor: "section-1" }] },
+      {
+        type: "patchChange",
+        targetName: "コーキ",
+        targetIconUrl: "https://ddragon.leagueoflegends.com/cdn/img/champion/Corki.png",
+        targetKind: "champion",
+        direction: "buff",
+        intent: "試合終盤のコーキの出撃時の火力を少し高めました。",
+        groups: [
+          {
+            abilityKey: "base",
+            changes: [{ stat: "レベルアップごとの攻撃力", before: "2", after: "2.5" }],
+          },
+          {
+            abilityKey: "R",
+            abilityName: "R - 連発ミサイル",
+            abilityIconUrl: "https://ddragon.leagueoflegends.com/cdn/img/spell/MissileBarrage.png",
+            changes: [
+              { stat: "通常攻撃による残りリチャージ時間短縮量", before: "2秒～4秒", after: "2秒～6秒" },
+              { text: "R使用中に移動できるようになりました。" },
+              { stat: "備考", text: "エフェクトの視認性を改善しました。" },
+            ],
+          },
+        ],
+      },
+      // groups/changesが空の最小構成も混ぜる（誤帰属ゼロの数値なし対象、article-body.tsが許容する形）。
+      { type: "patchChange", targetName: "アジール", targetKind: "champion", direction: "adjust", groups: [] },
       // 任意フィールド無しの最小構成も混ぜる。
       { type: "reaction", number: 1, name: "名無し", lines: [{ text: "最小レス" }] },
       { type: "heading", text: "anchor無し見出し" },
@@ -81,14 +132,6 @@ describe("article-editor-form: フォーム⇔ブロック変換", () => {
     const raw = draftsToRawBlocks(drafts);
     const roundTripped = parseArticleBody(raw);
     expect(roundTripped).toEqual(blocks);
-  });
-
-  it("S4未対応ブロック(toc)はraw draftとしてそのまま素通しされる", () => {
-    const block: ArticleBodyBlock = { type: "toc", items: [{ label: "章1", anchor: "a1" }] };
-    const draft = blockToDraft(block);
-    expect(draft.type).toBe("raw");
-    const raw = draftToRawBlock(draft);
-    expect(parseArticleBody([raw])).toEqual([block]);
   });
 });
 
@@ -132,6 +175,132 @@ describe("article-editor-form: 検証エラーの伝播", () => {
   it("validateReactionAnchorsは単体でも同じ検証を行う", () => {
     const blocks: ArticleBodyBlock[] = [{ type: "reaction", number: 1, name: "A", lines: [{ text: "x" }], anchors: [5] }];
     expect(() => validateReactionAnchors(blocks)).toThrow(/anchorsに存在しないレス番号があります: 5/);
+  });
+
+  it("画像のaltが空だと保存拒否される", () => {
+    const draft: BlockDraft = { type: "image", url: "https://example.com/a.png", alt: "", credit: "" };
+    expect(() => draftsToArticleBody([draft])).toThrow(/画像altが空/);
+  });
+
+  it("リンクボタンのurlがhttps以外だと保存拒否される", () => {
+    const httpDraft: BlockDraft = { type: "linkButton", url: "http://example.com/notes", label: "非公式" };
+    expect(() => draftsToArticleBody([httpDraft])).toThrow(/linkButton url.*https必須/);
+    const jsDraft: BlockDraft = { type: "linkButton", url: "javascript:alert(1)", label: "危険" };
+    expect(() => draftsToArticleBody([jsDraft])).toThrow(/linkButton url.*https必須/);
+  });
+
+  it("目次(toc)に記事内に存在しないアンカーを指定すると、どのブロックか分かるメッセージで拒否される", () => {
+    const heading = headingDraft({ text: "見出し", anchor: "sec-1" });
+    const toc: BlockDraft = { type: "toc", items: [{ label: "存在しない章", anchor: "sec-999" }] };
+    expect(() => draftsToArticleBody([heading, toc])).toThrow(
+      /本文ブロック\[1\]のtoc itemsに存在しないアンカーがあります: sec-999/,
+    );
+  });
+
+  it("validateTocAnchorsは単体でも同じ検証を行う", () => {
+    const blocks: ArticleBodyBlock[] = [{ type: "toc", items: [{ label: "章", anchor: "missing" }] }];
+    expect(() => validateTocAnchors(blocks)).toThrow(/toc itemsに存在しないアンカーがあります: missing/);
+  });
+
+  it("patchChangeの数値変更でbefore/afterいずれかが空だと、どのグループ・何行目かが分かるメッセージで拒否される", () => {
+    const draft = patchChangeDraft({
+      targetName: "コーキ",
+      groups: [
+        {
+          abilityKey: "",
+          abilityName: "",
+          abilityIconUrl: "",
+          changes: [{ kind: "numeric", stat: "攻撃力", before: "", after: "2.5", text: "" }],
+        },
+      ],
+    });
+    expect(() => draftsToArticleBody([draft])).toThrow(
+      /groups\[0\]のchanges\[0\]がstat\/before\/after\(数値変更\)・text\(記述式変更\)のいずれも満たしません/,
+    );
+  });
+
+  it("patchChangeのtargetKind/directionは定義済みの語彙以外を受け付けない（不正なJSON入力を想定）", () => {
+    // 不正な語彙はUIのselectでは選べないが、blocksJson(フォーム送信値)は任意の文字列を受け付けうるため、
+    // parseArticleBody側で最終的に弾かれることを確認する（`as unknown as BlockDraft`で意図的に型を緩める）。
+    const invalidKind = {
+      ...patchChangeDraft({ targetName: "x" }),
+      targetKind: "unknown",
+    } as unknown as BlockDraft;
+    expect(() => draftsToArticleBody([invalidKind])).toThrow(/targetKindが不正/);
+    const invalidDirection = {
+      ...patchChangeDraft({ targetName: "x" }),
+      direction: "op",
+    } as unknown as BlockDraft;
+    expect(() => draftsToArticleBody([invalidDirection])).toThrow(/directionが不正/);
+  });
+});
+
+describe("article-editor-form: patchChangeの組み立て（グループ/変更行の追加・削除・種別判別）", () => {
+  it("グループの追加(insertItemAfter)・削除(removeItemAt)の結果が期待した構造になる", () => {
+    const group1: PatchChangeGroupDraft = {
+      abilityKey: "Q",
+      abilityName: "Q",
+      abilityIconUrl: "",
+      changes: [{ kind: "numeric", stat: "ダメージ", before: "80", after: "100", text: "" }],
+    };
+    const group2: PatchChangeGroupDraft = {
+      abilityKey: "base",
+      abilityName: "",
+      abilityIconUrl: "",
+      changes: [{ kind: "descriptive", stat: "", before: "", after: "", text: "説明文" }],
+    };
+    const afterAdd = insertItemAfter([group1], 0, group2);
+    expect(afterAdd).toEqual([group1, group2]);
+    const afterRemove = removeItemAt(afterAdd, 0);
+    expect(afterRemove).toEqual([group2]);
+
+    const draft = patchChangeDraft({ targetName: "テスト対象", groups: afterRemove });
+    const body = draftsToArticleBody([draft]);
+    expect(body[0]).toMatchObject({
+      groups: [{ abilityKey: "base", changes: [{ text: "説明文" }] }],
+    });
+  });
+
+  it("変更行の追加(insertItemAfter)・削除(removeItemAt)の結果が期待した構造になる", () => {
+    const numeric: PatchChangeDraft = { kind: "numeric", stat: "体力", before: "500", after: "550", text: "" };
+    const descriptive: PatchChangeDraft = { kind: "descriptive", stat: "", before: "", after: "", text: "追加の説明" };
+    const afterAdd = insertItemAfter<PatchChangeDraft>([numeric], 0, descriptive);
+    expect(afterAdd).toEqual([numeric, descriptive]);
+    const afterRemove = removeItemAt(afterAdd, 0);
+    expect(afterRemove).toEqual([descriptive]);
+  });
+
+  it("数値変更(stat/before/after全非空)と記述式変更(text非空)の判別が入出力で正しい", () => {
+    const numericBlock: ArticleBodyBlock = {
+      type: "patchChange",
+      targetName: "コーキ",
+      targetKind: "champion",
+      direction: "buff",
+      groups: [{ changes: [{ stat: "攻撃力", before: "2", after: "2.5" }] }],
+    };
+    const descriptiveBlock: ArticleBodyBlock = {
+      type: "patchChange",
+      targetName: "コーキ",
+      targetKind: "champion",
+      direction: "buff",
+      groups: [{ changes: [{ text: "R使用中に移動できるようになりました。" }] }],
+    };
+    const descriptiveWithLabelBlock: ArticleBodyBlock = {
+      type: "patchChange",
+      targetName: "コーキ",
+      targetKind: "champion",
+      direction: "buff",
+      groups: [{ changes: [{ stat: "備考", text: "エフェクトの視認性を改善しました。" }] }],
+    };
+    for (const block of [numericBlock, descriptiveBlock, descriptiveWithLabelBlock]) {
+      const draft = blockToDraft(block);
+      expect(parseArticleBody(draftsToRawBlocks([draft]))).toEqual([block]);
+    }
+    // draft.kindがdraftToRawBlockの出力(数値=stat/before/after、記述式=text＋任意stat)に正しく反映される。
+    const numericDraft = blockToDraft(numericBlock);
+    expect(numericDraft.type === "patchChange" && numericDraft.groups[0].changes[0].kind).toBe("numeric");
+    const descriptiveDraft = blockToDraft(descriptiveBlock);
+    expect(descriptiveDraft.type === "patchChange" && descriptiveDraft.groups[0].changes[0].kind).toBe("descriptive");
   });
 });
 

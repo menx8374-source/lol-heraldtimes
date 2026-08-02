@@ -1,11 +1,12 @@
 "use client";
 
 /**
- * 構造化エディタ（admincms-S3 F7/F8）。生JSON textareaを廃止し、本文ブロックをカードとして
- * 縦に並べ、追加/削除/並べ替え＋メタ情報（タイトル/要約/カテゴリ/タグ/サムネイル/公開状態）を
- * 同画面で編集する。保存は`updateArticleAction`（server action）へ、タグ配列・ブロックドラフト配列を
- * JSON文字列化したhidden inputで渡す（フォーム⇔ブロックの変換自体は`lib/admin/article-editor-form.ts`の
- * 純関数が担い、ここではUI状態の保持と入力欄の描画のみを行う）。
+ * 構造化エディタ（admincms-S3 F7/F8、admincms-S4 F9でパッチ系ブロックの編集フォームを追加）。
+ * 生JSON textareaを廃止し、本文ブロックをカードとして縦に並べ、追加/削除/並べ替え＋メタ情報
+ * （タイトル/要約/カテゴリ/タグ/サムネイル/公開状態）を同画面で編集する。保存は`updateArticleAction`
+ * （server action）へ、タグ配列・ブロックドラフト配列をJSON文字列化したhidden inputで渡す
+ * （フォーム⇔ブロックの変換自体は`lib/admin/article-editor-form.ts`の純関数が担い、ここではUI状態の
+ * 保持と入力欄の描画のみを行う）。
  *
  * サブコンポーネント（BlockCard等）はモジュールトップレベルで定義する。ArticleEditor本体の中で
  * 関数コンポーネントを再定義すると、親の再レンダーごとに別コンポーネントとして扱われ入力中の
@@ -22,6 +23,9 @@ import { updateArticleAction } from "@/app/admin/actions";
 import {
   BLOCK_TYPE_LABELS,
   EDITABLE_BLOCK_TYPES,
+  PATCH_ABILITY_KEY_LABELS,
+  PATCH_DIRECTION_LABELS,
+  PATCH_TARGET_KIND_LABELS,
   blockToDraft,
   createDraftBlock,
   insertItemAfter,
@@ -29,11 +33,18 @@ import {
   removeItemAt,
   type BlockDraft,
   type EditableBlockType,
+  type PatchChangeDraft,
+  type PatchChangeGroupDraft,
   type ReactionLineDraft,
 } from "@/lib/admin/article-editor-form";
 import { CATEGORY_LABELS } from "@/lib/categories";
 import { EMBED_PROVIDER_LABELS, type EmbedProvider } from "@/lib/embed";
 import type { ArticleBodyBlock, ArticleBodyEmphasisColor } from "@/lib/article-body";
+import {
+  PATCH_TARGET_KIND_VALUES,
+  PATCH_DIRECTION_VALUES,
+  PATCH_ABILITY_KEY_VALUES,
+} from "@/lib/article-body";
 import { ARTICLE_STATUS_LABELS as STATUS_LABELS } from "@/lib/admin/article-status-labels";
 
 const RES_EMPHASIS_COLOR_OPTIONS: { value: "" | ArticleBodyEmphasisColor; label: string }[] = [
@@ -299,11 +310,374 @@ function BlockFields({ draft, onChange }: { draft: BlockDraft; onChange: (draft:
       </div>
     );
   }
-  // raw: patchChange/toc/linkButton（S4対応）。このスプリントでは編集UI未対応のため読み取り専用で表示する。
+  if (draft.type === "linkButton") {
+    return (
+      <div className="flex flex-col gap-2 text-sm">
+        <label className="flex flex-col gap-1">
+          <span>ラベル</span>
+          <input
+            type="text"
+            value={draft.label}
+            onChange={(e) => onChange({ ...draft, label: e.target.value })}
+            className={inputClass}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span>URL（https のみ）</span>
+          <input
+            type="text"
+            value={draft.url}
+            onChange={(e) => onChange({ ...draft, url: e.target.value })}
+            className={inputClass}
+          />
+        </label>
+      </div>
+    );
+  }
+  if (draft.type === "toc") {
+    return <TocFields draft={draft} onChange={onChange} />;
+  }
+  // draft.type === "patchChange"（残る唯一のケース）
+  return <PatchChangeFields draft={draft} onChange={onChange} />;
+}
+
+/** 目次(toc)ブロックの編集欄。items(表示名/リンク先アンカー)の追加/編集/並替/削除。 */
+function TocFields({
+  draft,
+  onChange,
+}: {
+  draft: Extract<BlockDraft, { type: "toc" }>;
+  onChange: (draft: BlockDraft) => void;
+}) {
+  function updateItem(itemIndex: number, item: { label: string; anchor: string }) {
+    onChange({ ...draft, items: draft.items.map((it, i) => (i === itemIndex ? item : it)) });
+  }
+  function addItem() {
+    onChange({ ...draft, items: insertItemAfter(draft.items, null, { label: "", anchor: "" }) });
+  }
+  function removeItem(itemIndex: number) {
+    onChange({ ...draft, items: removeItemAt(draft.items, itemIndex) });
+  }
+  function moveItemAt(itemIndex: number, direction: -1 | 1) {
+    onChange({ ...draft, items: moveItem(draft.items, itemIndex, direction) });
+  }
+
   return (
-    <div className="flex flex-col gap-1 text-xs text-neutral-400">
-      <p>この種類（{draft.rawType}）の編集はまだ対応していません（内容はそのまま保存されます）。</p>
-      <pre className="max-h-32 overflow-auto rounded bg-neutral-950 p-2">{JSON.stringify(draft.original, null, 2)}</pre>
+    <div className="flex flex-col gap-2 text-sm">
+      {draft.items.map((item, itemIndex) => (
+        <div key={itemIndex} className="flex flex-wrap items-end gap-2 rounded border border-neutral-800 p-2">
+          <label className="flex flex-col gap-1">
+            <span>表示名</span>
+            <input
+              type="text"
+              value={item.label}
+              onChange={(e) => updateItem(itemIndex, { ...item, label: e.target.value })}
+              className={inputClass}
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span>リンク先アンカー（見出しブロックのアンカーと一致させる）</span>
+            <input
+              type="text"
+              value={item.anchor}
+              onChange={(e) => updateItem(itemIndex, { ...item, anchor: e.target.value })}
+              className={inputClass}
+            />
+          </label>
+          <div className="flex gap-1">
+            <button type="button" onClick={() => moveItemAt(itemIndex, -1)} disabled={itemIndex === 0} className={smallButtonClass} aria-label="項目を上へ移動">
+              ↑
+            </button>
+            <button
+              type="button"
+              onClick={() => moveItemAt(itemIndex, 1)}
+              disabled={itemIndex === draft.items.length - 1}
+              className={smallButtonClass}
+              aria-label="項目を下へ移動"
+            >
+              ↓
+            </button>
+            <button
+              type="button"
+              onClick={() => removeItem(itemIndex)}
+              disabled={draft.items.length <= 1}
+              className={smallButtonClass}
+            >
+              項目を削除
+            </button>
+          </div>
+        </div>
+      ))}
+      <button type="button" onClick={addItem} className={`${smallButtonClass} self-start`}>
+        項目を追加
+      </button>
+    </div>
+  );
+}
+
+/** パッチ変更(patchChange)ブロックの編集欄。対象名/対象種別/方向/変更意図＋グループ群。 */
+function PatchChangeFields({
+  draft,
+  onChange,
+}: {
+  draft: Extract<BlockDraft, { type: "patchChange" }>;
+  onChange: (draft: BlockDraft) => void;
+}) {
+  function updateGroup(groupIndex: number, group: PatchChangeGroupDraft) {
+    onChange({ ...draft, groups: draft.groups.map((g, i) => (i === groupIndex ? group : g)) });
+  }
+  function addGroup() {
+    const newGroup: PatchChangeGroupDraft = { abilityKey: "", abilityName: "", abilityIconUrl: "", changes: [] };
+    onChange({ ...draft, groups: insertItemAfter(draft.groups, null, newGroup) });
+  }
+  function removeGroup(groupIndex: number) {
+    onChange({ ...draft, groups: removeItemAt(draft.groups, groupIndex) });
+  }
+  function moveGroup(groupIndex: number, direction: -1 | 1) {
+    onChange({ ...draft, groups: moveItem(draft.groups, groupIndex, direction) });
+  }
+
+  return (
+    <div className="flex flex-col gap-3 text-sm">
+      <div className="flex flex-wrap gap-2">
+        <label className="flex flex-col gap-1">
+          <span>対象名</span>
+          <input
+            type="text"
+            value={draft.targetName}
+            onChange={(e) => onChange({ ...draft, targetName: e.target.value })}
+            className={inputClass}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span>対象種別</span>
+          <select
+            value={draft.targetKind}
+            onChange={(e) => onChange({ ...draft, targetKind: e.target.value as typeof draft.targetKind })}
+            className={inputClass}
+          >
+            {PATCH_TARGET_KIND_VALUES.map((k) => (
+              <option key={k} value={k}>
+                {PATCH_TARGET_KIND_LABELS[k]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span>方向</span>
+          <select
+            value={draft.direction}
+            onChange={(e) => onChange({ ...draft, direction: e.target.value as typeof draft.direction })}
+            className={inputClass}
+          >
+            {PATCH_DIRECTION_VALUES.map((k) => (
+              <option key={k} value={k}>
+                {PATCH_DIRECTION_LABELS[k]}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <label className="flex flex-col gap-1">
+        <span>対象アイコンURL（任意）</span>
+        <input
+          type="text"
+          value={draft.targetIconUrl}
+          onChange={(e) => onChange({ ...draft, targetIconUrl: e.target.value })}
+          className={inputClass}
+        />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span>変更意図（任意）</span>
+        <textarea
+          value={draft.intent}
+          onChange={(e) => onChange({ ...draft, intent: e.target.value })}
+          rows={2}
+          className={inputClass}
+        />
+      </label>
+
+      <div className="flex flex-col gap-2">
+        <span className="font-bold">グループ（スキル・項目単位の変更）</span>
+        {draft.groups.map((group, groupIndex) => (
+          <PatchChangeGroupCard
+            key={groupIndex}
+            group={group}
+            index={groupIndex}
+            total={draft.groups.length}
+            onChange={(g) => updateGroup(groupIndex, g)}
+            onMove={(direction) => moveGroup(groupIndex, direction)}
+            onRemove={() => removeGroup(groupIndex)}
+          />
+        ))}
+        <button type="button" onClick={addGroup} className={`${smallButtonClass} self-start`}>
+          グループを追加
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const smallSelectClass = "rounded border border-neutral-700 bg-neutral-950 px-2 py-1 text-xs text-neutral-100";
+
+/** patchChangeの1グループ分のカード。abilityKey/abilityName＋変更行一覧。 */
+function PatchChangeGroupCard({
+  group,
+  index,
+  total,
+  onChange,
+  onMove,
+  onRemove,
+}: {
+  group: PatchChangeGroupDraft;
+  index: number;
+  total: number;
+  onChange: (group: PatchChangeGroupDraft) => void;
+  onMove: (direction: -1 | 1) => void;
+  onRemove: () => void;
+}) {
+  function updateChange(changeIndex: number, change: PatchChangeDraft) {
+    onChange({ ...group, changes: group.changes.map((c, i) => (i === changeIndex ? change : c)) });
+  }
+  function addChange(kind: "numeric" | "descriptive") {
+    onChange({ ...group, changes: insertItemAfter(group.changes, null, { kind, stat: "", before: "", after: "", text: "" }) });
+  }
+  function removeChange(changeIndex: number) {
+    onChange({ ...group, changes: removeItemAt(group.changes, changeIndex) });
+  }
+  function moveChange(changeIndex: number, direction: -1 | 1) {
+    onChange({ ...group, changes: moveItem(group.changes, changeIndex, direction) });
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded border border-neutral-800 p-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-neutral-500">グループ #{index + 1}</span>
+        <div className="ml-auto flex gap-1">
+          <button type="button" onClick={() => onMove(-1)} disabled={index === 0} className={smallButtonClass} aria-label="グループを上へ移動">
+            ↑
+          </button>
+          <button type="button" onClick={() => onMove(1)} disabled={index === total - 1} className={smallButtonClass} aria-label="グループを下へ移動">
+            ↓
+          </button>
+          <button
+            type="button"
+            onClick={onRemove}
+            className="rounded border border-red-900 px-2 py-1 text-xs text-red-300 hover:bg-red-950/40"
+          >
+            グループを削除
+          </button>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <label className="flex flex-col gap-1 text-xs">
+          <span>スキル区分（任意）</span>
+          <select
+            value={group.abilityKey}
+            onChange={(e) => onChange({ ...group, abilityKey: e.target.value as PatchChangeGroupDraft["abilityKey"] })}
+            className={smallSelectClass}
+          >
+            <option value="">未指定</option>
+            {PATCH_ABILITY_KEY_VALUES.map((k) => (
+              <option key={k} value={k}>
+                {PATCH_ABILITY_KEY_LABELS[k]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-xs">
+          <span>スキル名（任意）</span>
+          <input
+            type="text"
+            value={group.abilityName}
+            onChange={(e) => onChange({ ...group, abilityName: e.target.value })}
+            className={smallSelectClass}
+          />
+        </label>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {group.changes.map((change, changeIndex) => (
+          <PatchChangeRow
+            key={changeIndex}
+            change={change}
+            index={changeIndex}
+            total={group.changes.length}
+            onChange={(c) => updateChange(changeIndex, c)}
+            onMove={(direction) => moveChange(changeIndex, direction)}
+            onRemove={() => removeChange(changeIndex)}
+          />
+        ))}
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => addChange("numeric")} className={smallButtonClass}>
+            数値変更の行を追加
+          </button>
+          <button type="button" onClick={() => addChange("descriptive")} className={smallButtonClass}>
+            記述式変更の行を追加
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** patchChangeグループ内の1変更行。`kind`で数値変更(項目名/変更前/変更後)・記述式変更(ラベル任意/本文)を切り替える。 */
+function PatchChangeRow({
+  change,
+  index,
+  total,
+  onChange,
+  onMove,
+  onRemove,
+}: {
+  change: PatchChangeDraft;
+  index: number;
+  total: number;
+  onChange: (change: PatchChangeDraft) => void;
+  onMove: (direction: -1 | 1) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-start gap-2 rounded border border-neutral-800 p-2 text-xs" data-patch-change-row data-change-kind={change.kind}>
+      <span className="rounded bg-neutral-800 px-1.5 py-0.5">{change.kind === "numeric" ? "数値変更" : "記述式変更"}</span>
+      {change.kind === "numeric" ? (
+        <>
+          <label className="flex flex-col gap-1">
+            <span>項目名</span>
+            <input type="text" value={change.stat} onChange={(e) => onChange({ ...change, stat: e.target.value })} className={smallSelectClass} />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span>変更前</span>
+            <input type="text" value={change.before} onChange={(e) => onChange({ ...change, before: e.target.value })} className={smallSelectClass} />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span>変更後</span>
+            <input type="text" value={change.after} onChange={(e) => onChange({ ...change, after: e.target.value })} className={smallSelectClass} />
+          </label>
+        </>
+      ) : (
+        <>
+          <label className="flex flex-col gap-1">
+            <span>ラベル（任意）</span>
+            <input type="text" value={change.stat} onChange={(e) => onChange({ ...change, stat: e.target.value })} className={smallSelectClass} />
+          </label>
+          <label className="flex min-w-[12rem] flex-1 flex-col gap-1">
+            <span>本文</span>
+            <textarea value={change.text} onChange={(e) => onChange({ ...change, text: e.target.value })} rows={2} className={smallSelectClass} />
+          </label>
+        </>
+      )}
+      <div className="ml-auto flex gap-1 self-center">
+        <button type="button" onClick={() => onMove(-1)} disabled={index === 0} className={smallButtonClass} aria-label="変更行を上へ移動">
+          ↑
+        </button>
+        <button type="button" onClick={() => onMove(1)} disabled={index === total - 1} className={smallButtonClass} aria-label="変更行を下へ移動">
+          ↓
+        </button>
+        <button type="button" onClick={onRemove} className={smallButtonClass}>
+          行を削除
+        </button>
+      </div>
     </div>
   );
 }

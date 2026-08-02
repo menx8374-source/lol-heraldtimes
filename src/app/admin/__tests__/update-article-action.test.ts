@@ -174,4 +174,130 @@ describe("updateArticleAction（構造化エディタの保存アクション、
     expect(updated.title).toBe("編集後タイトル");
     expect(updated.body).toEqual([{ type: "paragraph", text: "新しい本文" }]);
   });
+
+  it("目次(toc)に記事内に存在しないアンカーを指定すると{success:false}を返し、記事を変更しない（admincms-S4）", async () => {
+    const article = await createArticle();
+    const drafts = [
+      { type: "heading", text: "見出し", anchor: "sec-1" },
+      { type: "toc", items: [{ label: "存在しない章", anchor: "sec-999" }] },
+    ];
+    const result = await updateArticleAction(null, baseFormData(article.id, JSON.stringify(drafts)));
+
+    expect(result).toEqual({
+      success: false,
+      error: expect.stringContaining("toc itemsに存在しないアンカーがあります: sec-999"),
+    });
+    const unchanged = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
+    expect(unchanged.title).toBe("元タイトル");
+  });
+
+  it("画像のaltが空だと{success:false}を返し、記事を変更しない（admincms-S4）", async () => {
+    const article = await createArticle();
+    const drafts = [{ type: "image", url: "https://example.com/a.png", alt: "", credit: "" }];
+    const result = await updateArticleAction(null, baseFormData(article.id, JSON.stringify(drafts)));
+
+    expect(result).toEqual({ success: false, error: expect.stringContaining("画像altが空") });
+    const unchanged = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
+    expect(unchanged.title).toBe("元タイトル");
+  });
+
+  it("リンクボタンのurlが非httpsだと{success:false}を返し、記事を変更しない（admincms-S4）", async () => {
+    const article = await createArticle();
+    const drafts = [{ type: "linkButton", url: "http://example.com/notes", label: "公式サイト" }];
+    const result = await updateArticleAction(null, baseFormData(article.id, JSON.stringify(drafts)));
+
+    expect(result).toEqual({ success: false, error: expect.stringContaining("linkButton url") });
+    const unchanged = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
+    expect(unchanged.title).toBe("元タイトル");
+  });
+
+  it("パッチ変更の数値変更が欠落していると{success:false}を返し、記事を変更しない（admincms-S4）", async () => {
+    const article = await createArticle();
+    const drafts = [
+      {
+        type: "patchChange",
+        targetName: "コーキ",
+        targetIconUrl: "",
+        targetKind: "champion",
+        direction: "buff",
+        intent: "",
+        groups: [
+          {
+            abilityKey: "",
+            abilityName: "",
+            abilityIconUrl: "",
+            changes: [{ kind: "numeric", stat: "攻撃力", before: "", after: "2.5", text: "" }],
+          },
+        ],
+      },
+    ];
+    const result = await updateArticleAction(null, baseFormData(article.id, JSON.stringify(drafts)));
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toMatch(/groups\[0\]のchanges\[0\]/);
+    }
+    const unchanged = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
+    expect(unchanged.title).toBe("元タイトル");
+  });
+
+  it("パッチ記事を無変更で保存すると、パッチ変更表・目次・バナー画像・公式リンクボタンの内容が一切変化しない（admincms-S4 往復同一性）", async () => {
+    const patchBody: unknown[] = [
+      { type: "image", url: "https://example.com/patch-banner.png", alt: "パッチ14.1バナー", credit: "Riot Games" },
+      { type: "heading", text: "主な強化", anchor: "sec-buff" },
+      { type: "toc", items: [{ label: "主な強化", anchor: "sec-buff" }] },
+      {
+        type: "patchChange",
+        targetName: "コーキ",
+        targetIconUrl: "https://ddragon.leagueoflegends.com/cdn/img/champion/Corki.png",
+        targetKind: "champion",
+        direction: "buff",
+        intent: "試合終盤のコーキの出撃時の火力を少し高めました。",
+        groups: [
+          { abilityKey: "base", changes: [{ stat: "レベルアップごとの攻撃力", before: "2", after: "2.5" }] },
+          {
+            abilityKey: "R",
+            abilityName: "R - 連発ミサイル",
+            changes: [
+              { stat: "リチャージ時間短縮量", before: "2秒～4秒", after: "2秒～6秒" },
+              { text: "R使用中に移動できるようになりました。" },
+            ],
+          },
+        ],
+      },
+      { type: "linkButton", url: "https://www.leagueoflegends.com/patch-notes/", label: "公式パッチノートを見る" },
+    ];
+    const article = await prisma.article.create({
+      data: {
+        slug: `patch-article-${Math.random().toString(36).slice(2)}`,
+        title: "パッチ14.1ノート",
+        category: "パッチ/メタ",
+        body: patchBody as never,
+        publishedAt: new Date("2026-07-20T00:00:00+09:00"),
+        status: "published",
+      },
+    });
+
+    // getArticleForEditと同じ経路（DB検証済みブロック→blockToDraft）でフォーム初期値を組み立て、
+    // 無編集のままblocksJsonとして送信する（実際のエディタが行う往復と同じ形）。
+    const { getArticleForEdit } = await import("@/lib/admin/articles-admin");
+    const { blockToDraft } = await import("@/lib/admin/article-editor-form");
+    const editData = await getArticleForEdit(article.id);
+    if (!editData) throw new Error("記事が見つかりません");
+    const drafts = editData.body.map(blockToDraft);
+
+    const fd = new FormData();
+    fd.set("articleId", article.id);
+    fd.set("title", editData.title);
+    fd.set("category", editData.category);
+    fd.set("metaDescription", editData.metaDescription);
+    fd.set("thumbnailUrl", editData.thumbnailUrl);
+    fd.set("tagsJson", JSON.stringify(editData.tags));
+    fd.set("blocksJson", JSON.stringify(drafts));
+
+    await expect(updateArticleAction(null, fd)).rejects.toThrow("__REDIRECT__:/admin");
+
+    const updated = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
+    expect(updated.body).toEqual(patchBody);
+  });
 });
