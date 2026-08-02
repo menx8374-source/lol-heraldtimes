@@ -48,6 +48,13 @@ status: active
 - 分類: ops
 - 記録日: 2026-07-25
 
+### Server Actionをボタンの`formAction`＋`name/value`で送るとsubmitterのnameが上書きされて欠落する
+- 症状: 単一`<form>`内で複数の操作を`<button type="submit" formAction={serverAction} name="articleId" value={id}>`で送ると、サーバー側で`formData.get("articleId")`が常にnull→「idが指定されていません」で500。単体テストは緑なのに実ブラウザ操作でだけ再現。
+- 原因: React DOMはServer Actionを指すsubmitterボタンの`name`属性を、内部のアクションID伝達フィールド（`$ACTION_ID_...`）で上書きする。そのため実際に送信されるFormDataにアプリ側の`name`が入らない。単体テストが`fd.set("articleId", id)`済みFormDataでactionを直接呼ぶと、Reactの実FormData組み立てを経ないためこの欠落を検知できない（盲点）。
+- 次への適用: フォームから識別子をServer Actionへ渡すときは、submitterボタンの`name/value`に頼らず**`<input type="hidden" name="...">`**を使う（1操作=1つの独立`<form>`）。HTMLはform入れ子不可なので、一括選択(checkbox)と行ごとの個別操作を同居させたい場合は、個別`<form>`を兄弟に置き、checkbox等はHTML5の`form="<bulkFormId>"`属性で一括formに紐付ける。テストは`fd.set`直呼びだけに頼らず、`renderToStaticMarkup`でhidden input構造を検証する／実際にformを組み立てて送る／evaluatorのPlaywright実クリックで担保する。
+- 分類: impl
+- 記録日: 2026-08-01
+
 ### i18n: 非ASCIIを含む動的URLセグメントは「エンコード済みURL」で検証する
 - 症状: 日本語タグの一覧ページ（`/tags/[tag]`）が本番ブラウザ遷移で常に0件・見出しが生の `%E3%83%...`。自己確認では見逃し、evaluatorの実機操作でFAIL。
 - 原因: ブラウザ／Next の `<Link>` は非ASCIIの動的セグメントをURLエンコードして遷移するため、ページが受け取る値はエンコード済み文字列。それを `decodeURIComponent` せずにDBクエリ・表示へ流すと、生の日本語で保存されたデータと一致せず0件になる。`curl` で生UTF-8パスを叩くと（curlはエンコードしないため）バグが再現せず見逃す。
