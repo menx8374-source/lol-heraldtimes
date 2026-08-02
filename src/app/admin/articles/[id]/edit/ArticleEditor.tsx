@@ -815,8 +815,12 @@ function ReactionFields({
 type BlockItem = { id: string; draft: BlockDraft };
 
 /** `updateArticleAction`の戻り値と構造的に一致させる（"use server"ファイルからの型re-exportを避けるため
- * ここでも同じ形を定義する。Client Componentなのでこちら側での定義に制約は無い）。 */
-type SaveState = { success: true } | { success: false; error: string };
+ * ここでも同じ形を定義する。Client Componentなのでこちら側での定義に制約は無い）。
+ * `revalidateWarning`（admincms-S5 F10、S5設計整理）: 保存(DB)自体は成功したが、一覧/詳細ページの
+ * 同一プロセス内での即時反映（直接`revalidatePath`）が例外を投げて失敗した場合にのみ`true`になる
+ * （通常は失敗しないため既定構成では出ない）。保存内容は失われていないため、redirectせずこの画面に
+ * 留まり警告バナーを表示する。 */
+type SaveState = { success: true; revalidateWarning: boolean } | { success: false; error: string };
 
 export type ArticleEditorProps = {
   articleId: string;
@@ -897,6 +901,15 @@ export function ArticleEditor({
           className="rounded-lg border border-red-900 bg-red-950/40 px-3 py-2 text-sm text-red-300"
         >
           保存に失敗しました: {saveState.error}
+        </div>
+      )}
+
+      {saveState && saveState.success && saveState.revalidateWarning && (
+        <div
+          data-revalidate-warning
+          className="rounded-lg border border-amber-800 bg-amber-950/40 px-3 py-2 text-sm text-amber-300"
+        >
+          保存は完了しましたが、一覧への即時反映ができませんでした（編集内容は失われていません）。
         </div>
       )}
 

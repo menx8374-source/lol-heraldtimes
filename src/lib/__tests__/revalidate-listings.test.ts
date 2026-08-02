@@ -1,12 +1,22 @@
 /**
- * revalidatePublishedListings（revalidate-S1 F-RV1-3、B）の単体テスト（ブリーフ テスト2）。
- * REVALIDATE_SECRET未設定時はfetchを一切呼ばない(no-op)こと、設定時はREVALIDATE_URL
- * （既定の内部localhost）へシークレット付きPOSTすること、失敗しても例外を投げないことを検証する。
+ * revalidatePublishedListings（revalidate-S1 F-RV1-3、B）／revalidateListingPathsInProcess
+ * （admincms-S5で共有化）の単体テスト（ブリーフ テスト2）。
+ * - revalidatePublishedListings: REVALIDATE_SECRET未設定時はfetchを一切呼ばない(no-op)こと、
+ *   設定時はREVALIDATE_URL（既定の内部localhost）へシークレット付きPOSTすること、失敗しても
+ *   例外を投げないこと（パイプライン専用の補助処理、admincms-S5設計整理で管理画面からは呼ばない）。
+ * - revalidateListingPathsInProcess: 固定の一覧パス群を直接revalidatePathすること（`/api/revalidate`
+ *   と管理画面の両方が使う共有source of truth）。
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { revalidatePublishedListings } from "@/lib/generation/revalidate-listings";
 
-describe("revalidatePublishedListings（revalidate-S1 F-RV1-3）", () => {
+const revalidatePathMock = vi.fn();
+vi.mock("next/cache", () => ({
+  revalidatePath: (...args: unknown[]) => revalidatePathMock(...args),
+}));
+
+import { revalidatePublishedListings, revalidateListingPathsInProcess } from "@/lib/generation/revalidate-listings";
+
+describe("revalidatePublishedListings（revalidate-S1 F-RV1-3、パイプライン専用）", () => {
   const originalFetch = global.fetch;
   const originalSecret = process.env.REVALIDATE_SECRET;
   const originalUrl = process.env.REVALIDATE_URL;
@@ -94,5 +104,32 @@ describe("revalidatePublishedListings（revalidate-S1 F-RV1-3）", () => {
 
     await expect(revalidatePublishedListings()).resolves.toBeUndefined();
     expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+});
+
+describe("revalidateListingPathsInProcess（admincms-S5、一覧パス群の共有source of truth）", () => {
+  beforeEach(() => {
+    revalidatePathMock.mockClear();
+  });
+
+  it("固定の一覧パス群を直接revalidatePathする（/api/revalidateと同じ10パス）", () => {
+    revalidateListingPathsInProcess();
+
+    expect(revalidatePathMock).toHaveBeenCalledTimes(10);
+    const FIXED_PATHS: [string, string?][] = [
+      ["/"],
+      ["/tags"],
+      ["/patches"],
+      ["/archive"],
+      ["/tier"],
+      ["/champions"],
+      ["/category/[slug]", "page"],
+      ["/tags/[tag]", "page"],
+      ["/patches/[version]", "page"],
+      ["/archive/[key]", "page"],
+    ];
+    for (const args of FIXED_PATHS) {
+      expect(revalidatePathMock).toHaveBeenCalledWith(...args.filter((a) => a !== undefined));
+    }
   });
 });

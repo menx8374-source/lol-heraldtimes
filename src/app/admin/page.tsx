@@ -9,7 +9,7 @@ import {
 } from "@/lib/dashboard";
 import { formatPublishedAt } from "@/lib/format";
 import { listHeldCommentsForAdmin } from "@/lib/admin/comments-admin";
-import { listArticlesForAdmin, listReviewQueue } from "@/lib/admin/articles-admin";
+import { listArticlesForAdmin, listReviewQueue, countReviewQueue } from "@/lib/admin/articles-admin";
 import { getCategoryPoliciesForDisplay } from "@/lib/admin/category-policy";
 import {
   approveArticleAction,
@@ -19,11 +19,11 @@ import {
   cancelScheduleAction,
   approveCommentAction,
   rejectCommentAction,
-  approveReviewArticleAction,
-  rejectReviewArticleAction,
   setCategoryPolicyAction,
 } from "@/app/admin/actions";
 import { ManualArticlePanel } from "@/app/admin/ManualArticlePanel";
+import { ReviewQueueList } from "@/app/admin/ReviewQueueList";
+import { CATEGORY_LABELS, type CategoryLabel } from "@/lib/categories";
 
 import { ARTICLE_STATUS_LABELS as STATUS_LABELS } from "@/lib/admin/article-status-labels";
 
@@ -42,7 +42,17 @@ const STAGE_LABELS: Record<string, string> = {
   pipeline: "パイプライン全体",
 };
 
-export default async function AdminDashboardPage() {
+type Props = {
+  searchParams: Promise<{ reviewCategory?: string }>;
+};
+
+export default async function AdminDashboardPage({ searchParams }: Props) {
+  const { reviewCategory } = await searchParams;
+  // admincms-S5 F11: レビューキューのカテゴリ絞込。未指定/未知の値は絞込なし(全件)として扱う
+  // （URL手打ちで不正な値が来ても400等にせず、単に絞込が効かないだけにする）。
+  const categoryFilter =
+    reviewCategory && CATEGORY_LABELS.includes(reviewCategory as CategoryLabel) ? reviewCategory : undefined;
+
   const [
     runHistory,
     publishedTotal,
@@ -52,6 +62,7 @@ export default async function AdminDashboardPage() {
     heldComments,
     adminArticles,
     reviewQueue,
+    reviewQueueCount,
     categoryPolicies,
   ] = await Promise.all([
     listRunHistory(),
@@ -61,12 +72,12 @@ export default async function AdminDashboardPage() {
     listFailureLog(),
     listHeldCommentsForAdmin(),
     listArticlesForAdmin(),
-    listReviewQueue(),
+    listReviewQueue({ category: categoryFilter }),
+    // バッジ件数はカテゴリ絞込に影響されない全体件数にするため、reviewQueueとは別に取得する
+    // （絞込中でも「未レビュー全体で何件残っているか」がバッジで分かるようにする）。
+    countReviewQueue(),
     getCategoryPoliciesForDisplay(),
   ]);
-  // バッジ件数は全件取得済みの reviewQueue から導出する（listReviewQueue はtake未指定で全件返すため
-  // 別COUNTクエリは不要）。
-  const reviewQueueCount = reviewQueue.length;
 
   return (
     <div className="min-h-screen bg-neutral-950 text-neutral-100">
@@ -129,69 +140,35 @@ export default async function AdminDashboardPage() {
 
         <section className="mt-8">
           <h2 className="text-lg font-bold">レビューキュー（要レビュー）</h2>
-          {reviewQueue.length === 0 ? (
-            <p className="mt-2 text-sm text-neutral-400">要レビューの記事はありません。</p>
-          ) : (
-            <ul className="mt-3 flex flex-col gap-2">
-              {reviewQueue.map((article) => (
-                <li
-                  key={article.id}
-                  className="rounded-lg border border-sky-900 bg-sky-950/30 px-3 py-2 text-sm"
-                >
-                  <div className="flex flex-wrap items-baseline gap-2">
-                    <span className="rounded bg-sky-900 px-2 py-0.5 text-xs text-sky-300">{article.category}</span>
-                    <span className="font-bold">{article.title}</span>
-                    <span className="text-xs text-neutral-500">{formatPublishedAt(article.createdAt)}</span>
-                  </div>
-                  {article.sourceUrl && (
-                    <p className="mt-1 truncate text-xs text-neutral-500">
-                      出典:{" "}
-                      <a
-                        href={article.sourceUrl}
-                        target="_blank"
-                        rel="noopener noreferrer nofollow"
-                        className="text-sky-400 hover:underline"
-                      >
-                        {article.sourceUrl}
-                      </a>
-                    </p>
-                  )}
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <Link
-                      href={`/admin/articles/${article.id}/preview`}
-                      className="rounded border border-neutral-700 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
-                    >
-                      プレビュー
-                    </Link>
-                    <Link
-                      href={`/admin/articles/${article.id}/edit`}
-                      className="rounded border border-neutral-700 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
-                    >
-                      編集
-                    </Link>
-                    <form action={approveReviewArticleAction}>
-                      <input type="hidden" name="articleId" value={article.id} />
-                      <button
-                        type="submit"
-                        className="rounded bg-emerald-700 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-600"
-                      >
-                        承認して公開
-                      </button>
-                    </form>
-                    <form action={rejectReviewArticleAction}>
-                      <input type="hidden" name="articleId" value={article.id} />
-                      <button
-                        type="submit"
-                        className="rounded bg-red-800 px-3 py-1 text-xs font-bold text-white hover:bg-red-700"
-                      >
-                        却下
-                      </button>
-                    </form>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
+          <form method="get" action="/admin" className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+            <label className="flex items-center gap-2">
+              <span className="text-xs text-neutral-400">カテゴリで絞込:</span>
+              <select
+                name="reviewCategory"
+                defaultValue={categoryFilter ?? ""}
+                data-review-category-filter
+                className="rounded border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-100"
+              >
+                <option value="">すべて</option>
+                {CATEGORY_LABELS.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="submit"
+              className="rounded border border-neutral-700 px-3 py-1 text-xs text-neutral-200 hover:bg-neutral-800"
+            >
+              絞り込む
+            </button>
+          </form>
+          {/* admincms-S5評価フィードバック対応: 0件時の表示は`ReviewQueueList`自身に持たせ、常に
+              同一コンポーネントをレンダーする（旧実装は0件時に別要素<p>へ差し替えていたため、
+              全件承認直後にreviewQueueが空になるとReviewQueueListごとアンマウントされ、
+              useActionStateが保持していたはずの「まとめて承認」結果表示が消えてしまっていた）。 */}
+          <ReviewQueueList articles={reviewQueue} />
         </section>
 
         <section className="mt-8">

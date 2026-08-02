@@ -18,7 +18,10 @@ vi.mock("next/headers", () => ({
     get: (key: string) => (key.toLowerCase() === "authorization" ? AUTH_HEADER : null),
   }),
 }));
-vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+const revalidatePathMock = vi.fn();
+vi.mock("next/cache", () => ({
+  revalidatePath: (...args: unknown[]) => revalidatePathMock(...args),
+}));
 vi.mock("next/navigation", () => ({
   redirect: vi.fn((url: string) => {
     throw new Error(`__REDIRECT__:${url}`);
@@ -45,6 +48,19 @@ async function createArticle() {
   });
 }
 
+/** in-process再検証（`revalidateListingPathsInProcess`経由の`revalidatePath`呼び出し）を、
+ * 指定回数目の呼び出しでthrowさせる（admincms-S5設計整理: 真の失敗時のみ警告になることの検証用）。
+ * 引数省略時は常にthrowする。 */
+function makeRevalidatePathThrowOnce(afterCalls = 0) {
+  let count = 0;
+  revalidatePathMock.mockImplementation(() => {
+    count += 1;
+    if (count > afterCalls) {
+      throw new Error("revalidatePathに失敗しました(テスト用)");
+    }
+  });
+}
+
 function baseFormData(articleId: string, blocksJson: string): FormData {
   const fd = new FormData();
   fd.set("articleId", articleId);
@@ -57,7 +73,7 @@ function baseFormData(articleId: string, blocksJson: string): FormData {
   return fd;
 }
 
-describe("updateArticleAction（構造化エディタの保存アクション、admincms-S3補完）", () => {
+describe("updateArticleAction（構造化エディタの保存アクション、admincms-S3補完・admincms-S5 F10）", () => {
   const originalAdminUser = process.env.ADMIN_USER;
   const originalAdminPassword = process.env.ADMIN_PASSWORD;
 
@@ -65,6 +81,7 @@ describe("updateArticleAction（構造化エディタの保存アクション、
     await resetDb();
     process.env.ADMIN_USER = "test-admin";
     process.env.ADMIN_PASSWORD = "test-pass";
+    revalidatePathMock.mockReset();
   });
 
   afterAll(() => {
@@ -162,7 +179,7 @@ describe("updateArticleAction（構造化エディタの保存アクション、
     expect(unchanged.title).toBe("元タイトル");
   });
 
-  it("有効な入力なら記事を更新し、成功時のみredirectする", async () => {
+  it("有効な入力なら記事を更新し、in-process再検証が成功する既定構成ではredirectする(警告なし)（admincms-S5 F10設計整理）", async () => {
     const article = await createArticle();
     const drafts = [{ type: "paragraph", text: "新しい本文" }];
 
@@ -173,6 +190,42 @@ describe("updateArticleAction（構造化エディタの保存アクション、
     const updated = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
     expect(updated.title).toBe("編集後タイトル");
     expect(updated.body).toEqual([{ type: "paragraph", text: "新しい本文" }]);
+  });
+
+  it("in-process再検証(revalidatePath)が実際にthrowしたときだけ、保存は保持したまま警告付きでredirectしない（admincms-S5 F10設計整理）", async () => {
+    makeRevalidatePathThrowOnce();
+    const article = await createArticle();
+    const drafts = [{ type: "paragraph", text: "新しい本文2" }];
+
+    const result = await updateArticleAction(null, baseFormData(article.id, JSON.stringify(drafts)));
+
+    expect(result).toEqual({ success: true, revalidateWarning: true });
+    const updated = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
+    expect(updated.title).toBe("編集後タイトル");
+    expect(updated.body).toEqual([{ type: "paragraph", text: "新しい本文2" }]);
+  });
+
+  it("保存成功時、一覧ページ群と当該記事の個別詳細ページをin-processでrevalidatePathする（admincms-S5 F10）", async () => {
+    const article = await createArticle();
+    const drafts = [{ type: "paragraph", text: "新しい本文4" }];
+
+    await expect(
+      updateArticleAction(null, baseFormData(article.id, JSON.stringify(drafts))),
+    ).rejects.toThrow("__REDIRECT__:/admin");
+
+    expect(revalidatePathMock).toHaveBeenCalledWith("/admin");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/");
+    expect(revalidatePathMock).toHaveBeenCalledWith(`/articles/${article.slug}`);
+    expect(revalidatePathMock).toHaveBeenCalledWith("/category/[slug]", "page");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/tags/[tag]", "page");
+  });
+
+  it("検証エラーで保存が失敗したときは一覧の再検証(revalidatePath)を一切呼ばない（反映トリガー条件）", async () => {
+    const article = await createArticle();
+    const result = await updateArticleAction(null, baseFormData(article.id, JSON.stringify([])));
+
+    expect(result.success).toBe(false);
+    expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 
   it("目次(toc)に記事内に存在しないアンカーを指定すると{success:false}を返し、記事を変更しない（admincms-S4）", async () => {

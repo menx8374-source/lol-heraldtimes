@@ -10,7 +10,7 @@
  * - POST以外は405（GET等の誤操作でキャッシュが無闇に飛ばないようにする）。
  */
 import { NextResponse } from "next/server";
-import { revalidatePath } from "next/cache";
+import { revalidateListingPathsInProcess } from "@/lib/generation/revalidate-listings";
 
 export const dynamic = "force-dynamic";
 
@@ -36,20 +36,6 @@ async function extractProvidedSecret(request: Request): Promise<string | null> {
   return null;
 }
 
-/** 再検証対象は固定の一覧パス群のみ（ユーザー入力由来のパスは一切受け付けない）。 */
-function revalidateListingPaths(): void {
-  revalidatePath("/");
-  revalidatePath("/tags");
-  revalidatePath("/patches");
-  revalidatePath("/archive");
-  revalidatePath("/tier");
-  revalidatePath("/champions");
-  revalidatePath("/category/[slug]", "page");
-  revalidatePath("/tags/[tag]", "page");
-  revalidatePath("/patches/[version]", "page");
-  revalidatePath("/archive/[key]", "page");
-}
-
 export async function POST(request: Request) {
   const configuredSecret = getConfiguredSecret();
   if (!configuredSecret) {
@@ -62,7 +48,10 @@ export async function POST(request: Request) {
   }
 
   try {
-    revalidateListingPaths();
+    // 再検証対象は固定の一覧パス群のみ（`revalidateListingPathsInProcess`、ユーザー入力由来の
+    // パスは一切受け付けない）。管理画面のサーバーアクションと共有するsource of truth
+    // （`src/lib/generation/revalidate-listings.ts`、admincms-S5で共有化）。
+    revalidateListingPathsInProcess();
     return NextResponse.json({ revalidated: true });
   } catch (err) {
     console.error("一覧ページの再検証に失敗しました:", err);

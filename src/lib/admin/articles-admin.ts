@@ -10,7 +10,6 @@ import { validateReactionAnchors, validateTocAnchors } from "@/lib/admin/article
 import { bodyBlocksToText } from "@/lib/search";
 import { moderateArticleContent } from "@/lib/moderation/moderate";
 import { requireAuthorized, type AdminAuthContext } from "@/lib/admin/auth-context";
-import { revalidatePublishedListings } from "@/lib/generation/revalidate-listings";
 import { CATEGORY_LABELS, type CategoryLabel } from "@/lib/categories";
 
 export type AdminArticleSummary = {
@@ -128,12 +127,16 @@ export type UpdateArticleContentInput = {
  * （status を変更対象にしていない場合＝held/rejected/scheduled はそのまま編集内容のみ反映し、
  * 状態は変えない＝編集で勝手に公開しない）。tags は connectOrCreate で置換更新する
  * （追加/削除が反映され既存タグを失わない）。
+ *
+ * 戻り値（admincms-S5 F10で追加）: 記事のslug。編集フォームはslugを変更できないため保存前の値と
+ * 同一だが、呼び出し元（`updateArticleAction`）が個別記事詳細ページ(`/articles/[slug]`)を
+ * `revalidatePath`するために必要（公開後編集の即時反映）。
  */
 export async function updateArticleContent(
   articleId: string,
   input: UpdateArticleContentInput,
   auth: AdminAuthContext,
-): Promise<void> {
+): Promise<{ slug: string }> {
   requireAuthorized(auth);
 
   const title = input.title.trim();
@@ -197,6 +200,7 @@ export async function updateArticleContent(
   }
 
   await prisma.article.update({ where: { id: articleId }, data });
+  return { slug: article.slug };
 }
 
 /** ピン留め(注目記事固定)のON/OFFを切り替える。 */
@@ -241,12 +245,16 @@ export type ReviewQueueArticleSummary = {
 };
 
 /**
- * レビューキュー（admincms-S1 F2）: status="review" の記事を新しい順で取得する。
- * take を指定すると DB 側で件数を絞る（未承認が積み上がっても無界に全件取得しないため）。
+ * レビューキュー（admincms-S1 F2、admincms-S5 F11でカテゴリ絞込を追加）: status="review" の記事を
+ * 新しい順で取得する。take を指定すると DB 側で件数を絞る（未承認が積み上がっても無界に全件取得
+ * しないため）。category を指定すると、そのカテゴリの要レビュー記事のみに絞り込む（未指定=全件、
+ * 他状態（公開・保留・却下・予約）の記事は status="review" 条件により混ざらない）。
  */
-export async function listReviewQueue(options: { take?: number } = {}): Promise<ReviewQueueArticleSummary[]> {
+export async function listReviewQueue(
+  options: { take?: number; category?: string } = {},
+): Promise<ReviewQueueArticleSummary[]> {
   const rows = await prisma.article.findMany({
-    where: { status: "review" },
+    where: { status: "review", ...(options.category ? { category: options.category } : {}) },
     select: {
       id: true,
       slug: true,
@@ -276,12 +284,19 @@ export async function countReviewQueue(): Promise<number> {
 /**
  * 要レビュー記事を承認して公開する（status="review" のときのみ許可。それ以外の状態からの
  * 呼び出しは不正な遷移として拒否し、DBを変更しない）。保留キューの承認(approveHeldArticle)とは
- * 別関数だが、公開状態への遷移内容自体は同じにする。承認は一覧ページの即時反映
- * （revalidatePublishedListings、機能B）も呼ぶ（REVALIDATE_SECRET未設定ならno-op）。
+ * 別関数だが、公開状態への遷移内容自体は同じにする。
+ *
+ * 一覧ページへの即時反映（admincms-S5設計整理）: この関数自体はHTTPループバック（機能B）を呼ばない
+ * （呼び出し元の`approveReviewArticleAction`が同一プロセス内で直接`revalidatePath`する。1件ずつ
+ * HTTP往復していた旧実装は、一括承認N件でN回のHTTP呼び出しになる非効率と、個別承認との反映経路の
+ * 非対称を生んでいたため撤去した）。戻り値の`slug`はその`revalidatePath("/articles/[slug]")`用。
  */
-export async function approveReviewArticle(articleId: string, auth: AdminAuthContext): Promise<void> {
+export async function approveReviewArticle(
+  articleId: string,
+  auth: AdminAuthContext,
+): Promise<{ slug: string }> {
   requireAuthorized(auth);
-  const article = await prisma.article.findUnique({ where: { id: articleId }, select: { status: true } });
+  const article = await prisma.article.findUnique({ where: { id: articleId }, select: { status: true, slug: true } });
   if (!article) throw new Error("記事が見つかりません");
   if (article.status !== "review") {
     throw new Error(`要レビュー状態の記事のみ承認できます（現在の状態: ${article.status}）`);
@@ -296,7 +311,7 @@ export async function approveReviewArticle(articleId: string, auth: AdminAuthCon
       scheduledAt: null,
     },
   });
-  await revalidatePublishedListings();
+  return { slug: article.slug };
 }
 
 /**
@@ -311,4 +326,39 @@ export async function rejectReviewArticle(articleId: string, auth: AdminAuthCont
     throw new Error(`要レビュー状態の記事のみ却下できます（現在の状態: ${article.status}）`);
   }
   await prisma.article.update({ where: { id: articleId }, data: { status: "rejected" } });
+}
+
+/** `bulkApproveReviewArticles` の結果（admincms-S5 F11、一括承認）。 */
+export type BulkApproveResult = {
+  /** 承認に成功した記事（id・slug）の一覧。呼び出し元がslugを使って個別詳細ページ
+   * (`/articles/[slug]`)を再検証できるよう、idだけでなくslugも返す（evaluatorフィードバック対応:
+   * 一括承認は個別承認と同様に各記事の詳細ページも即時反映する）。 */
+  succeeded: { id: string; slug: string }[];
+  /** 承認に失敗した記事ID＋理由（不正な状態遷移・記事が存在しない等、`approveReviewArticle` の
+   * 例外メッセージをそのまま使う）。 */
+  failed: { id: string; reason: string }[];
+};
+
+/**
+ * 選択された複数の要レビュー記事をまとめて承認する（admincms-S5 F11）。1件ずつ `approveReviewArticle`
+ * を呼び、成功/失敗を集計して返す（1件の失敗が他の承認を止めない＝部分成功を許す）。articleIds が
+ * 空配列のときは何も行わず `{succeeded:[], failed:[]}` を返す（呼び出し元＝サーバーアクションが
+ * 「記事が選択されていません」案内に変換する）。
+ */
+export async function bulkApproveReviewArticles(
+  articleIds: string[],
+  auth: AdminAuthContext,
+): Promise<BulkApproveResult> {
+  requireAuthorized(auth);
+  const succeeded: { id: string; slug: string }[] = [];
+  const failed: { id: string; reason: string }[] = [];
+  for (const articleId of articleIds) {
+    try {
+      const { slug } = await approveReviewArticle(articleId, auth);
+      succeeded.push({ id: articleId, slug });
+    } catch (err) {
+      failed.push({ id: articleId, reason: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return { succeeded, failed };
 }

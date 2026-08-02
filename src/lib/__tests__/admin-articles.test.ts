@@ -17,6 +17,7 @@ import {
   countReviewQueue,
   approveReviewArticle,
   rejectReviewArticle,
+  bulkApproveReviewArticles,
 } from "@/lib/admin/articles-admin";
 import { UnauthorizedError } from "@/lib/auth/basic-auth";
 import { listArticles, listPopularArticles, PUBLISHED_ONLY } from "@/lib/articles";
@@ -40,7 +41,7 @@ async function createArticle(overrides: Partial<Record<string, unknown>> = {}) {
     data: {
       slug: (overrides.slug as string) ?? `article-${Math.random().toString(36).slice(2)}`,
       title: (overrides.title as string) ?? "テスト記事タイトル",
-      category: "パッチ/メタ",
+      category: (overrides.category as string) ?? "パッチ/メタ",
       body: (overrides.body as object) ?? [{ type: "paragraph", text: "本文" }],
       publishedAt: (overrides.publishedAt as Date) ?? new Date("2026-07-20T00:00:00+09:00"),
       status: (overrides.status as string) ?? "held",
@@ -430,6 +431,76 @@ describe("レビューキュー（admincms-S1 F2、要レビュー状態の承�
     const article = await createArticle({ slug: "review-unauth", status: "review" });
     await expect(approveReviewArticle(article.id, UNAUTHORIZED)).rejects.toThrow(UnauthorizedError);
     await expect(rejectReviewArticle(article.id, UNAUTHORIZED)).rejects.toThrow(UnauthorizedError);
+
+    const unchanged = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
+    expect(unchanged.status).toBe("review");
+  });
+
+  it("listReviewQueueはcategory指定時、そのカテゴリの要レビュー記事のみを返し、他状態・他カテゴリは混ざらない（admincms-S5 F11）", async () => {
+    await createArticle({ slug: "review-target-cat", status: "review", category: "パッチ/メタ" });
+    await createArticle({ slug: "review-other-cat", status: "review", category: "Riot公式" });
+    await createArticle({ slug: "published-target-cat", status: "published", category: "パッチ/メタ" });
+    await createArticle({ slug: "held-target-cat", status: "held", category: "パッチ/メタ" });
+    await createArticle({ slug: "rejected-target-cat", status: "rejected", category: "パッチ/メタ" });
+    await createArticle({
+      slug: "scheduled-target-cat",
+      status: "scheduled",
+      category: "パッチ/メタ",
+      scheduledAt: new Date(Date.now() + 3600_000),
+    });
+
+    const filtered = await listReviewQueue({ category: "パッチ/メタ" });
+    expect(filtered.map((a) => a.slug)).toEqual(["review-target-cat"]);
+
+    const all = await listReviewQueue();
+    expect(all.map((a) => a.slug).sort()).toEqual(["review-other-cat", "review-target-cat"]);
+  });
+
+  it("bulkApproveReviewArticlesは0件のとき何も変更せずsucceeded/failedとも空配列を返す（admincms-S5 F11）", async () => {
+    const article = await createArticle({ slug: "bulk-untouched", status: "review" });
+    const result = await bulkApproveReviewArticles([], authorizedContext());
+
+    expect(result).toEqual({ succeeded: [], failed: [] });
+    const unchanged = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
+    expect(unchanged.status).toBe("review");
+  });
+
+  it("bulkApproveReviewArticlesは全件成功のとき全記事をpublishedにし、succeededに全ID・slugを含める（admincms-S5 F11、evaluatorフィードバック対応でslugも返す）", async () => {
+    const a = await createArticle({ slug: "bulk-ok-1", status: "review" });
+    const b = await createArticle({ slug: "bulk-ok-2", status: "review" });
+
+    const result = await bulkApproveReviewArticles([a.id, b.id], authorizedContext());
+
+    expect(result.succeeded.sort((x, y) => x.id.localeCompare(y.id))).toEqual(
+      [
+        { id: a.id, slug: a.slug },
+        { id: b.id, slug: b.slug },
+      ].sort((x, y) => x.id.localeCompare(y.id)),
+    );
+    expect(result.failed).toEqual([]);
+    const updatedA = await prisma.article.findUniqueOrThrow({ where: { id: a.id } });
+    const updatedB = await prisma.article.findUniqueOrThrow({ where: { id: b.id } });
+    expect(updatedA.status).toBe("published");
+    expect(updatedB.status).toBe("published");
+  });
+
+  it("bulkApproveReviewArticlesは一部が不正な状態遷移で失敗しても、他の成功分は反映し失敗理由付きで集計する（admincms-S5 F11）", async () => {
+    const reviewArticle = await createArticle({ slug: "bulk-mixed-ok", status: "review" });
+    const heldArticle = await createArticle({ slug: "bulk-mixed-ng", status: "held" });
+
+    const result = await bulkApproveReviewArticles([reviewArticle.id, heldArticle.id], authorizedContext());
+
+    expect(result.succeeded).toEqual([{ id: reviewArticle.id, slug: reviewArticle.slug }]);
+    expect(result.failed).toEqual([{ id: heldArticle.id, reason: expect.any(String) }]);
+    const updatedReview = await prisma.article.findUniqueOrThrow({ where: { id: reviewArticle.id } });
+    const updatedHeld = await prisma.article.findUniqueOrThrow({ where: { id: heldArticle.id } });
+    expect(updatedReview.status).toBe("published");
+    expect(updatedHeld.status).toBe("held"); // 失敗した記事の状態は変わらない
+  });
+
+  it("未認証コンテキストではbulkApproveReviewArticlesが拒否され、DBを変更しない", async () => {
+    const article = await createArticle({ slug: "bulk-unauth", status: "review" });
+    await expect(bulkApproveReviewArticles([article.id], UNAUTHORIZED)).rejects.toThrow(UnauthorizedError);
 
     const unchanged = await prisma.article.findUniqueOrThrow({ where: { id: article.id } });
     expect(unchanged.status).toBe("review");
