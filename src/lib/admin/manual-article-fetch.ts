@@ -133,9 +133,10 @@ export function isXApiKeyConfigured(): boolean {
 }
 
 /**
- * 指定したtweet1件を取得する（GetXAPI。advanced_search以外に単一tweet取得用の
- * `GET /twitter/tweets?tweet_ids=` を想定。公式Twitter API v2の`GET /2/tweets?ids=`と同様の
- * REST慣習に倣った設計。レスポンス形は`advanced_search`と同じ`{tweets:[...]}`と仮定する）。
+ * 指定したtweet1件を取得する（GetXAPIの単一tweet取得エンドポイント。公式OpenAPI仕様で確認済み）:
+ *   `GET /twitter/tweet/detail?id=<tweetId>`、認証 `Authorization: Bearer <API_KEY>`。
+ *   レスポンスは `{ status, msg, data: <tweetオブジェクト> }`（`data`直下の単一オブジェクト。
+ *   advanced_searchの`{tweets:[...]}`とは形が異なる）。tweet本文=`data.text`、著者=`data.author.userName`。
  * `X_API_KEY` 未設定時は呼び出し側（isXApiKeyConfigured）で事前に弾く前提だが、二重の安全側として
  * ここでも未設定なら即座に失敗を返す。
  */
@@ -143,14 +144,14 @@ export async function fetchTweetById(tweetId: string): Promise<ManualFetchResult
   const apiKey = process.env.X_API_KEY;
   if (!apiKey) return { ok: false, message: "X の API キーが未設定のため利用できません" };
 
-  const params = new URLSearchParams({ tweet_ids: tweetId });
-  const url = `${GETXAPI_BASE}/twitter/tweets?${params.toString()}`;
-  const result = await fetchJsonWithStatus<{ tweets?: GetXApiTweet[] }>(url, {
+  const params = new URLSearchParams({ id: tweetId });
+  const url = `${GETXAPI_BASE}/twitter/tweet/detail?${params.toString()}`;
+  const result = await fetchJsonWithStatus<{ data?: GetXApiTweet }>(url, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
   if (result.kind !== "ok") return { ok: false, message: describeFailure(result.kind, "Xの投稿") };
 
-  const tweet = result.data.tweets?.[0];
+  const tweet = result.data.data;
   if (!tweet || !tweet.text || !tweet.author?.userName) {
     return { ok: false, message: "指定のXの投稿が見つかりません（削除済みの可能性があります）" };
   }

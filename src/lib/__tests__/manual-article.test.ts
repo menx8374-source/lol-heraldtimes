@@ -186,17 +186,16 @@ describe("createManualArticleFromUrl", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        if (url.includes("/twitter/tweets")) {
+        if (url.includes("/twitter/tweet/detail")) {
           return jsonResponse({
-            tweets: [
-              {
-                id: "9990002",
-                text: "今日のLJLの試合はマジで面白かった。序盤から目が離せなかった。",
-                url: "https://x.com/some_user/status/9990002",
-                createdAt: "2026-07-30T00:00:00.000Z",
-                author: { userName: "some_user" },
-              },
-            ],
+            status: "success",
+            data: {
+              id: "9990002",
+              text: "今日のLJLの試合はマジで面白かった。序盤から目が離せなかった。",
+              url: "https://x.com/some_user/status/9990002",
+              createdAt: "2026-07-30T00:00:00.000Z",
+              author: { userName: "some_user" },
+            },
           });
         }
         return jsonResponse({ tweets: [] }); // リプライ/引用は0件でよい(返信0件でも作成できることの確認を兼ねる)
@@ -226,17 +225,16 @@ describe("createManualArticleFromUrl", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        if (url.includes("/twitter/tweets")) {
+        if (url.includes("/twitter/tweet/detail")) {
           return jsonResponse({
-            tweets: [
-              {
-                id: "9990003",
-                text: "死ねと思うくらい酷い試合だった。もう見てられない。",
-                url: "https://x.com/some_user/status/9990003",
-                createdAt: "2026-07-30T00:00:00.000Z",
-                author: { userName: "some_user" },
-              },
-            ],
+            status: "success",
+            data: {
+              id: "9990003",
+              text: "死ねと思うくらい酷い試合だった。もう見てられない。",
+              url: "https://x.com/some_user/status/9990003",
+              createdAt: "2026-07-30T00:00:00.000Z",
+              author: { userName: "some_user" },
+            },
           });
         }
         return jsonResponse({ tweets: [] });

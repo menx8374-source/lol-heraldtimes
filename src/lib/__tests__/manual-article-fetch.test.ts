@@ -104,20 +104,21 @@ describe("isXApiKeyConfigured / fetchTweetById", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        if (url.includes("/twitter/tweets")) {
+        // 単一tweet取得は GET /twitter/tweet/detail（レスポンスは {data: <tweet>}）。
+        if (url.includes("/twitter/tweet/detail")) {
           return jsonResponse({
-            tweets: [
-              {
-                id: "999",
-                text: "今日の試合は面白かった",
-                url: "https://x.com/user1/status/999",
-                createdAt: "2026-07-30T00:00:00.000Z",
-                author: { userName: "user1" },
-              },
-            ],
+            status: "success",
+            msg: "success",
+            data: {
+              id: "999",
+              text: "今日の試合は面白かった",
+              url: "https://x.com/user1/status/999",
+              createdAt: "2026-07-30T00:00:00.000Z",
+              author: { userName: "user1" },
+            },
           });
         }
-        // conversation_id:.../quoted_tweet_id:... のリプライ/引用検索は0件でよい
+        // conversation_id:.../quoted_tweet_id:... のリプライ/引用検索(advanced_search)は0件でよい
         return jsonResponse({ tweets: [] });
       }),
     );
@@ -131,9 +132,9 @@ describe("isXApiKeyConfigured / fetchTweetById", () => {
     }
   });
 
-  it("削除済み(tweetsが空)の場合は記事化せず日本語メッセージを返す", async () => {
+  it("削除済み(dataが空)の場合は記事化せず日本語メッセージを返す", async () => {
     process.env.X_API_KEY = "test-key";
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ tweets: [] })));
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ status: "success", msg: "success", data: null })));
     const result = await fetchTweetById("deleted-999");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.message).toContain("見つかりません");
